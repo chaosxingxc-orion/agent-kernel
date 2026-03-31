@@ -1,0 +1,29 @@
+name: CI Lint
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Python lint dependencies
+        run: python -m pip install --upgrade pip ruff pylint
+
+      - name: Run Python lint gate
+        run: python -m ruff check python_src python_tests && python -m pylint python_src python_tests
