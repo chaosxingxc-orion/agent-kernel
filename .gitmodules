@@ -1,0 +1,6 @@
+[submodule "external/agent-core"]
+	path = external/agent-core
+	url = https://github.com/openJiuwen-ai/agent-core.git
+[submodule "external/temporal"]
+	path = external/temporal
+	url = https://github.com/temporalio/temporal.git
