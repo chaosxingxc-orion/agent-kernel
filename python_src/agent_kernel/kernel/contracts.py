@@ -31,7 +31,7 @@ EffectClass = Literal[
     "irreversible_write",
 ]
 ExternalIdempotencyLevel = Literal["guaranteed", "best_effort", "unknown"]
-RecoveryMode = Literal["static_compensation", "human_escalation", "abort"]
+RecoveryMode = Literal["static_compensation", "human_escalation", "abort", "reflect_and_retry"]
 
 InteractionTarget = Literal[
     "agent_peer",    # another agent kernel: A2A or any peer-agent protocol
@@ -227,7 +227,7 @@ class RunProjection:
     waiting_external: bool
     ready_for_dispatch: bool
     current_action_id: str | None = None
-    recovery_mode: Literal["static_compensation", "human_escalation", "abort"] | None = None
+    recovery_mode: RecoveryMode | None = None
     recovery_reason: str | None = None
     active_child_runs: list[str] = field(default_factory=list)
 
@@ -343,6 +343,7 @@ class RecoveryDecision:
     reason: str
     compensation_action_id: str | None = None
     escalation_channel_ref: str | None = None
+    corrected_action: Any | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -359,6 +360,7 @@ class RecoveryInput:
     lifecycle_state: RunLifecycleState
     projection: RunProjection
     failed_action_id: str | None = None
+    reflection_round: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -421,7 +423,7 @@ class RecoveryOutcome:
     run_id: str
     action_id: str | None
     recovery_mode: RecoveryMode
-    outcome_state: Literal["executed", "scheduled", "escalated", "aborted"]
+    outcome_state: Literal["executed", "scheduled", "escalated", "aborted", "reflected"]
     written_at: str
     operator_escalation_ref: str | None = None
     emitted_event_ids: list[str] = field(default_factory=list)
@@ -450,6 +452,7 @@ class TurnIntentRecord:
     host_kind: str | None
     outcome_kind: str
     written_at: str
+    reflection_round: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -564,7 +567,7 @@ class QueryRunResponse:
     projected_offset: int
     waiting_external: bool
     current_action_id: str | None = None
-    recovery_mode: Literal["static_compensation", "human_escalation", "abort"] | None = None
+    recovery_mode: RecoveryMode | None = None
     recovery_reason: str | None = None
     active_child_runs: list[str] = field(default_factory=list)
 
@@ -577,7 +580,7 @@ class QueryRunDashboardResponse:
     lifecycle_state: RunLifecycleState
     projected_offset: int
     waiting_external: bool
-    recovery_mode: Literal["static_compensation", "human_escalation", "abort"] | None = None
+    recovery_mode: RecoveryMode | None = None
     recovery_reason: str | None = None
     active_child_runs_count: int = 0
     correlation_hint: str = ""
@@ -739,6 +742,28 @@ class TemporalActivityGateway(Protocol):
 
         Returns:
             Reconciliation result.
+        """
+        ...
+
+    async def execute_inference(self, request: InferenceActivityInput) -> ModelOutput:
+        """Executes one LLM inference activity.
+
+        Args:
+            request: Inference activity input payload.
+
+        Returns:
+            Normalised model output.
+        """
+        ...
+
+    async def execute_skill_script(self, request: ScriptActivityInput) -> ScriptResult:
+        """Executes one skill script activity.
+
+        Args:
+            request: Script activity input payload.
+
+        Returns:
+            Script execution result.
         """
         ...
 
@@ -1091,3 +1116,557 @@ class ObservabilityHook(Protocol):
             timestamp_ms: UTC epoch milliseconds.
         """
         ...
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 — Cognitive Foundation
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class TokenBudget:
+    """Per-turn token budget for LLM inference.
+
+    Attributes:
+        max_input: Maximum input tokens for context window.
+        max_output: Maximum output tokens for model response.
+        reasoning_budget: Optional extended thinking budget (provider-specific).
+    """
+
+    max_input: int = 32_768
+    max_output: int = 4_096
+    reasoning_budget: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InferenceConfig:
+    """Configuration for one LLM inference call.
+
+    Enters the CapabilitySnapshot SHA256 audit chain to ensure every
+    model call is traceable to the exact configuration that authorized it.
+
+    Attributes:
+        model_ref: Provider-qualified model identifier (e.g. ``gpt-4o``).
+        token_budget: Per-turn token allocation.
+        temperature: Sampling temperature. ``0.0`` for deterministic output.
+        stop_sequences: Optional stop sequences for response termination.
+        turn_kind_overrides: Per-turn-kind token budget overrides.
+            Keys are turn kind labels (``"reasoning"``, ``"tool_selection"``).
+    """
+
+    model_ref: str
+    token_budget: TokenBudget = field(default_factory=TokenBudget)
+    temperature: float = 0.0
+    stop_sequences: tuple[str, ...] = field(default_factory=tuple)
+    turn_kind_overrides: dict[str, TokenBudget] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class ToolDefinition:
+    """Defines one tool exposed to the model in a ContextWindow.
+
+    Attributes:
+        name: Tool name as presented to the model.
+        description: Human-readable description of the tool's purpose.
+        input_schema: JSON Schema dict for tool input validation.
+    """
+
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class SkillSummary:
+    """Summarises one skill for model consumption in a ContextWindow.
+
+    Attributes:
+        skill_id: Unique skill identifier.
+        description: Human-readable description.
+        script_ids: Ordered list of script identifiers within the skill.
+        input_schema: Optional JSON Schema for skill invocation.
+    """
+
+    skill_id: str
+    description: str
+    script_ids: tuple[str, ...] = field(default_factory=tuple)
+    input_schema: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ContextWindow:
+    """Assembled model input produced by ContextPort.
+
+    Immutable snapshot of everything the model sees for one Turn.
+    The quality of this object is the upper bound on model output quality.
+
+    Attributes:
+        system_instructions: System-level instructions derived from
+            capability_scope and policy.
+        tool_definitions: Ordered tool definitions available to the model.
+        skill_definitions: Ordered skill summaries available to the model.
+        history: Conversation history as message dicts (provider-neutral).
+        current_state: Current run state digest from ProjectionService.
+        memory_ref: Optional memory binding reference (platform-owned).
+        recovery_context: Optional structured recovery context when
+            assembling for a reflect_and_retry turn.
+        inference_config: Inference configuration governing this context.
+    """
+
+    system_instructions: str
+    tool_definitions: tuple[ToolDefinition, ...] = field(default_factory=tuple)
+    skill_definitions: tuple[SkillSummary, ...] = field(default_factory=tuple)
+    history: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    current_state: dict[str, Any] = field(default_factory=dict)
+    memory_ref: str | None = None
+    recovery_context: dict[str, Any] | None = None
+    inference_config: InferenceConfig | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ModelOutput:
+    """Normalised model response from any LLM provider.
+
+    Attributes:
+        raw_text: Raw text content of the model response.
+        tool_calls: Ordered list of provider-neutral tool call dicts.
+            Each dict has keys: ``id``, ``name``, ``arguments`` (dict).
+        finish_reason: Reason the model stopped generating.
+        usage: Token usage statistics dict (``input_tokens``, ``output_tokens``).
+    """
+
+    raw_text: str
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    finish_reason: Literal["stop", "tool_calls", "length", "error"] = "stop"
+    usage: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class InferenceActivityInput:
+    """Input payload for the execute_inference Temporal Activity.
+
+    Attributes:
+        run_id: Run identifier.
+        turn_id: Turn identifier within the run.
+        context_window: Assembled model input.
+        config: Inference configuration for this call.
+        idempotency_key: Stable key for Temporal Activity-level dedup.
+            Prevents double-billing on Temporal retry.
+    """
+
+    run_id: str
+    turn_id: str
+    context_window: ContextWindow
+    config: InferenceConfig
+    idempotency_key: str
+
+
+class LLMGateway(Protocol):
+    """Southbound abstraction for LLM provider calls.
+
+    Positioned below the Temporal Activity boundary. The Activity
+    provides durability; the Gateway provides provider abstraction.
+    Two independent retry levels must not be merged:
+      - Temporal Activity retry  → kernel-level (process crash, timeout)
+      - Gateway-internal retry   → provider-level (rate limits, 5xx)
+
+    Implementations must never raise on provider-level errors directly;
+    they must classify errors into ``ModelOutput(finish_reason="error")``
+    or raise ``LLMProviderError`` for the Activity to handle.
+    """
+
+    async def infer(
+        self,
+        context: ContextWindow,
+        config: InferenceConfig,
+        idempotency_key: str,
+    ) -> ModelOutput:
+        """Runs one synchronous inference call.
+
+        Args:
+            context: Assembled context window.
+            config: Inference configuration.
+            idempotency_key: Stable dedup key for provider-side caching.
+
+        Returns:
+            Normalised model output.
+        """
+        ...
+
+    async def count_tokens(
+        self,
+        context: ContextWindow,
+        model_ref: str,
+    ) -> int:
+        """Estimates token count for the context window.
+
+        Args:
+            context: Context window to estimate.
+            model_ref: Model for which to estimate tokens.
+
+        Returns:
+            Estimated total token count.
+        """
+        ...
+
+
+class ContextPort(Protocol):
+    """Northbound interface for context window assembly.
+
+    The kernel calls this port before each ReasoningLoop turn.
+    The platform provides the implementation; the kernel owns the contract.
+    Platform MUST NOT bypass ContextPort to inject prompts directly.
+
+    Invariant 9: All model input passes through ContextPort.
+    """
+
+    async def assemble(
+        self,
+        run_id: str,
+        snapshot: "CapabilitySnapshot",
+        history: list[RuntimeEvent],
+        inference_config: InferenceConfig | None = None,
+        recovery_context: dict[str, Any] | None = None,
+    ) -> ContextWindow:
+        """Assembles one context window for a Turn.
+
+        Args:
+            run_id: Run identifier.
+            snapshot: Frozen capability snapshot for tool/skill enumeration.
+            history: Ordered event history for conversation reconstruction.
+            inference_config: Optional inference config to embed in window.
+            recovery_context: Optional structured recovery context for
+                reflect_and_retry turns.
+
+        Returns:
+            Immutable context window ready for model inference.
+        """
+        ...
+
+
+class OutputParser(Protocol):
+    """Parses raw model output into kernel-executable Actions or ExecutionPlans.
+
+    The parser bridges the cognitive layer (model output) and the
+    execution layer (kernel Actions). It must not embed business logic —
+    only structural translation from model output format to kernel DTOs.
+    """
+
+    def parse(
+        self,
+        output: ModelOutput,
+        run_id: str,
+    ) -> "list[Action]":
+        """Parses model output into a flat list of Actions.
+
+        Args:
+            output: Normalised model output.
+            run_id: Run identifier for action construction.
+
+        Returns:
+            Ordered list of kernel Actions for sequential execution.
+        """
+        ...
+
+    def parse_plan(
+        self,
+        output: ModelOutput,
+        run_id: str,
+    ) -> "ExecutionPlan":
+        """Parses model output into an ExecutionPlan (serial or parallel).
+
+        Args:
+            output: Normalised model output.
+            run_id: Run identifier for action construction.
+
+        Returns:
+            ExecutionPlan — either SequentialPlan or ParallelPlan.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Parallel Execution
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ParallelGroup:
+    """Defines one parallel execution group within a ParallelPlan.
+
+    Attributes:
+        actions: Actions to execute concurrently in this group.
+        join_strategy: Barrier semantics for the group.
+            ``"all"`` — all must succeed (any failure → RecoveryGate).
+            ``"any"`` — first success unblocks continuation.
+            ``"n_of_m"`` — at least ``n`` must succeed.
+        n: Required success count when ``join_strategy="n_of_m"``.
+        timeout_ms: Optional group-level execution timeout.
+        group_idempotency_key: Stable key for group-level dedup on retry.
+    """
+
+    actions: tuple[Action, ...]
+    join_strategy: Literal["all", "any", "n_of_m"] = "all"
+    n: int | None = None
+    timeout_ms: int | None = None
+    group_idempotency_key: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class SequentialPlan:
+    """An ordered list of Actions for sequential execution.
+
+    The current TurnEngine handles SequentialPlan natively —
+    each Action is a separate Turn.
+
+    Attributes:
+        steps: Ordered Actions for one-at-a-time execution.
+    """
+
+    steps: tuple[Action, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ParallelPlan:
+    """A set of ParallelGroups for concurrent execution via PlanExecutor.
+
+    Attributes:
+        groups: Ordered parallel groups. Groups execute sequentially;
+            Actions within each group execute concurrently.
+    """
+
+    groups: tuple[ParallelGroup, ...]
+
+
+ExecutionPlan = SequentialPlan | ParallelPlan
+
+
+@dataclass(frozen=True, slots=True)
+class BranchResult:
+    """Result from one successfully completed parallel branch.
+
+    Attributes:
+        action_id: Action identifier for this branch.
+        output_json: Optional structured output from the branch.
+        acknowledged: Whether the action was positively acknowledged.
+    """
+
+    action_id: str
+    output_json: dict[str, Any] | None = None
+    acknowledged: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class BranchFailure:
+    """Failure record from one parallel branch.
+
+    Attributes:
+        action_id: Action identifier for the failed branch.
+        failure_kind: Failure category for recovery routing.
+        failure_code: Specific failure code.
+        evidence: Optional FailureEnvelope for detailed evidence.
+    """
+
+    action_id: str
+    failure_kind: str
+    failure_code: str
+    evidence: FailureEnvelope | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ParallelJoinResult:
+    """Aggregate result from PlanExecutor after barrier completion.
+
+    Attributes:
+        group_idempotency_key: Group identifier.
+        successes: List of successful branch results.
+        failures: List of failed branch results.
+        join_satisfied: Whether the join_strategy was satisfied.
+    """
+
+    group_idempotency_key: str
+    successes: list[BranchResult]
+    failures: list[BranchFailure]
+    join_satisfied: bool
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — Script Execution Infrastructure
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ScriptResult:
+    """Result from one script execution.
+
+    Attributes:
+        script_id: Script identifier.
+        exit_code: Process exit code (0 = success).
+        stdout: Captured standard output.
+        stderr: Captured standard error.
+        output_json: Optional structured JSON output parsed from stdout.
+        execution_ms: Actual execution duration in milliseconds.
+    """
+
+    script_id: str
+    exit_code: int
+    stdout: str = ""
+    stderr: str = ""
+    output_json: dict[str, Any] | None = None
+    execution_ms: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ScriptActivityInput:
+    """Input payload for the execute_skill_script Temporal Activity.
+
+    Attributes:
+        run_id: Run identifier.
+        action_id: Action identifier.
+        script_id: Script identifier within the skill.
+        script_content: Executable script content (not a reference).
+        host_kind: Execution mechanism (``local_process``, ``in_process_python``,
+            ``remote_service``).
+        parameters: Runtime parameters injected into the script.
+        timeout_ms: Maximum execution time before heartbeat_timeout.
+        heartbeat_interval_ms: How often the Activity sends heartbeats.
+    """
+
+    run_id: str
+    action_id: str
+    script_id: str
+    script_content: str
+    host_kind: str
+    parameters: dict[str, Any] = field(default_factory=dict)
+    timeout_ms: int = 30_000
+    heartbeat_interval_ms: int = 5_000
+
+
+@dataclass(frozen=True, slots=True)
+class ScriptFailureEvidence:
+    """Structured evidence from a failed script execution.
+
+    Used by ReflectionContextBuilder to assemble failure context for the
+    model. The ``budget_consumed_ratio`` + ``output_produced=False``
+    combination is the heuristic signature of a dead loop.
+
+    Attributes:
+        script_id: Script identifier.
+        failure_kind: Failure category.
+        budget_consumed_ratio: Fraction of timeout budget consumed (0.0–1.0).
+            Value ≈ 1.0 with ``output_produced=False`` → suspected dead loop.
+        output_produced: Whether any stdout output was produced before failure.
+        suspected_cause: Optional human-readable root cause hypothesis.
+        partial_output: Partial stdout captured before timeout/failure.
+        original_script: Original script content for model inspection.
+        stderr_tail: Last N lines of stderr for model inspection.
+    """
+
+    script_id: str
+    failure_kind: Literal[
+        "heartbeat_timeout",
+        "runtime_error",
+        "permission_denied",
+        "resource_exhausted",
+        "output_validation_failed",
+    ]
+    budget_consumed_ratio: float
+    output_produced: bool
+    suspected_cause: str | None = None
+    partial_output: str | None = None
+    original_script: str = ""
+    stderr_tail: str | None = None
+
+
+class ScriptRuntime(Protocol):
+    """Southbound abstraction for script execution environments.
+
+    Routes execution to the correct host based on ``host_kind``:
+    - ``local_process``   → subprocess with stdout/stderr capture
+    - ``in_process_python`` → exec() in isolated namespace
+    - ``remote_service``  → HTTP/gRPC call to remote executor
+    """
+
+    async def execute_script(
+        self,
+        input_value: ScriptActivityInput,
+    ) -> ScriptResult:
+        """Executes one script and returns a result.
+
+        Args:
+            input_value: Script execution payload with content and parameters.
+
+        Returns:
+            Script result with exit code and captured output.
+        """
+        ...
+
+    async def validate_script(
+        self,
+        script_content: str,
+        host_kind: str,
+    ) -> bool:
+        """Validates that a script is safe to execute.
+
+        Args:
+            script_content: Script source to validate.
+            host_kind: Target execution mechanism.
+
+        Returns:
+            ``True`` when validation passes.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — Reflection Loop
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ReflectionPolicy:
+    """Governs the reflect_and_retry recovery loop.
+
+    Prevents infinite reflection cycles by bounding round count and
+    classifying which failure kinds are eligible for model reflection.
+
+    Attributes:
+        max_rounds: Maximum reflection attempts before escalation/abort.
+        reflection_timeout_ms: Per-reflection-turn timeout.
+        reflectable_failure_kinds: Set of failure kinds that may trigger
+            a reflection round.
+        non_reflectable_failure_kinds: Failure kinds that always bypass
+            reflection (go directly to human_escalation or abort).
+        escalate_on_exhaustion: When ``True`` and ``max_rounds`` is reached,
+            fall back to ``human_escalation`` instead of ``abort``.
+    """
+
+    max_rounds: int = 3
+    reflection_timeout_ms: int = 60_000
+    reflectable_failure_kinds: frozenset[str] = field(
+        default_factory=lambda: frozenset({
+            "heartbeat_timeout",
+            "runtime_error",
+            "output_validation_failed",
+        })
+    )
+    non_reflectable_failure_kinds: frozenset[str] = field(
+        default_factory=lambda: frozenset({
+            "resource_exhausted",
+            "permission_denied",
+        })
+    )
+    escalate_on_exhaustion: bool = True
+
+    def is_reflectable(self, failure_kind: str) -> bool:
+        """Returns whether a failure kind is eligible for reflection.
+
+        Args:
+            failure_kind: Failure kind string to check.
+
+        Returns:
+            ``True`` when the failure kind should trigger reflection.
+        """
+        if failure_kind in self.non_reflectable_failure_kinds:
+            return False
+        return failure_kind in self.reflectable_failure_kinds

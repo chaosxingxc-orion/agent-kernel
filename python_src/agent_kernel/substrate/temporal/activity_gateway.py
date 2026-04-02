@@ -20,8 +20,12 @@ from typing import Any
 from agent_kernel.kernel.contracts import (
     AdmissionActivityInput,
     AdmissionResult,
+    InferenceActivityInput,
     MCPActivityInput,
+    ModelOutput,
     ReconciliationActivityInput,
+    ScriptActivityInput,
+    ScriptResult,
     TemporalActivityGateway,
     ToolActivityInput,
     VerificationActivityInput,
@@ -46,6 +50,12 @@ ReconciliationActivityCallable = Callable[
     Any | Awaitable[Any],
 ]
 MCPHandlerKey = tuple[str, str]
+InferenceActivityCallable = Callable[
+    [InferenceActivityInput], ModelOutput | Awaitable[ModelOutput],
+]
+ScriptActivityCallable = Callable[
+    [ScriptActivityInput], ScriptResult | Awaitable[ScriptResult],
+]
 
 
 class ActivityHandlerNotRegisteredError(LookupError):
@@ -90,6 +100,8 @@ class TemporalActivityBindings:
     mcp_activity: MCPActivityCallable
     verification_activity: VerificationActivityCallable
     reconciliation_activity: ReconciliationActivityCallable
+    inference_activity: InferenceActivityCallable | None = None
+    script_activity: ScriptActivityCallable | None = None
 
 
 class TemporalSDKActivityGateway(TemporalActivityGateway):
@@ -288,6 +300,50 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         return await self._invoke(
             self._bindings.reconciliation_activity, request,
         )
+
+    async def execute_inference(
+        self,
+        request: InferenceActivityInput,
+    ) -> ModelOutput:
+        """Executes the injected inference activity callable.
+
+        Args:
+            request: Inference activity input payload.
+
+        Returns:
+            Normalised model output.
+
+        Raises:
+            RuntimeError: If no inference_activity callable is registered.
+        """
+        if self._bindings.inference_activity is None:
+            raise RuntimeError(
+                "No inference_activity callable registered in"
+                " TemporalActivityBindings."
+            )
+        return await self._invoke(self._bindings.inference_activity, request)
+
+    async def execute_skill_script(
+        self,
+        request: ScriptActivityInput,
+    ) -> ScriptResult:
+        """Executes the injected script activity callable.
+
+        Args:
+            request: Script activity input payload.
+
+        Returns:
+            Script execution result.
+
+        Raises:
+            RuntimeError: If no script_activity callable is registered.
+        """
+        if self._bindings.script_activity is None:
+            raise RuntimeError(
+                "No script_activity callable registered in"
+                " TemporalActivityBindings."
+            )
+        return await self._invoke(self._bindings.script_activity, request)
 
     async def _invoke(
         self,

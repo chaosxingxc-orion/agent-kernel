@@ -183,6 +183,11 @@ class AgentKernelRuntimeBundle:
     context_adapter: AgentCoreContextAdapter
     checkpoint_adapter: AgentCoreCheckpointAdapter
     tool_mcp_adapter: AgentCoreToolMCPAdapter
+    # Optional cognitive services — typed as Any to avoid circular imports.
+    cognitive_context_port: Any | None = None    # ContextPort Protocol
+    cognitive_llm_gateway: Any | None = None     # LLMGateway Protocol
+    cognitive_output_parser: Any | None = None   # OutputParser Protocol
+    cognitive_reflection_policy: Any | None = None  # ReflectionPolicy
 
     @classmethod
     def build_minimal_complete(
@@ -202,6 +207,10 @@ class AgentKernelRuntimeBundle:
         mcp_handlers: (
             Mapping[MCPHandlerKey, MCPActivityCallable] | None
         ) = None,
+        context_port: Any | None = None,
+        llm_gateway: Any | None = None,
+        output_parser: Any | None = None,
+        reflection_policy: Any | None = None,
     ) -> AgentKernelRuntimeBundle:
         """Builds one minimal-complete runtime bundle.
 
@@ -276,6 +285,10 @@ class AgentKernelRuntimeBundle:
             context_adapter=boundary["context_adapter"],
             checkpoint_adapter=boundary["checkpoint_adapter"],
             tool_mcp_adapter=boundary["tool_mcp_adapter"],
+            cognitive_context_port=context_port,
+            cognitive_llm_gateway=llm_gateway,
+            cognitive_output_parser=output_parser,
+            cognitive_reflection_policy=reflection_policy,
         )
 
     @staticmethod
@@ -616,6 +629,10 @@ class AgentKernelRuntimeBundle:
             strict_mode=RunActorStrictModeConfig(
                 enabled=self.strict_mode_config.enabled
             ),
+            context_port=self.cognitive_context_port,
+            llm_gateway=self.cognitive_llm_gateway,
+            output_parser=self.cognitive_output_parser,
+            reflection_policy=self.cognitive_reflection_policy,
         )
 
     def create_temporal_worker(

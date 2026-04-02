@@ -2,7 +2,7 @@
 
 > 企业级智能体执行内核 — 六权威生命周期协议 · Temporal 持久执行基底 · 单系统运行时
 
-**6 235 测试通过** | Python 3.14 | Google Python Style Guide
+**6 436 测试通过** | Python 3.14 | Google Python Style Guide
 
 ---
 

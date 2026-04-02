@@ -115,6 +115,11 @@ class RunActorDependencyBundle:
     )
     workflow_id_prefix: str = "run"
     observability_hook: ObservabilityHook | None = None
+    context_port: Any | None = None        # ContextPort Protocol
+    llm_gateway: Any | None = None         # LLMGateway Protocol
+    output_parser: Any | None = None       # OutputParser Protocol
+    reflection_policy: Any | None = None   # ReflectionPolicy
+    reflection_builder: Any | None = None  # ReflectionContextBuilder
 
 
 _RUN_ACTOR_CONFIG: ContextVar[RunActorDependencyBundle | None] = ContextVar(
@@ -211,6 +216,21 @@ class RunActorWorkflow:
         self._deduper = dependencies.deduper
         self._dedupe_store = dependencies.dedupe_store or InMemoryDedupeStore()
         self._strict_mode = dependencies.strict_mode
+        # Build optional reasoning loop when all cognitive services are present.
+        _reasoning_loop = None
+        if (
+            dependencies.context_port is not None
+            and dependencies.llm_gateway is not None
+            and dependencies.output_parser is not None
+        ):
+            from agent_kernel.kernel.reasoning_loop import ReasoningLoop  # noqa: PLC0415
+
+            _reasoning_loop = ReasoningLoop(
+                context_port=dependencies.context_port,
+                llm_gateway=dependencies.llm_gateway,
+                output_parser=dependencies.output_parser,
+            )
+
         self._turn_engine = turn_engine or TurnEngine(
             snapshot_builder=CapabilitySnapshotBuilder(),
             admission_service=self._admission,
@@ -221,6 +241,7 @@ class RunActorWorkflow:
                 require_declarative_bundle_digest=self._strict_mode.enabled,
             ),
             require_declared_snapshot_inputs=self._strict_mode.enabled,
+            reasoning_loop=_reasoning_loop,
         )
         self._run_id: str | None = None
         self._session_id: str | None = None

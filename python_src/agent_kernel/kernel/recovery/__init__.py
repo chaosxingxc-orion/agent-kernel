@@ -7,6 +7,7 @@ from agent_kernel.kernel.recovery.planner import (
     RecoveryPlanAction,
     RecoveryPlanner,
 )
+from agent_kernel.kernel.recovery.reflection_builder import ReflectionContextBuilder
 
 __all__ = [
     "PlannedRecoveryGateService",
@@ -14,4 +15,5 @@ __all__ = [
     "RecoveryPlan",
     "RecoveryPlanAction",
     "RecoveryPlanner",
+    "ReflectionContextBuilder",
 ]

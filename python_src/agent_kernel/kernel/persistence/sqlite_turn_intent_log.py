@@ -33,8 +33,9 @@ class SQLiteTurnIntentLog(TurnIntentLog):
               dispatch_dedupe_key,
               host_kind,
               outcome_kind,
-              written_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              written_at,
+              reflection_round
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(intent_commit_ref) DO UPDATE SET
               run_id = excluded.run_id,
               decision_ref = excluded.decision_ref,
@@ -42,7 +43,8 @@ class SQLiteTurnIntentLog(TurnIntentLog):
               dispatch_dedupe_key = excluded.dispatch_dedupe_key,
               host_kind = excluded.host_kind,
               outcome_kind = excluded.outcome_kind,
-              written_at = excluded.written_at
+              written_at = excluded.written_at,
+              reflection_round = excluded.reflection_round
             """,
             (
                 intent.run_id,
@@ -53,6 +55,7 @@ class SQLiteTurnIntentLog(TurnIntentLog):
                 intent.host_kind,
                 intent.outcome_kind,
                 intent.written_at,
+                intent.reflection_round,
             ),
         )
         self._conn.commit()
@@ -69,7 +72,8 @@ class SQLiteTurnIntentLog(TurnIntentLog):
               dispatch_dedupe_key,
               host_kind,
               outcome_kind,
-              written_at
+              written_at,
+              reflection_round
             FROM turn_intent_log
             WHERE run_id = ?
             ORDER BY written_at DESC, id DESC
@@ -88,6 +92,7 @@ class SQLiteTurnIntentLog(TurnIntentLog):
             host_kind=row["host_kind"],
             outcome_kind=row["outcome_kind"],
             written_at=row["written_at"],
+            reflection_round=row["reflection_round"] if row["reflection_round"] is not None else 0,
         )
 
     def _ensure_schema(self) -> None:
@@ -102,7 +107,8 @@ class SQLiteTurnIntentLog(TurnIntentLog):
               dispatch_dedupe_key TEXT,
               host_kind TEXT,
               outcome_kind TEXT NOT NULL,
-              written_at TEXT NOT NULL
+              written_at TEXT NOT NULL,
+              reflection_round INTEGER DEFAULT 0
             )
             """
         )
@@ -113,4 +119,3 @@ class SQLiteTurnIntentLog(TurnIntentLog):
             """
         )
         self._conn.commit()
-

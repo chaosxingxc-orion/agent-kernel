@@ -13,9 +13,13 @@ The engine is intentionally narrow for PoC:
 from __future__ import annotations
 
 import inspect
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
+
+if TYPE_CHECKING:
+    from agent_kernel.kernel.reasoning_loop import ReasoningLoop
 
 from agent_kernel.kernel.capability_snapshot import (
     CapabilitySnapshot,
@@ -44,6 +48,7 @@ TurnTriggerType = Literal["start", "signal", "child_join", "recovery_resume"]
 TurnState = Literal[
     "collecting",
     "intent_committed",
+    "reasoning",
     "snapshot_built",
     "admission_checked",
     "dispatch_blocked",
@@ -82,12 +87,14 @@ class TurnInput:
         through_offset: Upper-bound offset for this turn.
         based_on_offset: Baseline offset the turn replays from.
         trigger_type: Discriminator for the turn trigger origin.
+        history: Optional ordered event history for passing to reasoning loop.
     """
 
     run_id: str
     through_offset: int
     based_on_offset: int
     trigger_type: TurnTriggerType
+    history: list[Any] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,6 +248,7 @@ class TurnEngine:
         executor: ExecutorPort,
         snapshot_input_resolver: SnapshotInputResolverPort | None = None,
         require_declared_snapshot_inputs: bool = False,
+        reasoning_loop: ReasoningLoop | None = None,
     ) -> None:
         """Initializes TurnEngine with required service dependencies.
 
@@ -254,6 +262,8 @@ class TurnEngine:
                 payload directly.
             require_declared_snapshot_inputs: When ``True``, enforces
                 v6.4 strict mode requiring declared snapshot inputs.
+            reasoning_loop: Optional reasoning loop for deriving actions from
+                an LLM when no explicit action is provided.
         """
         self._snapshot_builder = snapshot_builder
         self._admission_service = admission_service
@@ -261,11 +271,12 @@ class TurnEngine:
         self._executor = executor
         self._snapshot_input_resolver = snapshot_input_resolver
         self._require_declared_snapshot_inputs = require_declared_snapshot_inputs
+        self._reasoning_loop = reasoning_loop
 
     async def run_turn(
         self,
         input_value: TurnInput,
-        action: Action,
+        action: Action | None = None,
         admission_subject: Any | None = None,
     ) -> TurnResult:  # pylint: disable=too-many-locals
         """Runs one turn across snapshot, admission, dedupe, and execution.
@@ -273,6 +284,9 @@ class TurnEngine:
         Args:
             input_value: Turn trigger and offset context.
             action: Candidate action selected by upstream decision path.
+                When ``None`` and a reasoning loop is configured, the engine
+                runs the loop to derive an action. When ``None`` and no
+                reasoning loop is configured, returns ``completed_noop``.
             admission_subject: Optional admission subject override. When
                 ``None``, the capability snapshot is used.
 
@@ -282,11 +296,59 @@ class TurnEngine:
         Raises:
             TypeError: If the admission result is an unawaited awaitable.
         """
-        turn_identity = _build_turn_identity(input_value=input_value, action=action)
         emitted_events: list[TurnStateEvent] = [
             TurnStateEvent(state="collecting"),
             TurnStateEvent(state="intent_committed"),
         ]
+
+        # When no action is provided, derive one via the reasoning loop or return noop.
+        if action is None:
+            if self._reasoning_loop is None:
+                emitted_events.append(TurnStateEvent(state="completed_noop"))
+                return TurnResult(
+                    state="completed_noop",
+                    outcome_kind="noop",
+                    decision_ref=f"decision:{input_value.run_id}:{input_value.based_on_offset}",
+                    decision_fingerprint=(
+                        f"{input_value.run_id}:{input_value.trigger_type}"
+                        f":noop:{input_value.based_on_offset}"
+                    ),
+                    emitted_events=emitted_events,
+                )
+            emitted_events.append(TurnStateEvent(state="reasoning"))
+            # Build a minimal inference config for the reasoning call.
+            from agent_kernel.kernel.contracts import InferenceConfig
+
+            inference_config = InferenceConfig(model_ref="echo")
+            reasoning_result = await self._reasoning_loop.run_once(
+                run_id=input_value.run_id,
+                snapshot=self._snapshot_builder.build(
+                    CapabilitySnapshotInput(
+                        run_id=input_value.run_id,
+                        based_on_offset=input_value.based_on_offset,
+                        tenant_policy_ref="policy:default",
+                        permission_mode="strict",
+                    )
+                ),
+                history=list(input_value.history),
+                inference_config=inference_config,
+                idempotency_key=uuid.uuid4().hex,
+            )
+            if not reasoning_result.actions:
+                emitted_events.append(TurnStateEvent(state="completed_noop"))
+                return TurnResult(
+                    state="completed_noop",
+                    outcome_kind="noop",
+                    decision_ref=f"decision:{input_value.run_id}:{input_value.based_on_offset}",
+                    decision_fingerprint=(
+                        f"{input_value.run_id}:{input_value.trigger_type}"
+                        f":noop:{input_value.based_on_offset}"
+                    ),
+                    emitted_events=emitted_events,
+                )
+            action = reasoning_result.actions[0]
+
+        turn_identity = _build_turn_identity(input_value=input_value, action=action)
         authoritative_dispatch_attempts = 0
 
         try:
