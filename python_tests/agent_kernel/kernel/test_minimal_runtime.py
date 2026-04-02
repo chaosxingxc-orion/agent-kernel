@@ -1259,8 +1259,14 @@ def test_non_failed_reconcile_event_only_advances_projection_offset() -> None:
     assert state.projected_offset == 2
 
 
-def test_derived_diagnostic_event_is_rejected_by_projection_authority_path() -> None:
-    """derived_diagnostic events must be rejected from projection authority replay."""
+def test_derived_diagnostic_event_is_skipped_by_projection_authority_path() -> None:
+    """derived_diagnostic events must be silently skipped during projection replay.
+
+    The architecture invariant: derived_diagnostic events are "never replayed".
+    They may appear in the same ActionCommit as authoritative facts (e.g.
+    recovery.plan_selected alongside a recovery lifecycle fact) and must not
+    raise errors — they are simply excluded from projection state transitions.
+    """
     event_log = InMemoryKernelRuntimeEventLog()
     projection = InMemoryDecisionProjectionService(event_log)
 
@@ -1287,8 +1293,10 @@ def test_derived_diagnostic_event_is_rejected_by_projection_authority_path() -> 
         )
     )
 
-    with pytest.raises(ValueError, match="derived_diagnostic"):
-        asyncio.run(projection.get("run-10d"))
+    # derived_diagnostic event is skipped — projection stays at its default state.
+    state = asyncio.run(projection.get("run-10d"))
+    assert state.lifecycle_state == "created"
+    assert state.projected_offset == 0
 
 
 def test_projection_can_disable_derived_diagnostic_reject_guard_for_migration() -> None:

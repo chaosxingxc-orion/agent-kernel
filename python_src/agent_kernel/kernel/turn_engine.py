@@ -58,6 +58,22 @@ TurnOutcomeKind = Literal["noop", "blocked", "dispatched", "recovery_pending"]
 
 
 @dataclass(frozen=True, slots=True)
+class TurnStateEvent:
+    """Represents one FSM state-transition event emitted by TurnEngine.
+
+    Attributes:
+        state: FSM state name or diagnostic event name reached.
+        reason: Optional human-readable reason for the transition.
+        metadata: Optional extra key-value pairs for diagnostic events
+            (e.g. effect scope downgrade fields, deprecation markers).
+    """
+
+    state: str
+    reason: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class TurnInput:
     """Represents one turn execution trigger for a run.
 
@@ -102,7 +118,7 @@ class TurnResult:
     remote_policy_decision: RemoteDispatchPolicyDecision | None = None
     action_commit: dict[str, Any] | None = None
     recovery_input: FailureEnvelope | None = None
-    emitted_events: list[dict[str, Any]] = field(default_factory=list)
+    emitted_events: list[TurnStateEvent] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,9 +283,9 @@ class TurnEngine:
             TypeError: If the admission result is an unawaited awaitable.
         """
         turn_identity = _build_turn_identity(input_value=input_value, action=action)
-        emitted_events: list[dict[str, Any]] = [
-            {"state": "collecting"},
-            {"state": "intent_committed"},
+        emitted_events: list[TurnStateEvent] = [
+            TurnStateEvent(state="collecting"),
+            TurnStateEvent(state="intent_committed"),
         ]
         authoritative_dispatch_attempts = 0
 
@@ -281,9 +297,9 @@ class TurnEngine:
                 require_declared_snapshot_inputs=self._require_declared_snapshot_inputs,
             )
             snapshot = self._snapshot_builder.build(snapshot_input)
-            emitted_events.append({"state": "snapshot_built"})
+            emitted_events.append(TurnStateEvent(state="snapshot_built"))
         except CapabilitySnapshotBuildError:
-            emitted_events.append({"state": "completed_noop"})
+            emitted_events.append(TurnStateEvent(state="completed_noop"))
             return TurnResult(
                 state="completed_noop",
                 outcome_kind="noop",
@@ -302,9 +318,9 @@ class TurnEngine:
         )
         if used_legacy_check_fallback:
             emitted_events.append(_legacy_check_fallback_event())
-        emitted_events.append({"state": "admission_checked"})
+        emitted_events.append(TurnStateEvent(state="admission_checked"))
         if not _is_admitted(admission_result):
-            emitted_events.append({"state": "dispatch_blocked"})
+            emitted_events.append(TurnStateEvent(state="dispatch_blocked"))
             return TurnResult(
                 state="dispatch_blocked",
                 outcome_kind="blocked",
@@ -318,10 +334,10 @@ class TurnEngine:
         dispatch_policy = _resolve_dispatch_policy(action=action)
         if dispatch_policy.should_block:
             emitted_events.append(
-                {
-                    "state": "dispatch_blocked",
-                    "reason": dispatch_policy.block_reason,
-                }
+                TurnStateEvent(
+                    state="dispatch_blocked",
+                    reason=dispatch_policy.block_reason,
+                )
             )
             return TurnResult(
                 state="dispatch_blocked",
@@ -350,7 +366,7 @@ class TurnEngine:
             emitted_events=emitted_events,
         )
         if not reservation.accepted:
-            emitted_events.append({"state": "dispatch_blocked"})
+            emitted_events.append(TurnStateEvent(state="dispatch_blocked"))
             return TurnResult(
                 state="dispatch_blocked",
                 outcome_kind="blocked",
@@ -368,7 +384,7 @@ class TurnEngine:
             raise RuntimeError("Single turn must not perform multiple dispatch attempts.")
         if dedupe_available:
             self._dedupe_store.mark_dispatched(turn_identity.dispatch_dedupe_key)
-        emitted_events.append({"state": "dispatched"})
+        emitted_events.append(TurnStateEvent(state="dispatched"))
         execution_context = _build_execution_context(
             input_value=input_value,
             action=action,
@@ -388,7 +404,7 @@ class TurnEngine:
         if acknowledged:
             if dedupe_available:
                 self._dedupe_store.mark_acknowledged(turn_identity.dispatch_dedupe_key)
-            emitted_events.append({"state": "dispatch_acknowledged"})
+            emitted_events.append(TurnStateEvent(state="dispatch_acknowledged"))
             return TurnResult(
                 state="dispatch_acknowledged",
                 outcome_kind="dispatched",
@@ -410,7 +426,7 @@ class TurnEngine:
         if dedupe_available:
             self._dedupe_store.mark_unknown_effect(turn_identity.dispatch_dedupe_key)
         emitted_events.extend(
-            [{"state": "effect_unknown"}, {"state": "recovery_pending"}]
+            [TurnStateEvent(state="effect_unknown"), TurnStateEvent(state="recovery_pending")]
         )
         return _build_recovery_pending_turn_result(
             input_value=input_value,
@@ -647,7 +663,7 @@ def _reserve_with_degradation(
     envelope: IdempotencyEnvelope,
     action: Action,
     host_kind: HostKind,
-    emitted_events: list[dict[str, Any]],
+    emitted_events: list[TurnStateEvent],
 ) -> tuple[DedupeReservation, IdempotencyEnvelope, bool]:
     """Reserves dedupe key and applies v6.4 degradation when store unavailable."""
     try:
@@ -668,12 +684,14 @@ def _reserve_with_degradation(
             rule_bundle_hash=envelope.rule_bundle_hash,
         )
         emitted_events.append(
-            {
-                "state": "dedupe_degraded",
-                "reason": type(error).__name__,
-                "from_effect_scope": "idempotent_write",
-                "to_effect_scope": downgraded_effect_scope,
-            }
+            TurnStateEvent(
+                state="dedupe_degraded",
+                reason=type(error).__name__,
+                metadata={
+                    "from_effect_scope": "idempotent_write",
+                    "to_effect_scope": downgraded_effect_scope,
+                },
+            )
         )
         return DedupeReservation(accepted=True, reason="accepted"), downgraded_envelope, False
 
@@ -685,14 +703,17 @@ def _resolve_dedupe_downgrade_scope(host_kind: HostKind) -> str:
     return "compensatable_write"
 
 
-def _legacy_check_fallback_event() -> dict[str, str]:
+def _legacy_check_fallback_event() -> TurnStateEvent:
     """Builds structured deprecation signal for legacy ``check`` fallback path."""
-    return {
-        "state": "admission_legacy_check_fallback",
-        "severity": "warning",
-        "deprecation_phase": "soft",
-        "target_removal_version": "0.2",
-    }
+    return TurnStateEvent(
+        state="admission_legacy_check_fallback",
+        reason="deprecated check() path used instead of admit()",
+        metadata={
+            "severity": "warning",
+            "deprecation_phase": "soft",
+            "target_removal_version": "0.2",
+        },
+    )
 
 
 def _resolve_snapshot_input(
@@ -1023,7 +1044,7 @@ def _build_recovery_pending_turn_result(
     execute_result: dict[str, Any],
     host_kind: HostKind,
     remote_policy_decision: RemoteDispatchPolicyDecision | None,
-    emitted_events: list[dict[str, Any]],
+    emitted_events: list[TurnStateEvent],
 ) -> TurnResult:
     """Builds recovery-pending result with normalized failure evidence fields.
 

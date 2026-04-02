@@ -28,7 +28,7 @@ from agent_kernel.kernel.minimal_runtime import (
     StaticDispatchAdmissionService,
     StaticRecoveryGateService,
 )
-from agent_kernel.kernel.turn_engine import TurnOutcomeKind, TurnResult, TurnState
+from agent_kernel.kernel.turn_engine import TurnOutcomeKind, TurnResult, TurnState, TurnStateEvent
 from agent_kernel.substrate.temporal.run_actor_workflow import (
     ActorSignal,
     RunActorStrictModeConfig,
@@ -197,7 +197,7 @@ def make_turn_result(
         intent_commit_ref="intent:action-1:1",
         action_commit=action_commit,
         recovery_input=recovery_input,
-        emitted_events=[{"state": emitted_state} for emitted_state in emitted_states],
+        emitted_events=[TurnStateEvent(state=emitted_state) for emitted_state in emitted_states],
     )
 
 
@@ -644,8 +644,10 @@ def test_workflow_persists_recovery_pending_before_recovery_gate_event() -> None
     recovering_commit = event_log.append_action_commit.await_args_list[0].args[0]
     recovery_commit = event_log.append_action_commit.await_args_list[1].args[0]
     assert recovering_commit.events[0].event_type == "run.recovering"
-    assert recovery_commit.events[0].event_type == "run.waiting_external"
-    assert recovery_commit.events[0].commit_offset == 27
+    assert recovery_commit.events[0].event_type == "recovery.plan_selected"
+    assert recovery_commit.events[0].event_authority == "derived_diagnostic"
+    assert recovery_commit.events[1].event_type == "run.waiting_external"
+    assert recovery_commit.events[1].commit_offset == 28
 
 
 def test_workflow_skips_duplicate_decision_fingerprint() -> None:

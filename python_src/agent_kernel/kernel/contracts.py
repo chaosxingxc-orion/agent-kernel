@@ -33,6 +33,15 @@ EffectClass = Literal[
 ExternalIdempotencyLevel = Literal["guaranteed", "best_effort", "unknown"]
 RecoveryMode = Literal["static_compensation", "human_escalation", "abort"]
 
+InteractionTarget = Literal[
+    "agent_peer",    # another agent kernel: A2A or any peer-agent protocol
+    "it_service",    # traditional IT: REST / gRPC / GraphQL / enterprise system
+    "data_system",   # database, vector store, data lake, streaming platform
+    "tool_executor", # MCP, function call, CLI, sandbox, code execution
+    "human_actor",   # approval gate, feedback loop, human escalation
+    "event_stream",  # Kafka, Redis Streams, pub/sub, message queue
+]
+
 
 @dataclass(frozen=True, slots=True)
 class RuntimeEvent:
@@ -91,6 +100,10 @@ class Action:
         action_type: Action type discriminator.
         effect_class: Declared side-effect class.
         external_idempotency_level: Optional external idempotency guarantee.
+        interaction_target: Optional classification of the external target being
+            contacted.  Orthogonal to ``host_kind`` (which describes execution
+            *mechanism*); this describes *who* the agent is talking to.
+            Enables routing, policy, and observability by target category.
         input_ref: Optional input reference string.
         input_json: Optional input payload dictionary.
         policy_tags: Policy tags for dispatch routing hints.
@@ -102,6 +115,7 @@ class Action:
     action_type: str
     effect_class: EffectClass
     external_idempotency_level: ExternalIdempotencyLevel | None = None
+    interaction_target: InteractionTarget | None = None
     input_ref: str | None = None
     input_json: dict[str, Any] | None = None
     policy_tags: list[str] = field(default_factory=list)
@@ -993,5 +1007,87 @@ class DecisionDeduper(Protocol):
 
         Args:
             fingerprint: Decision fingerprint to mark as seen.
+        """
+        ...
+
+
+class EventExportPort(Protocol):
+    """Platform-facing async export sink for kernel ActionCommit events.
+
+    The kernel fires ``export_commit`` after each ``ActionCommit`` is durably
+    written to the operational event log.  The call is fire-and-forget:
+
+    - The kernel never awaits the result on the execution critical path.
+    - Export failures are swallowed by the wrapper and logged at WARNING.
+    - The platform may apply any TTL, indexing, or streaming strategy it
+      needs without coupling to kernel internals.
+
+    Design boundary:
+      - Kernel operational log (correctness) → ``KernelRuntimeEventLog``
+      - Platform evolution store (analytics/training) → ``EventExportPort``
+
+    Implementations must not raise.  Use ``InMemoryRunTraceStore`` for
+    development and integration tests.
+    """
+
+    async def export_commit(self, commit: ActionCommit) -> None:
+        """Receives one durably-written commit for platform processing.
+
+        Args:
+            commit: The ``ActionCommit`` that was just appended to the
+                kernel event log.  The commit is immutable and safe to
+                retain across async boundaries.
+        """
+        ...
+
+
+class ObservabilityHook(Protocol):
+    """Receives FSM state transition events for observability purposes.
+
+    Implementations must be synchronous and fast. The hook is called
+    on the hot path of every FSM state transition — slow or blocking
+    implementations will add latency to every turn.
+
+    Use ``CompositeObservabilityHook`` to fan-out to multiple backends.
+    Use ``NoOpObservabilityHook`` as the zero-cost default.
+    """
+
+    def on_turn_state_transition(
+        self,
+        *,
+        run_id: str,
+        action_id: str,
+        from_state: str,
+        to_state: str,
+        turn_offset: int,
+        timestamp_ms: int,
+    ) -> None:
+        """Called on every TurnEngine FSM state transition.
+
+        Args:
+            run_id: Run identifier.
+            action_id: Action/turn identifier.
+            from_state: Previous FSM state.
+            to_state: New FSM state.
+            turn_offset: Monotonic turn offset.
+            timestamp_ms: UTC epoch milliseconds.
+        """
+        ...
+
+    def on_run_lifecycle_transition(
+        self,
+        *,
+        run_id: str,
+        from_state: str,
+        to_state: str,
+        timestamp_ms: int,
+    ) -> None:
+        """Called on every run lifecycle state transition.
+
+        Args:
+            run_id: Run identifier.
+            from_state: Previous lifecycle state.
+            to_state: New lifecycle state.
+            timestamp_ms: UTC epoch milliseconds.
         """
         ...

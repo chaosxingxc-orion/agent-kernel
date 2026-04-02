@@ -33,6 +33,7 @@ from agent_kernel.kernel.contracts import (
     DispatchAdmissionService,
     ExecutorService,
     KernelRuntimeEventLog,
+    ObservabilityHook,
     RecoveryDecision,
     RecoveryGateService,
     RecoveryInput,
@@ -112,6 +113,8 @@ class RunActorDependencyBundle:
     strict_mode: RunActorStrictModeConfig = field(
         default_factory=RunActorStrictModeConfig
     )
+    workflow_id_prefix: str = "run"
+    observability_hook: ObservabilityHook | None = None
 
 
 _RUN_ACTOR_CONFIG: ContextVar[RunActorDependencyBundle | None] = ContextVar(
@@ -123,16 +126,41 @@ _RUN_ACTOR_CONFIG_FALLBACK: dict[str, RunActorDependencyBundle | None] = {
 }
 
 
-def configure_run_actor_dependencies(dependencies: RunActorDependencyBundle | None) -> None:
+def configure_run_actor_dependencies(
+    dependencies: RunActorDependencyBundle | None,
+) -> RunActorDependencyBundle | None:
     """Configures default dependencies for workflow construction.
 
     Temporal workers may execute workflow code in runtime contexts that do not
     preserve ``ContextVar`` bindings from test or bootstrap call sites.
     Maintain both context-local and process-level fallback bindings so workflow
     tests and local workers receive the same configured services deterministically.
+
+    Returns:
+        The ``dependencies`` argument, allowing callers to use the return value
+        as an identity token for a scoped ``clear_run_actor_dependencies`` call.
     """
     _RUN_ACTOR_CONFIG.set(dependencies)
     _RUN_ACTOR_CONFIG_FALLBACK["dependencies"] = dependencies
+    return dependencies
+
+
+def clear_run_actor_dependencies(
+    token: RunActorDependencyBundle | None,
+) -> None:
+    """Clears process-level dependencies only when they match ``token``.
+
+    Safe to call concurrently: if another ``KernelRuntime`` has already
+    registered its own bundle, this call is a no-op and the new runtime's
+    state is not disturbed.
+
+    Args:
+        token: The bundle reference returned by ``configure_run_actor_dependencies``
+            at start time.  Only clears if the current global matches this token.
+    """
+    if _RUN_ACTOR_CONFIG_FALLBACK.get("dependencies") is token:
+        _RUN_ACTOR_CONFIG.set(None)
+        _RUN_ACTOR_CONFIG_FALLBACK["dependencies"] = None
 
 
 class RunActorWorkflow:
@@ -537,7 +565,14 @@ class RunActorWorkflow:
         recovery_decision: RecoveryDecision,
         caused_by: str | None,
     ) -> int:
-        """Appends one recovery decision event to authoritative runtime log."""
+        """Appends one recovery decision event to authoritative runtime log.
+
+        Emits two events in the same commit:
+          1. ``recovery.plan_selected`` (derived_diagnostic) — the planner
+             decision is always auditable even if execution fails later.
+          2. The authoritative recovery fact (authoritative_fact) — the
+             durable lifecycle state change consumed by projection replay.
+        """
         event_type = _recovery_event_type(recovery_decision.mode)
         _assert_recovery_event_type_allowed(event_type)
         await self._event_log.append_action_commit(
@@ -550,8 +585,29 @@ class RunActorWorkflow:
                 events=[
                     RuntimeEvent(
                         run_id=run_id,
-                        event_id=f"evt-recovery-{offset}",
+                        event_id=f"evt-recovery-plan-{offset}",
                         commit_offset=offset,
+                        event_type="recovery.plan_selected",
+                        event_class="derived",
+                        event_authority="derived_diagnostic",
+                        ordering_key=run_id,
+                        wake_policy="projection_only",
+                        payload_json={
+                            "planned_mode": recovery_decision.mode,
+                            "reason": recovery_decision.reason,
+                            "compensation_action_id": (
+                                recovery_decision.compensation_action_id
+                            ),
+                            "escalation_channel_ref": (
+                                recovery_decision.escalation_channel_ref
+                            ),
+                        },
+                        created_at=_utc_now_iso(),
+                    ),
+                    RuntimeEvent(
+                        run_id=run_id,
+                        event_id=f"evt-recovery-{offset}",
+                        commit_offset=offset + 1,
                         event_type=event_type,
                         event_class="fact",
                         event_authority="authoritative_fact",
@@ -562,7 +618,7 @@ class RunActorWorkflow:
                             "reason": recovery_decision.reason,
                         },
                         created_at=_utc_now_iso(),
-                    )
+                    ),
                 ],
             )
         )
@@ -576,11 +632,14 @@ class RunActorWorkflow:
                     operator_escalation_ref=(
                         recovery_decision.escalation_channel_ref
                     ),
-                    emitted_event_ids=[f"evt-recovery-{offset}"],
+                    emitted_event_ids=[
+                        f"evt-recovery-plan-{offset}",
+                        f"evt-recovery-{offset}",
+                    ],
                     written_at=_utc_now_iso(),
                 )
             )
-        return offset + 1
+        return offset + 2
 
 
 class _TurnEngineExecutorAdapter:
@@ -791,19 +850,19 @@ def _build_remote_policy_decision_payload(
 
 
 def _extract_turn_emitted_states(
-    emitted_events: list[dict[str, Any]],
+    emitted_events: list[Any],
 ) -> list[str]:
     """Extracts ordered ``state`` markers from TurnEngine emitted events.
 
     Args:
-        emitted_events: List of emitted event dictionaries.
+        emitted_events: List of TurnStateEvent objects.
 
     Returns:
         Ordered list of non-empty state string values.
     """
     emitted_states: list[str] = []
     for emitted_event in emitted_events:
-        state_value = emitted_event.get("state")
+        state_value = emitted_event.state
         if isinstance(state_value, str) and state_value != "":
             emitted_states.append(state_value)
     return emitted_states
@@ -911,7 +970,7 @@ def _assert_single_dispatch_attempt_in_turn(turn_result: TurnResult) -> None:
     dispatch_count = sum(
         1
         for event in turn_result.emitted_events
-        if event.get("state") == "dispatched"
+        if event.state == "dispatched"
     )
     if dispatch_count > 1:
         raise RuntimeError(

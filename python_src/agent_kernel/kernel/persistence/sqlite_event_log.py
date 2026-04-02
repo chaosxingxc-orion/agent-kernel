@@ -102,6 +102,26 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
             rows = self._connection.execute(query, (run_id, after_offset)).fetchall()
         return [self._row_to_runtime_event(row) for row in rows]
 
+    async def max_offset(self, run_id: str) -> int:
+        """Returns the highest committed offset for a run, or 0 when empty.
+
+        Args:
+            run_id: Run identifier to query.
+
+        Returns:
+            Highest ``commit_offset`` value in the log, or 0 when no events exist.
+        """
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                SELECT COALESCE(MAX(commit_offset), 0)
+                FROM runtime_events
+                WHERE stream_run_id = ?
+                """,
+                (run_id,),
+            )
+            return int(cursor.fetchone()[0])
+
     def _initialize_schema(self) -> None:
         """Creates required tables and indexes when absent."""
         self._connection.executescript(

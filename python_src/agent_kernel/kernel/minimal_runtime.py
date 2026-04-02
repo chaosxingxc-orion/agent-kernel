@@ -152,12 +152,14 @@ class InMemoryDecisionProjectionService(DecisionProjectionService):
         for event in unseen_events:
             if event.commit_offset > through_offset:
                 break
-            _validate_projection_authority_input(
+            should_replay = _validate_projection_authority_input(
                 event=event,
                 reject_derived_diagnostic_authority_input=(
                     self._reject_derived_diagnostic_authority_input
                 ),
             )
+            if not should_replay:
+                continue
             projection = _apply_projection_event(projection, event)
         self._projection_by_run[run_id] = projection
         return projection
@@ -187,12 +189,14 @@ class InMemoryDecisionProjectionService(DecisionProjectionService):
         projection = self._projection_by_run.get(run_id, _default_projection(run_id))
         unseen_events = await self._event_log.load(run_id, after_offset=projection.projected_offset)
         for event in unseen_events:
-            _validate_projection_authority_input(
+            should_replay = _validate_projection_authority_input(
                 event=event,
                 reject_derived_diagnostic_authority_input=(
                     self._reject_derived_diagnostic_authority_input
                 ),
             )
+            if not should_replay:
+                continue
             projection = _apply_projection_event(projection, event)
         self._projection_by_run[run_id] = projection
         return projection
@@ -723,15 +727,29 @@ def _apply_projection_event(projection: RunProjection, event: RuntimeEvent) -> R
 def _validate_projection_authority_input(
     event: RuntimeEvent,
     reject_derived_diagnostic_authority_input: bool,
-) -> None:
-    """Validates whether runtime event can enter projection authority replay."""
+) -> bool:
+    """Returns whether the event should participate in projection replay.
+
+    ``derived_diagnostic`` events are intentionally excluded from projection
+    replay (architecture invariant: "never replayed").  They may appear in the
+    same ``ActionCommit`` as authoritative facts and must be silently skipped
+    rather than raising an error, so observability events do not break replay.
+
+    Args:
+        event: Runtime event to evaluate.
+        reject_derived_diagnostic_authority_input: When ``True``, silently
+            skips ``derived_diagnostic`` events.  When ``False``, all events
+            are processed (used in tests that inspect raw event streams).
+
+    Returns:
+        ``True`` when the event should be replayed, ``False`` to skip.
+    """
     if (
         reject_derived_diagnostic_authority_input
         and event.event_authority == "derived_diagnostic"
     ):
-        raise ValueError(
-            "derived_diagnostic events are not allowed as projection authority input."
-        )
+        return False
+    return True
 
 
 def _resolve_projection_transition(

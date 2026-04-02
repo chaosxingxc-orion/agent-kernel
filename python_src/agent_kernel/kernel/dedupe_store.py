@@ -11,7 +11,13 @@ class DedupeStoreStateError(ValueError):
 
 
 DedupeState = Literal["reserved", "dispatched", "acknowledged", "unknown_effect"]
-HostKind = Literal["local_process", "local_cli", "remote_service"]
+HostKind = Literal[
+    "local_process",
+    "local_cli",
+    "cli_process",
+    "in_process_python",
+    "remote_service",
+]
 
 
 @dataclass(frozen=True, slots=True)

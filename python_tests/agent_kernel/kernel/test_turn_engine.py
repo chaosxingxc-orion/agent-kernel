@@ -290,7 +290,7 @@ def test_turn_engine_returns_dispatched_when_executor_acknowledged() -> None:
     assert admission.calls == 1
     assert result.dispatch_dedupe_key == "run-1:action-1:10"
     assert result.intent_commit_ref != ""
-    assert [event["state"] for event in result.emitted_events] == [
+    assert [event.state for event in result.emitted_events] == [
         "collecting",
         "intent_committed",
         "snapshot_built",
@@ -312,7 +312,7 @@ def test_turn_engine_does_not_emit_legacy_fallback_state_on_admit_path() -> None
     result = asyncio.run(turn_engine.run_turn(_build_turn_input(), _build_action()))
 
     assert all(
-        event.get("state") != "admission_legacy_check_fallback"
+        event.state != "admission_legacy_check_fallback"
         for event in result.emitted_events
     )
 
@@ -328,18 +328,18 @@ def test_turn_engine_emits_legacy_fallback_state_when_only_check_is_available() 
 
     result = asyncio.run(turn_engine.run_turn(_build_turn_input(), _build_action()))
 
-    emitted_states = [event["state"] for event in result.emitted_events]
+    emitted_states = [event.state for event in result.emitted_events]
     assert "admission_legacy_check_fallback" in emitted_states
     assert emitted_states.index("admission_legacy_check_fallback") < emitted_states.index(
         "admission_checked"
     )
     fallback_event = next(
         event for event in result.emitted_events
-        if event.get("state") == "admission_legacy_check_fallback"
+        if event.state == "admission_legacy_check_fallback"
     )
-    assert fallback_event["severity"] == "warning"
-    assert fallback_event["deprecation_phase"] == "soft"
-    assert fallback_event["target_removal_version"] == "0.2"
+    assert fallback_event.metadata["severity"] == "warning"
+    assert fallback_event.metadata["deprecation_phase"] == "soft"
+    assert fallback_event.metadata["target_removal_version"] == "0.2"
 
 
 def test_turn_engine_prefers_admit_when_admit_and_check_both_exist() -> None:
@@ -358,7 +358,7 @@ def test_turn_engine_prefers_admit_when_admit_and_check_both_exist() -> None:
     assert admission.admit_calls == 1
     assert admission.check_calls == 0
     assert all(
-        event.get("state") != "admission_legacy_check_fallback"
+        event.state != "admission_legacy_check_fallback"
         for event in result.emitted_events
     )
 
@@ -446,7 +446,7 @@ def test_turn_engine_degrades_when_dedupe_store_unavailable_for_idempotent_write
 
     assert result.state == "dispatch_acknowledged"
     assert result.outcome_kind == "dispatched"
-    assert any(event.get("state") == "dedupe_degraded" for event in result.emitted_events)
+    assert any(event.state == "dedupe_degraded" for event in result.emitted_events)
     assert executor.envelopes[0].effect_scope == "compensatable_write"
 
 
