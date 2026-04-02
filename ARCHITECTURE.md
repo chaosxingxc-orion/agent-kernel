@@ -1,466 +1,532 @@
-# agent-kernel 完整架构图
+# agent-kernel 完整架构设计
 
-> **0.1 Baseline** — 六权威生命周期协议 · Temporal 持久执行基底 · 单系统运行时
+> **0.1 Baseline + 演进路线图**
+>
+> 标注说明：**✓ 已实现** | **○ 待实现**
 >
 > 测试覆盖：6 235 通过（2026-04-03）
 
 ---
 
-## 全局架构
+## 一、总体分层
 
 ```
-╔══════════════════════════════════════════════════════════════════════════════════════╗
-║  PLATFORM LAYER  （平台层 — 内核不拥有，通过 Protocol 边界交互）                          ║
-║                                                                                      ║
-║  agent-core Runner │ REST / gRPC Gateway │ Scheduler │ Human Review UI              ║
-║                                                                                      ║
-║  ┌───────────────────────────────────────────────────────────────────────────────┐   ║
-║  │  EventExportPort  （进化层 — 平台拥有，内核不依赖）                               │   ║
-║  │                                                                               │   ║
-║  │  InMemoryRunTraceStore ← dev / test                                           │   ║
-║  │  OTLPRunTraceExporter  ← Jaeger / Honeycomb / Datadog (opentelemetry-api)     │   ║
-║  │  <custom>              ← Kafka / S3 / Redis Streams                           │   ║
-║  │                                                                               │   ║
-║  │  每个 ActionCommit 写入后异步 fire-and-forget 导出；导出失败不阻塞内核执行           │   ║
-║  └───────────────────────────────────────────────────────────────────────────────┘   ║
-╚══════════════════════════════╦═════════════════════════════════════════════════════╝
-                               ║  StartRunRequest / SignalRunRequest / QueryRunRequest
-                               ║  (frozen DTO — 无平台类型泄漏)
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  PLATFORM LAYER（平台层）                                                     ║
+║                                                                              ║
+║  agent-core Runner │ REST/gRPC Gateway │ Scheduler │ Human Review UI        ║
+║                                                                              ║
+║  ┌──────────────────────────────────────────────────────────────────────┐   ║
+║  │  EventExportPort  ✓（进化层：平台拥有，内核不依赖）                      │   ║
+║  │  InMemoryRunTraceStore ✓  │  OTLPRunTraceExporter ✓  │  <Kafka/S3> ○  │   ║
+║  └──────────────────────────────────────────────────────────────────────┘   ║
+╚══════════════════════════════╦═══════════════════════════════════════════════╝
+                               ║ StartRunRequest / SignalRunRequest (frozen DTO)
                                ▼
-╔══════════════════════════════════════════════════════════════════════════════════════╗
-║  KERNEL BOUNDARY                                                                     ║
-║                                                                                      ║
-║  ┌──────────────────────────────────────────────────────────────────────────────┐   ║
-║  │  KernelFacade  ◄── 唯一允许的平台入口；platform 层不得直接访问任何内核组件          │   ║
-║  │                                                                              │   ║
-║  │  start_run() / signal_run() / cancel_run() / query_run()                    │   ║
-║  │  resume_run() / spawn_child() / stream_events() / query_dashboard()         │   ║
-║  └────────────────────────────────┬─────────────────────────────────────────────┘   ║
-║                                   │                                                  ║
-║  ┌────────────────────────────────▼─────────────────────────────────────────────┐   ║
-║  │  KernelRuntime  （单系统入口）                                                   │   ║
-║  │                                                                              │   ║
-║  │  async with await KernelRuntime.start(config) as kernel:                    │   ║
-║  │      ├── TemporalSDKWorkflowGateway  ─── Temporal 抽象层（可替换）              │   ║
-║  │      ├── KernelHealthProbe  ─────────── K8s liveness / readiness             │   ║
-║  │      ├── worker_task  ────────────────── asyncio background task（内核拥有）   │   ║
-║  │      │       └── done_callback ──────── 失败自动传播，不无声吞掉               │   ║
-║  │      └── RunActorDependencyBundle  ──── 共享服务实例（event_log 唯一来源）      │   ║
-║  │                                                                              │   ║
-║  │  KernelRuntimeConfig 可选项：                                                  │   ║
-║  │      event_export_port   ← EventExportPort 实现（进化层导出）                   │   ║
-║  │      observability_hook  ← ObservabilityHook 实现（FSM 转换监控）              │   ║
-║  │      event_log_backend   ← "in_memory" | "sqlite"                           │   ║
-║  │      strict_mode_enabled ← 强制 capability_snapshot_input 校验               │   ║
-║  └────────────────────────────────┬─────────────────────────────────────────────┘   ║
-╚══════════════════════════════════╦═════════════════════════════════════════════════╝
-                                   ║ start_workflow / signal_workflow / query_projection
-                                   ▼
-╔══════════════════════════════════════════════════════════════════════════════════════╗
-║  TEMPORAL SERVER  （持久执行基底 — 内核 substrate，不是 business truth）                ║
-║                                                                                      ║
-║  Workflow History DB │ Task Queues │ Timers │ Signal Delivery │ Replay Engine         ║
-╚══════════════════════════════════╦═════════════════════════════════════════════════╝
-                                   ║ worker polls → dispatch workflow tasks
-                  ┌────────────────╩─────────────────┐
-                  │                                   │
-           Run A  ▼                            Run B  ▼         ··· Run N
-╔════════════════════════════╗   ╔════════════════════════════╗
-║  RunActorWorkflow          ║   ║  RunActorWorkflow          ║    并行运行，
-║  Authority 1: LIFECYCLE    ║   ║  Authority 1: LIFECYCLE    ║    每个 run 独立
-║                            ║   ║                            ║    workflow 实例
-║  run_id / projection       ║   ║  run_id / projection       ║
-║  pending_signals (queue)   ║   ║  pending_signals (queue)   ║
-║  signal dedup token set    ║   ║  signal dedup token set    ║
-║                            ║   ║                            ║
-║  [Temporal 保证单线程确定性  ║   ║  [Temporal 保证单线程确定性  ║
-║   执行，signal 串行处理]     ║   ║   执行，signal 串行处理]     ║
-╚════════════════╦═══════════╝   ╚════════════════════════════╝
-                 ║ each turn triggers TurnEngine
-                 ▼
-╔═══════════════════════════════════════════════════════════════════════════════════╗
-║  TurnEngine  （FSM 规范路径 — 内核唯一决策引擎）                                      ║
-║                                                                                   ║
-║  collecting ──► intent_committed ──► snapshot_built ──► admission_checked         ║
-║       │                                                        │                  ║
-║       │                                            ┌───────────┴────────────┐     ║
-║       │                                            │                        │     ║
-║       │                                     dispatch_blocked          dispatched  ║
-║       │                                            │                        │     ║
-║       │                                     completed_noop     dispatch_acknowledged  ║
-║       │                                                             │              ║
-║       │                                                      effect_recorded         ║
-║       │                                                  effect_unknown             ║
-║       │                                                         │                  ║
-║       │                                                 recovery_pending            ║
-║       └─────────────────────────────────────────────────────────┘                  ║
-║                                                                                   ║
-║  每个状态转换 → TurnStateEvent(state, reason, metadata) — 类型化，非 dict           ║
-║              → ObservabilityHook.on_turn_state_transition()                       ║
-╚═══════════════════════════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  KERNEL BOUNDARY                                                             ║
+║                                                                              ║
+║  KernelFacade ✓  ←── 唯一平台入口                                            ║
+║  KernelRuntime ✓ ←── 单系统入口，一次 start() 装配全部服务                    ║
+║       ├── TemporalSDKWorkflowGateway ✓                                       ║
+║       ├── KernelHealthProbe ✓ (liveness / readiness)                        ║
+║       ├── worker_task ✓ (asyncio background + done_callback)                ║
+║       └── RunActorDependencyBundle ✓ (共享服务实例)                           ║
+╚══════════════════════════════╦═══════════════════════════════════════════════╝
+                               ║
+                               ▼
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  COGNITIVE RUNTIME LAYER（认知运行时层）                                       ║
+║                                                                              ║
+║  ┌─────────────────────────────────────────────────────────────────────┐    ║
+║  │  ReasoningLoop ○（待实现）                                            │    ║
+║  │                                                                     │    ║
+║  │  ContextPort ○ ──► ContextWindow ○ ──► LLMGateway ○                │    ║
+║  │  （装配上下文）         （模型输入）       （推理基底）                  │    ║
+║  │                                              │                      │    ║
+║  │                                      ModelOutput ○                  │    ║
+║  │                                              │                      │    ║
+║  │                                      OutputParser ○                 │    ║
+║  │                                      （LLM输出 → Action[]）          │    ║
+║  └──────────────────────────┬──────────────────────────────────────────┘    ║
+║                             │ Action[] 进入执行管道                           ║
+║  ┌──────────────────────────▼──────────────────────────────────────────┐    ║
+║  │  ExecutionPlan Layer ○（待实现）                                      │    ║
+║  │                                                                     │    ║
+║  │  SequentialPlan ○  │  ParallelPlan ○  │  PlanExecutor ○            │    ║
+║  │  （串行，当前已支持）    （并行派发+聚合）    （计划解释执行器）              │    ║
+║  └──────────────────────────┬──────────────────────────────────────────┘    ║
+║                             │                                                ║
+╚══════════════════════════════╦═══════════════════════════════════════════════╝
+                               ║
+                               ▼
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  TEMPORAL SUBSTRATE（持久执行基底）                                            ║
+║                                                                              ║
+║  Temporal Server: Workflow History │ Task Queues │ Timers │ Replay Engine   ║
+╚══════════════════════════════╦═══════════════════════════════════════════════╝
+                               ║
+              ┌────────────────╩──────────────────┐
+        Run A ▼                             Run B  ▼   ··· Run N
+╔══════════════════════════╗  ╔══════════════════════════╗
+║  RunActorWorkflow ✓      ║  ║  RunActorWorkflow ✓      ║
+║  Authority 1: LIFECYCLE  ║  ║  Authority 1: LIFECYCLE  ║
+║                          ║  ║                          ║
+║  TurnEngine FSM ✓        ║  ║  TurnEngine FSM ✓        ║
+║  （当前：串行单动作）       ║  ║                          ║
+╚══════════════╦═══════════╝  ╚══════════════════════════╝
+               ║
+               ▼
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  SOUTHBOUND SUBSTRATE LAYER（南向基底层）                                      ║
+║                                                                              ║
+║  TemporalActivityGateway ✓                                                   ║
+║    ├── execute_tool(ToolActivityInput) ✓                                    ║
+║    ├── execute_mcp(MCPActivityInput) ✓                                      ║
+║    ├── execute_verification(...) ✓                                          ║
+║    ├── execute_reconciliation(...) ✓                                        ║
+║    ├── execute_inference(InferenceActivityInput) ○  ← LLM 推理 Activity     ║
+║    └── execute_skill_script(ScriptActivityInput) ○  ← 脚本执行 Activity     ║
+║                                                                              ║
+║  [Activity 边界：持久性在此保证]                                               ║
+║                  │                            │                              ║
+║         ┌────────▼────────┐         ┌─────────▼────────┐                   ║
+║         │  LLMGateway ○   │         │ ScriptRuntime ○  │                   ║
+║         │  (Protocol)     │         │ (Protocol)       │                   ║
+║         │                 │         │                  │                   ║
+║         │ infer()         │         │ execute_script() │                   ║
+║         │ count_tokens()  │         │ validate_script()│                   ║
+║         │ stream_infer()  │         │                  │                   ║
+║         │                 │         │ host_kind 路由：  │                   ║
+║         │ 职责：           │         │ local_process    │                   ║
+║         │ provider 路由   │         │ in_process_python│                   ║
+║         │ token 预算执行  │         │ remote_service   │                   ║
+║         │ rate limit 处理 │         └──────────────────┘                   ║
+║         │ 响应格式归一化   │                                                  ║
+║         └────────┬────────┘                                                 ║
+║                  │                                                           ║
+║         Provider SDK (○ 待实现)                                              ║
+║         OpenAI │ Anthropic │ Google │ Local (Ollama/vLLM)                  ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
 ---
 
-## 六权威详细结构
+## 二、TurnEngine FSM：当前与目标状态
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          六权威职责分离                                        │
-│                                                                             │
-│  Authority 2              Authority 3             Authority 4               │
-│  ┌─────────────────┐     ┌──────────────────┐    ┌──────────────────────┐  │
-│  │ RuntimeEventLog │     │ DecisionProjection│    │ DispatchAdmission    │  │
-│  │                 │◄────│ Service           │    │ Service              │  │
-│  │ append_commit() │     │                  │    │                      │  │
-│  │ load()          │     │ catch_up()        │    │ admit(action, snap)  │  │
-│  │                 │     │ readiness()       │    │  ├─ approval_state   │  │
-│  │ [event truth]   │     │ get()             │    │  │  constraint check  │  │
-│  │ append-only,    │     │                  │    │  ├─ permission_mode   │  │
-│  │ never mutated   │     │ [projection truth]│    │  │  readonly gate     │  │
-│  │                 │     │ replays:          │    │  └─ peer_run_bindings│  │
-│  │ Backends:       │     │  authoritative_   │    │     whitelist        │  │
-│  │  InMemory(PoC)  │     │  fact +           │    │                      │  │
-│  │  SQLite(prod)   │     │  derived_         │    │ → AdmissionResult    │  │
-│  │                 │     │  replayable       │    │   (reason_code       │  │
-│  │ EventExporting  │     │  (never           │    │    Literal 7 values) │  │
-│  │  Wrapper:       │     │  derived_         │    └──────────────────────┘  │
-│  │  fire-and-forget│     │  diagnostic)      │                              │
-│  │  export after   │     │                  │                              │
-│  │  each commit    │     │ [raw inner log    │                              │
-│  │  (platform-side)│     │  bypasses wrapper]│                              │
-│  └─────────────────┘     └──────────────────┘                              │
-│                                                                             │
-│                    ┌────────────────────────────────┐                      │
-│                    │         DedupeStore             │                      │
-│                    │    (at-most-once dispatch gate) │                      │
-│                    │                                 │                      │
-│                    │  reserve → dispatched →         │                      │
-│                    │  acknowledged / unknown_effect  │                      │
-│                    │                                 │                      │
-│                    │  Backends: InMemory / SQLite    │                      │
-│                    │  [state machine — no reversals] │                      │
-│                    └────────────────┬────────────────┘                      │
-│                                     │ admitted + deduped                    │
-│                                     ▼                                       │
-│  Authority 5                                                                │
-│  ┌────────────────────────────────────────────────────────────────────┐    │
-│  │  ExecutorService   （host_kind × interaction_target 双维度路由）       │    │
-│  │                                                                    │    │
-│  │  host_kind（执行机制）           interaction_target（交互对象）          │    │
-│  │  ─────────────────────         ────────────────────────────────   │    │
-│  │  local_process                 agent_peer   ← 另一个智能体内核       │    │
-│  │  local_cli                     it_service   ← REST/gRPC/企业系统   │    │
-│  │  cli_process                   data_system  ← DB/向量库/数据湖      │    │
-│  │  in_process_python             tool_executor← MCP/函数调用/CLI      │    │
-│  │  remote_service                human_actor  ← 审批/反馈/上报        │    │
-│  │                                event_stream ← Kafka/pub-sub        │    │
-│  │  Backends: AsyncExecutorService(PoC) / ActivityBackedExecutor(prod)│    │
-│  └────────────────────────────────┬───────────────────────────────────┘    │
-│                                    │ effect_unknown / exception             │
-│                                    ▼                                        │
-│  Authority 6                                                                │
-│  ┌───────────────────────────────────────────────────────────────────┐     │
-│  │  RecoveryGateService + CompensationRegistry                        │     │
-│  │                                                                   │     │
-│  │  Input: FailureEnvelope                                           │     │
-│  │    ├── failed_stage: admission/execution/verification/...         │     │
-│  │    ├── failure_class: deterministic/transient/policy/side_effect  │     │
-│  │    ├── evidence_priority: external_ack > evidence_ref > inference │     │
-│  │    └── retryability: retryable / non_retryable / unknown          │     │
-│  │                                                                   │     │
-│  │  Output: RecoveryDecision                                         │     │
-│  │    ├── static_compensation  ─── CompensationRegistry 查找+执行     │     │
-│  │    │     └── 无 handler → 自动降级为 abort（不发出空补偿意图）         │     │
-│  │    ├── human_escalation     ─── escalation_channel_ref            │     │
-│  │    └── abort                ─── run enters terminal state         │     │
-│  │                                                                   │     │
-│  │  CompensationRegistry:                                            │     │
-│  │    register(effect_class, async_fn) / @handler decorator          │     │
-│  │    execute(action) → bool (True=handled, False=no handler)        │     │
-│  │                                                                   │     │
-│  │  Persists to: RecoveryOutcomeStore (immutable once written)       │     │
-│  └───────────────────────────────────────────────────────────────────┘     │
-└─────────────────────────────────────────────────────────────────────────────┘
+【当前已实现 ✓】串行单动作路径：
+
+collecting ──► intent_committed ──► snapshot_built ──► admission_checked
+    │                                                         │
+    │                                             ┌───────────┴────────────┐
+    │                                             │                        │
+    │                                      dispatch_blocked          dispatched
+    │                                             │                        │
+    │                                      completed_noop    dispatch_acknowledged
+    │                                                              │
+    │                                                      effect_recorded
+    │                                                      effect_unknown
+    │                                                           │
+    │                                                   recovery_pending
+    └───────────────────────────────────────────────────────────┘
+
+【待实现 ○】新增状态：
+
+推理路径（ReasoningLoop 集成后）：
+  reasoning ○ ──► intent_committed（替代外部直接注入 Action）
+
+并行执行路径：
+  parallel_dispatched ○     ← 并行组已派发，等待聚合
+  parallel_joined ○         ← barrier 完成，全部成功
+  parallel_partial_failure ○ ← 部分分支失败，收集证据
+
+模型反思路径：
+  reflecting ○              ← 接收故障证据，模型推理反思
+  （反思完成后重入 intent_committed，带修正后的 Action）
 ```
 
 ---
 
-## 两层持久化设计
+## 三、六权威详细结构（已实现 ✓）
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         TWO-LAYER PERSISTENCE                               │
-│                                                                             │
-│  操作层（内核拥有）                     进化层（平台拥有）                        │
-│  ─────────────────────────           ──────────────────────────────────    │
-│  目标：正确性 · TTL 有界              目标：分析 · 训练数据 · 跨 run 观测         │
-│                                                                             │
-│  SQLiteKernelRuntimeEventLog         EventExportPort（Protocol）             │
-│  SQLiteDedupeStore                   │                                     │
-│  SQLiteTurnIntentLog                 ├── InMemoryRunTraceStore (dev/test)   │
-│  SQLiteRecoveryOutcomeStore          ├── OTLPRunTraceExporter (OTel spans)  │
-│                                      └── <custom: Kafka / S3 / PostgreSQL>  │
-│  [process-restart 幂等]                                                     │
-│                                      RunTrace 视图字段：                     │
-│  EventExportingEventLog              ├── turns[]  ← TurnTrace 列表          │
-│  （装饰器 wrapper）                   ├── lifecycle_event_types[]            │
-│       │                              ├── failure_count                      │
-│       ├── inner.append() ← 操作层     ├── is_terminal / terminal_state      │
-│       └── asyncio.create_task()      └── first_commit_at / last_commit_at   │
-│           → safe_export()                                                   │
-│           (timeout + exception isolated)                                    │
-│                                                                             │
-│  Projection 始终读 base_event_log（raw inner），永不读 wrapper，              │
-│  确保导出失败不影响投影一致性                                                  │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 可观测性层
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           OBSERVABILITY LAYER                               │
-│                                                                             │
-│  同步 Hook（热路径，FSM 转换触发）         异步导出（火-忘，ActionCommit 触发）   │
-│  ─────────────────────────────────     ───────────────────────────────────  │
-│                                                                             │
-│  ObservabilityHook Protocol             EventExportPort Protocol            │
-│        │                                      │                             │
-│        ├── LoggingObservabilityHook           ├── InMemoryRunTraceStore      │
-│        ├── OtelObservabilityHook              └── OTLPRunTraceExporter       │
-│        │   (turn_transition span                  span 结构：                │
-│        │    run_transition span)                   kernel.turn / kernel.lifecycle  │
-│        ├── RunHeartbeatMonitor                    attributes: run_id / commit_id   │
-│        └── CompositeObservabilityHook             / action_type / effect_class     │
-│                                                   / interaction_target              │
-│  每次 FSM 转换:                                   events: 每个 RuntimeEvent        │
-│    TurnStateEvent(state, reason, metadata)        含 event_authority / offset       │
-│    → ObservabilityHook.on_turn_state_transition() │                             │
-│                                                  opentelemetry-api 可选依赖；     │
-│  KernelSelfHeartbeat.refresh()                   缺失时实例化抛 ImportError        │
-│    ├── event_log_check()                                                    │
-│    └── projection_check()                                                   │
-│          └──► KernelHealthProbe.liveness() / readiness()                    │
-│                   → {"status": "ok/degraded/unhealthy", "checks": {...}}    │
-│                   [平台层挂载到 /healthz / /readyz]                           │
-│                                                                             │
-│  RunHeartbeatMonitor.watchdog_once(gateway)                                 │
-│    检测无心跳 run → gateway.signal_workflow("heartbeat_timeout")             │
-│    → TurnEngine → Recovery 闭环                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                            六权威职责分离                                   │
+│                                                                          │
+│  Authority 2 ✓              Authority 3 ✓          Authority 4 ✓         │
+│  ┌─────────────────┐       ┌──────────────────┐   ┌──────────────────┐  │
+│  │ RuntimeEventLog │       │ DecisionProjection│   │ DispatchAdmission│  │
+│  │                 │◄──────│ Service           │   │ Service          │  │
+│  │ append_commit() │       │ catch_up()        │   │ admit(action,    │  │
+│  │ load()          │       │ readiness()       │   │   snapshot)      │  │
+│  │                 │       │ get()             │   │ approval_state   │  │
+│  │ Backends:       │       │                  │   │ permission_mode  │  │
+│  │  InMemory ✓     │       │ replays:          │   │ peer_run_bindings│  │
+│  │  SQLite ✓       │       │  authoritative_   │   └──────────────────┘  │
+│  │                 │       │  fact +           │                         │
+│  │ EventExporting  │       │  derived_replayable│                         │
+│  │ Wrapper ✓       │       │  (skip diagnostic)│                         │
+│  └─────────────────┘       └──────────────────┘                         │
+│                                                                          │
+│              ┌────────────────────────────────────┐                     │
+│              │  DedupeStore ✓ (at-most-once)       │                     │
+│              │  reserved → dispatched →            │                     │
+│              │  acknowledged / unknown_effect      │                     │
+│              │  InMemory ✓ │ SQLite ✓              │                     │
+│              └──────────────────┬─────────────────┘                     │
+│                                 │                                        │
+│  Authority 5 ✓                  ▼                                        │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  ExecutorService（host_kind × interaction_target 双维路由）         │   │
+│  │                                                                  │   │
+│  │  host_kind（执行机制）✓        interaction_target（交互对象）✓      │   │
+│  │  local_process                 agent_peer   ← 另一个智能体内核     │   │
+│  │  local_cli                     it_service   ← REST/gRPC/企业系统  │   │
+│  │  cli_process                   data_system  ← DB/向量库/数据湖    │   │
+│  │  in_process_python             tool_executor← MCP/函数调用/CLI    │   │
+│  │  remote_service                human_actor  ← 审批/反馈/上报      │   │
+│  │  [llm_inference ○]             event_stream ← Kafka/pub-sub      │   │
+│  └──────────────────────────────────┬───────────────────────────────┘   │
+│                                     │ effect_unknown / exception         │
+│                                     ▼                                    │
+│  Authority 6 ✓ + ○                                                       │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  RecoveryGateService + CompensationRegistry ✓                     │   │
+│  │                                                                  │   │
+│  │  RecoveryMode：                                                   │   │
+│  │    static_compensation ✓ ─── CompensationRegistry 查找+执行       │   │
+│  │    human_escalation ✓    ─── escalation_channel_ref              │   │
+│  │    abort ✓               ─── run 进入终态                         │   │
+│  │    reflect_and_retry ○   ─── 故障证据→模型反思→重新生成（待实现）    │   │
+│  │                                                                  │   │
+│  │  ReflectionPolicy ○：max_rounds / reflectable_failure_kinds      │   │
+│  │  ScriptFailureEvidence ○：结构化故障证据供模型理解                  │   │
+│  │  ReflectionContextBuilder ○：故障→ContextWindow 转换              │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 协议扩展层
+## 四、认知运行时层（待实现 ○）
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        PROTOCOL EXTENSION LAYER                             │
-│                                                                             │
-│  所有跨层依赖通过 typing.Protocol 倒置，替换任何实现无需改动内核逻辑：              │
-│                                                                             │
-│  Contract Boundary              Kernel Impl (PoC)   Production Path        │
-│  ──────────────────────────     ─────────────────   ─────────────────────  │
-│  KernelRuntimeEventLog      ←── InMemory           SQLite / PostgreSQL     │
-│  DecisionProjectionService  ←── InMemory           Redis / Postgres read   │
-│  DispatchAdmissionService   ←── Static             Policy Engine / OPA     │
-│  ExecutorService            ←── Async / Activity   Temporal Activity Pool  │
-│  RecoveryGateService        ←── PlannedGate        ML Planner / Rule DSL   │
-│  RecoveryOutcomeStore       ←── InMemory           SQLite / Postgres        │
-│  DedupeStorePort            ←── InMemory           SQLite / Redis           │
-│  TurnIntentLog              ←── InMemory           SQLite                  │
-│  TemporalWorkflowGateway    ←── TemporalSDK        Mock / Test harness     │
-│  ObservabilityHook          ←── Logging / OTel     Composite / Custom      │
-│  EventExportPort            ←── InMemoryRunTrace   OTLPExporter / Kafka    │
-│                                                                             │
-│  Registry Extension Points:                                                 │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │  KERNEL_EVENT_REGISTRY          → register custom run.* event types  │  │
-│  │  KERNEL_RECOVERY_MODE_REGISTRY  → register custom recovery modes     │  │
-│  │  CompensationRegistry           → register effect_class → async_fn   │  │
-│  │  register_event_transition()    → register FSM transitions           │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-│                                                                             │
-│  CapabilitySnapshot V2 合约边界:                                              │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │  model_ref + model_content_hash    ← 防止模型静默替换                    │  │
-│  │  memory_binding_ref + content_hash ← 防止记忆污染                        │  │
-│  │  session_ref (via SessionPort)     ← 会话绑定，内核不拥有存储              │  │
-│  │  peer_run_bindings[]               ← 智能体间信号授权白名单               │  │
-│  │  snapshot_hash = SHA256(all fields) ← 防篡改，schema_version="2"        │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-│                                                                             │
-│  Universal Interaction Contract (Action.interaction_target):                │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │  agent_peer    ← 另一个智能体内核（A2A 或任何对等协议）                    │  │
-│  │  it_service    ← REST / gRPC / GraphQL / 企业 IT 系统                  │  │
-│  │  data_system   ← 数据库 / 向量库 / 数据湖 / 流平台                       │  │
-│  │  tool_executor ← MCP / 函数调用 / CLI / 沙箱 / 代码执行                 │  │
-│  │  human_actor   ← 审批门 / 反馈回路 / 人工上报                           │  │
-│  │  event_stream  ← Kafka / Redis Streams / pub-sub / 消息队列            │  │
-│  │                                                                      │  │
-│  │  与 host_kind 正交：host_kind 描述执行机制，interaction_target 描述交互对象 │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│  COGNITIVE RUNTIME LAYER                                                  │
+│                                                                          │
+│  上下文工程质量 → 大模型输出质量上界                                         │
+│  大模型输出质量 ← f(上下文质量, 模型自身能力)   ← 两者不可互相推导            │
+│                                                                          │
+│  ContextPort ○（Protocol）                                                │
+│       │                                                                  │
+│       │  assemble(run_id, snapshot, history) → ContextWindow ○          │
+│       │                                                                  │
+│       │  ContextWindow 组成：                                             │
+│       │    ├── 系统指令（来自 capability_scope + policy）                  │
+│       │    ├── 工具定义（来自 tool_bindings，已通过 Admission 预检）        │
+│       │    ├── 技能定义（来自 skill_bindings，含脚本清单）                  │
+│       │    ├── 对话历史（来自 EventLog，按 token 预算裁剪）                 │
+│       │    ├── 当前 run 状态（来自 ProjectionService）                     │
+│       │    ├── 记忆绑定（来自 memory_binding_ref，平台层提供）              │
+│       │    └── 恢复上下文（来自 RecoveryOutcomeStore，如有）               │
+│       │                                                                  │
+│       ▼                                                                  │
+│  LLMGateway ○（Protocol，在 Temporal Activity 内部）                      │
+│       │                                                                  │
+│       │  infer(context, config, idempotency_key) → ModelOutput ○        │
+│       │  count_tokens(context, model_ref) → int                         │
+│       │  stream_infer(context, config) → AsyncIterator[Chunk]           │
+│       │                                                                  │
+│       │  InferenceConfig ○：                                             │
+│       │    model_ref + TokenBudget ○                                    │
+│       │    TokenBudget：max_input / max_output / reasoning_budget       │
+│       │    temperature / stop_sequences / turn_kind_overrides ○        │
+│       │    （预算按 turn 类型可配置：推理轮 vs 工具选择轮预算差异极大）       │
+│       │                                                                  │
+│       ▼                                                                  │
+│  ModelOutput ○ → OutputParser ○（Protocol）                              │
+│                       │                                                  │
+│                       │  parse(output, snapshot) → list[Action]         │
+│                       │  或 → ExecutionPlan ○（含并行组）                 │
+│                       │                                                  │
+│                       ▼                                                  │
+│                  Action[] 进入 TurnEngine / PlanExecutor                  │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 并行驱动模型
+## 五、并行执行模型（待实现 ○）
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       PARALLEL EXECUTION MODEL                              │
-│                                                                             │
-│  单个 KernelRuntime / 单个 Temporal Worker / 无限并行 run                      │
-│                                                                             │
-│  KernelRuntime.start(config)                                                │
-│       └── TemporalKernelWorker (asyncio task, polls task queue)             │
-│                │                                                            │
-│         ┌──────┴──────────────────────────────────┐                        │
-│         │                                         │                        │
-│    run-A workflow                           run-B workflow  ... run-N       │
-│    (independent asyncio task)               (independent asyncio task)     │
-│         │                                         │                        │
-│    TurnEngine-A                             TurnEngine-B                   │
-│         │                                         │                        │
-│    shared event_log ◄───────────────────────────► shared event_log        │
-│    (InMemory: append 无 await = asyncio 原子)                                │
-│    (SQLite: 独立 run_id key，写不互扰)                                         │
-│                                                                             │
-│  Parent / Child 生命周期协议:                                                  │
-│                                                                             │
-│  parent-run                              child-run                         │
-│      │──── signal child_spawned ──────────────────────────────►            │
-│      │     (projection: active_child_runs += child_id)                     │
-│      │                                                         │           │
-│      │◄─── signal child_completed ────────────────────────────┘           │
-│      │     (projection: active_child_runs -= child_id)                     │
-│      │                                                                     │
-│      │  on terminal: _terminate_active_children()                          │
-│      │     └── signal cancel_requested → each active child                 │
-│                                                                             │
-│  PeerSignal 授权路径:                                                         │
-│                                                                             │
-│  run-src ──► peer_signal action ──► Admission.admit()                      │
-│               input_json.target_run_id        │                            │
-│                                 checks: target ∈ peer_run_bindings         │
-│                                               └──► gateway.signal_workflow()│
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 信号路由图
-
-```
-外部信号类型             内核事件类型                    生命周期效果
-─────────────            ─────────────────────────      ────────────────────────
-callback            ──►  signal.callback                唤醒 actor，推进 TurnEngine
-cancel_requested    ──►  run.cancel_requested           请求取消（projection 决策）
-hard_failure        ──►  run.recovery_aborted           强制 Recovery 中止路径
-timeout             ──►  run.waiting_external           标记等待外部
-recovery_succeeded  ──►  run.recovery_succeeded         Recovery 完成，ready
-recovery_aborted    ──►  run.recovery_aborted           Recovery 中止，aborted
-heartbeat_timeout   ──►  run.recovering                 心跳看门狗 → Recovery 路径
-request_human_input ──►  run.waiting_human_input        人工审批门（24h 超时）
-human_input_received──►  run.ready                      人工输入接收，恢复 ready
-resume_from_snapshot──►  run.resume_requested           从快照恢复
-child_spawned       ──►  signal.child_spawned           父 run 记录子 run
-child_completed     ──►  signal.child_completed         子 run 完成 → 父 run
+┌──────────────────────────────────────────────────────────────────────────┐
+│  PARALLEL EXECUTION MODEL                                                 │
+│                                                                          │
+│  ExecutionPlan ○                                                          │
+│    ├── SequentialPlan ○：steps: list[Action]  （当前 TurnEngine 已支持）   │
+│    └── ParallelPlan ○：groups: list[ParallelGroup]                        │
+│                                                                          │
+│  ParallelGroup ○：                                                        │
+│    actions: list[Action]                                                 │
+│    join_strategy: "all" | "any" | "n_of_m"                              │
+│    n: int | None                                                         │
+│    timeout_ms: int | None                                                │
+│                                                                          │
+│  PlanExecutor ○（在 Temporal Workflow 层）：                               │
+│                                                                          │
+│    SequentialPlan → 现有 TurnEngine 逐步执行                              │
+│                                                                          │
+│    ParallelPlan →                                                         │
+│      asyncio.gather(                                                     │
+│          execute_activity(action_a),  ← Temporal 原生并行                │
+│          execute_activity(action_b),                                     │
+│          execute_activity(action_c),                                     │
+│      )                                                                   │
+│                                                                          │
+│    并行子智能体 →                                                          │
+│      asyncio.gather(                                                     │
+│          start_child_workflow(skill_a),  ← 现有 SpawnChildRunRequest    │
+│          start_child_workflow(skill_b),                                  │
+│          start_child_workflow(skill_c),                                  │
+│      ) + barrier                                                         │
+│                                                                          │
+│  BranchMonitor ○（每分支独立心跳）：                                        │
+│    每个 Activity / Child Workflow 有独立心跳检测                           │
+│    脚本运行在子进程：wrapper 每 N 秒调 activity.heartbeat()                │
+│    子进程无输出 + 耗尽超时预算 → suspected_cause = "infinite_loop"         │
+│                                                                          │
+│  BranchResult ○ / BranchFailure ○：                                      │
+│    每个分支独立结果收集                                                    │
+│    join 点汇聚：成功结果合并 + 失败证据分类                                 │
+│                                                                          │
+│  幂等保证：                                                                │
+│    join_strategy = "all" → 组级幂等键（any 失败则整组进 Recovery）          │
+│    join_strategy = "any" → 每 Action 独立幂等键（已完成的不重复执行）        │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 关键不变量
+## 六、故障恢复 + 模型反思闭环（部分待实现）
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  KERNEL INVARIANTS (代码级约束，不可绕过)                                       │
-│                                                                             │
-│  1. 单一规范路径                                                               │
-│     Platform → KernelFacade → TemporalGateway → RunActorWorkflow            │
-│     → TurnEngine → Admission → Executor → Recovery                          │
-│     无任何隐含短路路径                                                          │
-│                                                                             │
-│  2. 事件真相不可变                                                              │
-│     RuntimeEventLog: append-only，commit_offset 单调递增                      │
-│     authoritative_fact + derived_replayable 参与 Recovery replay            │
-│     derived_diagnostic 永不参与决策路径（静默跳过，不报错）                      │
-│                                                                             │
-│  3. Admission 是外部副作用的唯一门                                               │
-│     所有 effect_class != "read_only" 的动作必须经过 admit()                    │
-│     approval_state ∈ {pending/denied/revoked/expired} → 强制 readonly         │
-│                                                                             │
-│  4. At-most-once dispatch (DedupeStore 状态机)                               │
-│     reserved → dispatched → acknowledged / unknown_effect                  │
-│     无逆转，无重入                                                             │
-│                                                                             │
-│  5. Recovery 不写入 EventLog                                                 │
-│     RecoveryOutcomeStore 独立存储，不污染事件真相                                │
-│     recovery.plan_selected 作为 derived_diagnostic 记录决策审计               │
-│                                                                             │
-│  6. Temporal 是 substrate，不是 business truth                                │
-│     投影真相来自 RuntimeEventLog replay                                        │
-│     Temporal query 仅返回内存缓存的 _last_projection                            │
-│                                                                             │
-│  7. 内核不拥有平台关切                                                          │
-│     模型实现 / 记忆检索 / 会话存储 / 消息路由 → 平台层                             │
-│     内核仅 CONTRACT with 引用 + hash（防静默替换）                               │
-│                                                                             │
-│  8. DTO 不可变                                                               │
-│     所有内核 DTO: @dataclass(frozen=True, slots=True)                         │
-│     TurnStateEvent 替代 dict[str, Any] — 类型化 FSM 事件                      │
-│                                                                             │
-│  9. 进化层导出不阻塞操作层                                                       │
-│     EventExportingEventLog: fire-and-forget via asyncio.create_task()       │
-│     Projection 读 base_event_log（raw inner），不读 export wrapper            │
-│     导出超时/异常 → WARNING 日志，不影响 TurnEngine 执行路径                     │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│  FAULT RECOVERY + REFLECTION LOOP                                         │
+│                                                                          │
+│  【已实现 ✓】                                                              │
+│  static_compensation → CompensationRegistry.execute(action)             │
+│  human_escalation    → escalation_channel_ref                           │
+│  abort               → run 终态                                          │
+│  FailureEnvelope ✓ 证据优先链：external_ack > evidence_ref > inference   │
+│  RecoveryOutcomeStore ✓（独立存储，不污染 EventLog）                       │
+│  RunHeartbeatMonitor ✓（Run 级心跳）                                      │
+│                                                                          │
+│  【待实现 ○】reflect_and_retry 完整闭环：                                   │
+│                                                                          │
+│  脚本超时（死循环）检测：                                                   │
+│  Script Activity wrapper                                                 │
+│    └── 子进程运行 + 每 N 秒 activity.heartbeat()                          │
+│    └── 超时 → kill 子进程 → 构建 ScriptFailureEvidence ○                  │
+│              ├── failure_kind = "heartbeat_timeout"                      │
+│              ├── budget_consumed_ratio ≈ 1.0（死循环特征）                │
+│              ├── output_produced = False（无输出特征）                    │
+│              └── suspected_cause = "possible_infinite_loop"             │
+│                                                                          │
+│  ReflectionContextBuilder ○：                                            │
+│    ScriptFailureEvidence + 原始脚本 + 成功分支结果                         │
+│    → ContextWindow 增量（结构化给模型看）                                  │
+│                                                                          │
+│  ReflectionPolicy ○：                                                    │
+│    max_rounds: int = 3                                                  │
+│    reflection_timeout_ms: int                                           │
+│    reflectable_failure_kinds: {heartbeat_timeout, runtime_error, ...}  │
+│    non_reflectable_failure_kinds: {resource_exhausted, permission_denied}│
+│    escalate_on_exhaustion: bool                                         │
+│                                                                          │
+│  reflect_and_retry 执行流：                                               │
+│    parallel_partial_failure 事件                                         │
+│        ↓ RecoveryGate 决策：reflect_and_retry                            │
+│    ReflectionContextBuilder 装配上下文                                   │
+│        ↓ ReasoningLoop（模型接收故障证据推理）                              │
+│    模型输出：故障分析 + 修正脚本                                            │
+│        ↓ 新 Action（修正后脚本）重入六权威管道                              │
+│    成功 → 继续 │ 再次失败 → reflection_round + 1                          │
+│        ↓ round > max_rounds                                              │
+│    escalate_on_exhaustion=True  → human_escalation                      │
+│    escalate_on_exhaustion=False → abort                                  │
+│                                                                          │
+│  reflection_round 写入 TurnIntentLog ✓（重启后不丢失计数）                 │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 文件索引
+## 七、技能子系统（部分实现）
 
-| 文件 | 职责 |
-|------|------|
-| `kernel/contracts.py` | 所有 DTO、Protocol 接口、InteractionTarget、EffectClass |
-| `kernel/turn_engine.py` | TurnEngine FSM + TurnStateEvent 类型化事件 |
-| `kernel/minimal_runtime.py` | InMemory PoC 实现（测试 / 单进程用） |
-| `kernel/capability_snapshot.py` | SHA256 快照构建器 v2 |
-| `kernel/capability_snapshot_resolver.py` | approval_state 约束强制 |
-| `kernel/event_registry.py` | 25+ 内核事件类型目录 |
-| `kernel/dedupe_store.py` | 单调幂等状态机（5 值 HostKind） |
-| `kernel/failure_evidence.py` | FailureEnvelope 证据优先链 |
-| `kernel/event_export.py` | EventExportingEventLog · TurnTrace · RunTrace · InMemoryRunTraceStore |
-| `kernel/recovery/gate.py` | PlannedRecoveryGateService + CompensationRegistry 集成 |
-| `kernel/recovery/planner.py` | 确定性故障→恢复路由 |
-| `kernel/recovery/compensation_registry.py` | effect_class → async callable 映射 |
-| `kernel/persistence/sqlite_*.py` | SQLite 操作层（事件日志/幂等/恢复/意图） |
-| `substrate/temporal/run_actor_workflow.py` | Temporal 工作流（生命周期 shell） |
-| `substrate/temporal/gateway.py` | Temporal SDK 适配器 |
-| `substrate/temporal/worker.py` | Worker 启动 + SIGTERM/SIGINT 优雅关闭 |
-| `adapters/facade/kernel_facade.py` | 唯一允许的平台入口 |
-| `runtime/kernel_runtime.py` | 单系统 KernelRuntime + KernelRuntimeConfig |
-| `runtime/heartbeat.py` | RunHeartbeatMonitor + KernelSelfHeartbeat + HeartbeatWatchdog |
-| `runtime/health.py` | KernelHealthProbe（liveness/readiness） |
-| `runtime/observability_hooks.py` | OtelObservabilityHook + CompositeObservabilityHook |
-| `runtime/otel_export.py` | OTLPRunTraceExporter（ActionCommit → OTel spans） |
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│  SKILL SUBSYSTEM                                                          │
+│                                                                          │
+│  【已实现 ✓】                                                              │
+│  SkillDefinition ✓（skill_id / version / effect_class / tool_bindings）  │
+│  SkillRuntimeHost ✓（cli_process / in_process_python / remote_service）  │
+│  skill_bindings 在 CapabilitySnapshot ✓                                  │
+│  SpawnChildRunRequest ✓（Child Workflow 派发基础设施）                     │
+│  active_child_runs 追踪 ✓                                                │
+│                                                                          │
+│  【待实现 ○】技能完整驱动链路：                                             │
+│                                                                          │
+│  技能注入（平台→内核）：                                                    │
+│    技能定义通过 ContextPort 注入 ContextWindow（脚本清单、参数 schema）○    │
+│                                                                          │
+│  技能调用（模型决策）：                                                     │
+│    模型输出：Action(action_type="skill_call", skill_id=...) ○            │
+│    经过六权威管道：Admission 检查 skill_id ∈ skill_bindings               │
+│                                                                          │
+│  技能生命周期（内核治理）：                                                  │
+│    复杂技能 → SpawnChildRunRequest → Child RunActorWorkflow ✓            │
+│    原子技能 → execute_skill_script Activity ○                            │
+│                                                                          │
+│  技能内脚本执行（子 Run 模型驱动）：                                         │
+│    子 Run 的模型看到：技能目标 + 可用脚本列表 + 当前状态                    │
+│    模型输出：Action(action_type="script_execution", script_id=...) ○    │
+│    经过六权威管道 + ScriptRuntime ○ 路由到 host_kind 执行机制              │
+│                                                                          │
+│  串行 / 并行脚本：                                                         │
+│    串行 → 当前 TurnEngine 逐 Turn 执行 ✓                                  │
+│    并行 → PlanExecutor + ParallelGroup ○                                 │
+│    失败反思 → reflect_and_retry ○                                         │
+└──────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## PoC 已知限制（路线图）
+## 八、两层持久化（已实现 ✓）
 
-| 限制 | 当前状态 | 生产路径 |
-|---|---|---|
-| InMemory 服务不支持水平扩展 | PoC/单进程 | SQLite（单节点）→ PostgreSQL（分布式） |
-| InMemory Projection 缓存不持久化 | 重启后全量重放 | 持久化 Projection Store + 增量追赶 |
-| ObservabilityHook 同步调用 | 可能增加 turn 延迟 | 异步 hook + 内部队列缓冲 |
-| Recovery 无补偿动作库预置 | CompensationRegistry 框架就位 | 补充 effect_class → callable 映射 |
-| 多智能体协同无标准协议 | peer_run_bindings 提供钩子 | 实现 A2A 协议或自定义 agent_peer 路由 |
-| OTLPRunTraceExporter 无内置 Exporter | 需调用方配置 TracerProvider | 提供 OTLP gRPC / HTTP exporter 默认配置 |
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│  TWO-LAYER PERSISTENCE                                                    │
+│                                                                          │
+│  操作层（内核拥有）✓              进化层（平台拥有）✓                        │
+│  ─────────────────────           ──────────────────────────────────     │
+│  SQLiteKernelRuntimeEventLog     EventExportPort（Protocol）              │
+│  SQLiteDedupeStore               InMemoryRunTraceStore (dev/test)        │
+│  SQLiteTurnIntentLog             OTLPRunTraceExporter (OTel spans)       │
+│  SQLiteRecoveryOutcomeStore      <Kafka / S3 / PostgreSQL> ○             │
+│                                                                          │
+│  EventExportingEventLog（装饰器 wrapper）✓                                │
+│    inner.append() ← 操作层                                               │
+│    asyncio.create_task(_safe_export()) ← 火-忘导出                       │
+│                                                                          │
+│  Projection 始终读 base_event_log（raw inner），不读 wrapper ✓            │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 九、可观测性层（已实现 ✓）
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│  OBSERVABILITY LAYER                                                      │
+│                                                                          │
+│  同步 Hook（热路径）✓                   异步导出（火-忘）✓                  │
+│  ObservabilityHook Protocol            EventExportPort Protocol          │
+│    OtelObservabilityHook               OTLPRunTraceExporter              │
+│    LoggingObservabilityHook            InMemoryRunTraceStore             │
+│    CompositeObservabilityHook                                            │
+│    RunHeartbeatMonitor                 OTel Span 结构：                  │
+│                                          kernel.turn / kernel.lifecycle  │
+│  KernelHealthProbe ✓                     span attrs: run_id/action_type  │
+│    liveness() / readiness()              /effect_class/interaction_target│
+│    → /healthz / /readyz                  span events: 每个 RuntimeEvent  │
+│                                                                          │
+│  KernelSelfHeartbeat ✓                                                   │
+│    event_log_check() + projection_check()                               │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 十、协议扩展层（已实现 ✓）
+
+```
+Contract Boundary              Kernel Impl (PoC) ✓    Production Path
+──────────────────────────     ─────────────────────   ─────────────────────
+KernelRuntimeEventLog      ←── InMemory / SQLite       PostgreSQL
+DecisionProjectionService  ←── InMemory                Redis / Postgres read
+DispatchAdmissionService   ←── Static                  Policy Engine / OPA
+ExecutorService            ←── Async / Activity        Temporal Activity Pool
+RecoveryGateService        ←── PlannedGate             ML Planner / Rule DSL
+RecoveryOutcomeStore       ←── InMemory / SQLite        Postgres
+DedupeStorePort            ←── InMemory / SQLite        Redis
+TurnIntentLog              ←── InMemory / SQLite        SQLite
+TemporalWorkflowGateway    ←── TemporalSDK              Mock / Test harness
+ObservabilityHook          ←── Logging / OTel           Composite / Custom
+EventExportPort            ←── InMemoryRunTrace         OTLPExporter / Kafka
+LLMGateway ○               ←── （待实现）                OpenAI / Anthropic
+ScriptRuntime ○            ←── （待实现）                Sandbox / Python / Remote
+ContextPort ○              ←── （待实现）                Platform-specific
+OutputParser ○             ←── （待实现）                Tool-call / JSON mode
+
+Registry Extension Points ✓：
+  KERNEL_EVENT_REGISTRY          → custom run.* event types
+  KERNEL_RECOVERY_MODE_REGISTRY  → custom recovery modes
+  CompensationRegistry           → effect_class → async callable
+```
+
+---
+
+## 十一、关键不变量
+
+```
+1. ✓ 单一规范路径：Platform → KernelFacade → Temporal → RunActorWorkflow → TurnEngine
+2. ✓ 事件真相不可变：EventLog append-only，derived_diagnostic 不参与决策
+3. ✓ Admission 是副作用唯一门：approve_state 约束强制 readonly
+4. ✓ At-most-once dispatch：DedupeStore 单调状态机，无逆转
+5. ✓ Recovery 不写 EventLog：RecoveryOutcomeStore 独立存储
+6. ✓ Temporal 是 substrate：投影真相来自 EventLog replay
+7. ✓ DTO 不可变：frozen=True, slots=True
+8. ✓ 进化层不阻塞操作层：fire-and-forget，Projection 读 raw inner
+9. ○ 上下文工程不旁路：所有模型输入经 ContextPort，不允许平台直接拼 prompt 绕过内核
+10. ○ 模型推理是受治理的动作：LLM 调用有幂等键 / Token 预算 / Temporal Activity 边界
+11. ○ 反思轮次有上界：ReflectionPolicy.max_rounds 防止无限反思循环
+```
+
+---
+
+## 十二、已实现 vs 待实现全览
+
+| 模块 | 状态 | 所在文件 |
+|------|------|---------|
+| 六权威协议 | ✓ | `kernel/contracts.py` + 各实现 |
+| TurnEngine FSM（串行） | ✓ | `kernel/turn_engine.py` |
+| KernelRuntime 单系统入口 | ✓ | `runtime/kernel_runtime.py` |
+| KernelFacade 平台入口 | ✓ | `adapters/facade/kernel_facade.py` |
+| CapabilitySnapshot v2 | ✓ | `kernel/capability_snapshot.py` |
+| DedupeStore（InMemory+SQLite） | ✓ | `kernel/dedupe_store.py` + persistence |
+| CompensationRegistry | ✓ | `kernel/recovery/compensation_registry.py` |
+| EventExportPort + 导出层 | ✓ | `kernel/event_export.py` |
+| OTLPRunTraceExporter | ✓ | `runtime/otel_export.py` |
+| ObservabilityHook 体系 | ✓ | `runtime/observability_hooks.py` |
+| KernelHealthProbe + 心跳 | ✓ | `runtime/health.py` + `heartbeat.py` |
+| InteractionTarget（5类） | ✓ | `kernel/contracts.py` |
+| SkillDefinition 合约 | ✓ | `skills/contracts.py` |
+| **ContextPort + ContextWindow** | **○** | 待建模：`kernel/context_port.py` |
+| **LLMGateway Protocol** | **○** | 待建模：`kernel/contracts.py` 扩展 |
+| **InferenceConfig + TokenBudget** | **○** | 待建模：`kernel/contracts.py` 扩展 |
+| **execute_inference Activity** | **○** | 待建模：`substrate/temporal/activity_gateway.py` |
+| **OutputParser Protocol** | **○** | 待建模：`kernel/contracts.py` 扩展 |
+| **ReasoningLoop** | **○** | 待建模：`kernel/reasoning_loop.py` |
+| **ExecutionPlan + ParallelPlan** | **○** | 待建模：`kernel/contracts.py` 扩展 |
+| **PlanExecutor** | **○** | 待建模：`kernel/plan_executor.py` |
+| **TurnEngine 并行状态** | **○** | `kernel/turn_engine.py` 扩展 |
+| **BranchMonitor** | **○** | 待建模：`kernel/branch_monitor.py` |
+| **ScriptRuntime Protocol** | **○** | 待建模：`kernel/contracts.py` 扩展 |
+| **execute_skill_script Activity** | **○** | 待建模：`substrate/temporal/activity_gateway.py` |
+| **reflect_and_retry 恢复模式** | **○** | `kernel/contracts.py` + `recovery/` 扩展 |
+| **ScriptFailureEvidence** | **○** | 待建模：`kernel/failure_evidence.py` 扩展 |
+| **ReflectionPolicy** | **○** | 待建模：`kernel/recovery/reflection_policy.py` |
+| **ReflectionContextBuilder** | **○** | 待建模：`kernel/recovery/reflection_builder.py` |
+| **技能驱动完整链路** | **○** | `skills/` 扩展 + Child Workflow 集成 |
