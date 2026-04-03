@@ -15,7 +15,6 @@ This checker is intentionally read-only and non-blocking: it produces a
 
 from __future__ import annotations
 
-import contextlib
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
@@ -103,25 +102,54 @@ def verify_event_dedupe_consistency(
 
     # --- Load events for the run ---
     events: list[Any] = []
+    _load_error: Exception | None = None
     if hasattr(event_log, "list_events"):
         # InMemoryKernelRuntimeEventLog exposes list_events()
         try:
             events = list(event_log.list_events())
             events = [e for e in events if getattr(e, "run_id", None) == run_id]
-        except Exception:
-            pass
+        except Exception as exc:
+            _load_error = exc
     elif hasattr(event_log, "_events"):
         # Fallback: direct attribute access (some test stubs)
-        with contextlib.suppress(Exception):
+        try:
             events = [e for e in event_log._events if getattr(e, "run_id", None) == run_id]
+        except Exception as exc:
+            _load_error = exc
     else:
-        # Try the async load() via asyncio.run()
+        # Try the async load() — only when no event loop is running.
+        # asyncio.run() raises RuntimeError inside an existing event loop
+        # (the entire production async path), so guard before calling it.
         try:
             import asyncio
 
-            events = asyncio.run(event_log.load(run_id))
-        except Exception:
-            pass
+            try:
+                asyncio.get_running_loop()
+                # A loop is already running; cannot call asyncio.run() here.
+                # Callers in async contexts should use averify_event_dedupe_consistency.
+                _load_error = RuntimeError(
+                    "verify_event_dedupe_consistency called from async context; "
+                    "use averify_event_dedupe_consistency instead."
+                )
+            except RuntimeError as loop_exc:
+                if "async context" in str(loop_exc):
+                    _load_error = loop_exc
+                else:
+                    events = asyncio.run(event_log.load(run_id))
+        except Exception as exc:
+            _load_error = exc
+
+    if _load_error is not None:
+        report.violations.append(
+            ConsistencyViolation(
+                kind="event_log_unavailable",
+                idempotency_key=None,
+                dedupe_state=None,
+                event_count=None,
+                detail=f"event_log load failed for run {run_id!r}: {_load_error}",
+            )
+        )
+        return report
 
     report.events_checked = len(events)
 
@@ -213,8 +241,17 @@ async def averify_event_dedupe_consistency(
 
     try:
         events = await event_log.load(run_id)
-    except Exception:
-        events = []
+    except Exception as exc:
+        report.violations.append(
+            ConsistencyViolation(
+                kind="event_log_unavailable",
+                idempotency_key=None,
+                dedupe_state=None,
+                event_count=None,
+                detail=f"event_log.load({run_id!r}) raised: {exc}",
+            )
+        )
+        return report
 
     report.events_checked = len(events)
 
@@ -300,10 +337,11 @@ def _collect_dedupe_keys(dedupe_store: Any, run_id: str) -> list[str]:
             # Try colocated table first, then standalone table.
             for table in ("colocated_dedupe_store", "dedupe_store"):
                 try:
+                    escaped = run_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
                     rows = conn.execute(
                         f"SELECT dispatch_idempotency_key FROM {table} "
-                        "WHERE dispatch_idempotency_key LIKE ?",
-                        (f"{run_id}:%",),
+                        "WHERE dispatch_idempotency_key LIKE ? ESCAPE '\\'",
+                        (f"{escaped}:%",),
                     ).fetchall()
                     return [row[0] for row in rows]
                 except sqlite3.OperationalError:

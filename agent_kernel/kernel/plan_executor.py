@@ -214,18 +214,6 @@ class PlanExecutor:
                 )
 
         async def _monitored_run(action: Action) -> TurnResult:
-            # R6a: skip already-acknowledged branches on crash-replay.
-            if self._dedupe_store is not None:
-                branch_key = f"{group.group_idempotency_key}:{action.action_id}"
-                existing = self._dedupe_store.get(branch_key)
-                if existing is not None and existing.state == "acknowledged":
-                    return TurnResult(
-                        state="dispatch_acknowledged",
-                        outcome_kind="dispatched",
-                        decision_ref=branch_key,
-                        decision_fingerprint=branch_key,
-                        emitted_events=[],
-                    )
             try:
                 result = await self._turn_runner(action)
                 if self._branch_monitor is not None:
@@ -236,22 +224,27 @@ class PlanExecutor:
                     self._branch_monitor.complete_branch(action.action_id)
                 raise
 
-        coros = [_monitored_run(action) for action in group.actions]
-
         if group.timeout_ms is not None:
             timeout_s = group.timeout_ms / 1000.0
-            try:
-                raw_results = await asyncio.wait_for(
-                    asyncio.gather(*coros, return_exceptions=True),
-                    timeout=timeout_s,
-                )
-            except TimeoutError:
-                # Entire group timed out — map every action to BranchFailure.
-                raw_results = [
-                    TimeoutError(f"Group timeout after {group.timeout_ms}ms")
-                    for _ in group.actions
-                ]
+            tasks = [
+                asyncio.create_task(_monitored_run(action))
+                for action in group.actions
+            ]
+            done, pending = await asyncio.wait(tasks, timeout=timeout_s)
+            for t in pending:
+                t.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            raw_results = []
+            for task in tasks:
+                if task in done:
+                    exc = task.exception()
+                    raw_results.append(exc if exc is not None else task.result())
+                else:
+                    raw_results.append(
+                        TimeoutError(f"Branch timeout after {group.timeout_ms}ms")
+                    )
         else:
+            coros = [_monitored_run(action) for action in group.actions]
             raw_results = await asyncio.gather(*coros, return_exceptions=True)
 
         successes: list[BranchResult] = []

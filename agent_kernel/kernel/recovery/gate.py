@@ -162,9 +162,11 @@ class PlannedRecoveryGateService(RecoveryGateService):
         self._failure_counts[recovery_input.run_id] = failure_count
 
         # Circuit-breaker check: if effect_class circuit is OPEN, abort immediately.
+        # Do NOT call _record_circuit_failure here — that would reset the cooldown
+        # timer on every rejected request and prevent half-open recovery under
+        # sustained load (DEF-019B).
         effect_class = recovery_input.failed_effect_class
         if self._is_circuit_open(effect_class):
-            self._record_circuit_failure(effect_class)
             reason = f"{recovery_input.reason_code}:circuit_open"
             self._emit_recovery(recovery_input.run_id, recovery_input.reason_code, "abort")
             return RecoveryDecision(
@@ -190,21 +192,21 @@ class PlannedRecoveryGateService(RecoveryGateService):
             mode == "static_compensation"
             and self._compensation_registry is not None
         ):
-            effect_class = _extract_effect_class(recovery_input)
-            if effect_class is not None and not self._compensation_registry.has_handler(
-                effect_class
+            comp_effect_class = _extract_effect_class(recovery_input)
+            if comp_effect_class is not None and not self._compensation_registry.has_handler(
+                comp_effect_class
             ):
                 _gate_logger.warning(
                     "PlannedRecoveryGateService: no compensation handler for "
                     "effect_class=%s run_id=%s — downgrading to abort",
-                    effect_class,
+                    comp_effect_class,
                     recovery_input.run_id,
                 )
                 mode = "abort"  # type: ignore[assignment]
                 effective_reason = f"{plan.reason}:no_compensation_handler"
                 effective_compensation_id = None
                 effective_escalation_ref = None
-            elif effect_class is not None:
+            elif comp_effect_class is not None:
                 # Auto-execute compensation with dedupe_store injection when available.
                 # This ensures static_compensation is always at-most-once without
                 # requiring the caller to thread the dedupe_store through manually.

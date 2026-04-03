@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from pathlib import Path
 
@@ -23,42 +24,47 @@ class SQLiteTurnIntentLog(TurnIntentLog):
 
     async def write_intent(self, intent: TurnIntentRecord) -> None:
         """Writes one turn intent with idempotent semantics by intent ref."""
-        self._conn.execute(
-            """
-            INSERT INTO turn_intent_log (
-              run_id,
-              intent_commit_ref,
-              decision_ref,
-              decision_fingerprint,
-              dispatch_dedupe_key,
-              host_kind,
-              outcome_kind,
-              written_at,
-              reflection_round
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(intent_commit_ref) DO UPDATE SET
-              run_id = excluded.run_id,
-              decision_ref = excluded.decision_ref,
-              decision_fingerprint = excluded.decision_fingerprint,
-              dispatch_dedupe_key = excluded.dispatch_dedupe_key,
-              host_kind = excluded.host_kind,
-              outcome_kind = excluded.outcome_kind,
-              written_at = excluded.written_at,
-              reflection_round = excluded.reflection_round
-            """,
-            (
-                intent.run_id,
-                intent.intent_commit_ref,
-                intent.decision_ref,
-                intent.decision_fingerprint,
-                intent.dispatch_dedupe_key,
-                intent.host_kind,
-                intent.outcome_kind,
-                intent.written_at,
-                intent.reflection_round,
-            ),
-        )
-        self._conn.commit()
+        try:
+            self._conn.execute(
+                """
+                INSERT INTO turn_intent_log (
+                  run_id,
+                  intent_commit_ref,
+                  decision_ref,
+                  decision_fingerprint,
+                  dispatch_dedupe_key,
+                  host_kind,
+                  outcome_kind,
+                  written_at,
+                  reflection_round
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(intent_commit_ref) DO UPDATE SET
+                  run_id = excluded.run_id,
+                  decision_ref = excluded.decision_ref,
+                  decision_fingerprint = excluded.decision_fingerprint,
+                  dispatch_dedupe_key = excluded.dispatch_dedupe_key,
+                  host_kind = excluded.host_kind,
+                  outcome_kind = excluded.outcome_kind,
+                  written_at = excluded.written_at,
+                  reflection_round = excluded.reflection_round
+                """,
+                (
+                    intent.run_id,
+                    intent.intent_commit_ref,
+                    intent.decision_ref,
+                    intent.decision_fingerprint,
+                    intent.dispatch_dedupe_key,
+                    intent.host_kind,
+                    intent.outcome_kind,
+                    intent.written_at,
+                    intent.reflection_round,
+                ),
+            )
+            self._conn.commit()
+        except Exception:
+            with contextlib.suppress(Exception):
+                self._conn.rollback()
+            raise
 
     async def latest_for_run(self, run_id: str) -> TurnIntentRecord | None:
         """Returns latest persisted turn intent record for one run."""

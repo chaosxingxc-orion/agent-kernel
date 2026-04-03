@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from pathlib import Path
@@ -24,29 +25,34 @@ class SQLiteRecoveryOutcomeStore(RecoveryOutcomeStore):
 
     async def write_outcome(self, outcome: RecoveryOutcome) -> None:
         """Persists one recovery outcome row."""
-        self._conn.execute(
-            """
-            INSERT INTO recovery_outcome (
-              run_id,
-              action_id,
-              recovery_mode,
-              outcome_state,
-              written_at,
-              operator_escalation_ref,
-              emitted_event_ids_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                outcome.run_id,
-                outcome.action_id,
-                outcome.recovery_mode,
-                outcome.outcome_state,
-                outcome.written_at,
-                outcome.operator_escalation_ref,
-                json.dumps(outcome.emitted_event_ids, ensure_ascii=True),
-            ),
-        )
-        self._conn.commit()
+        try:
+            self._conn.execute(
+                """
+                INSERT INTO recovery_outcome (
+                  run_id,
+                  action_id,
+                  recovery_mode,
+                  outcome_state,
+                  written_at,
+                  operator_escalation_ref,
+                  emitted_event_ids_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    outcome.run_id,
+                    outcome.action_id,
+                    outcome.recovery_mode,
+                    outcome.outcome_state,
+                    outcome.written_at,
+                    outcome.operator_escalation_ref,
+                    json.dumps(outcome.emitted_event_ids, ensure_ascii=True),
+                ),
+            )
+            self._conn.commit()
+        except Exception:
+            with contextlib.suppress(Exception):
+                self._conn.rollback()
+            raise
 
     async def latest_for_run(self, run_id: str) -> RecoveryOutcome | None:
         """Returns latest recovery outcome for one run, if present."""

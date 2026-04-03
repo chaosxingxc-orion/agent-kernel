@@ -333,6 +333,7 @@ def test_workflow_persists_dispatched_turn_outcome_without_derived_executor_even
     )
     executor.execute.return_value = {
         "derived_events": [derived_event],
+        "acknowledged": True,
     }
 
     asyncio.run(

@@ -32,7 +32,6 @@ Usage::
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import time
 from collections.abc import Callable
@@ -196,12 +195,12 @@ def event_log_health_check(event_log: Any) -> HealthCheckFn:
 
     def _check() -> tuple[HealthStatus, str]:
         try:
-            count = -1
-            with contextlib.suppress(Exception):
-                if hasattr(event_log, "list_events"):
-                    count = len(event_log.list_events())
-                elif hasattr(event_log, "events"):
-                    count = len(event_log.events)
+            if hasattr(event_log, "list_events"):
+                count = len(event_log.list_events())
+            elif hasattr(event_log, "events"):
+                count = len(event_log.events)
+            else:
+                return HealthStatus.OK, "EventLog reachable (no count available)"
             return HealthStatus.OK, f"EventLog reachable ({count} events)"
         except Exception as exc:  # pylint: disable=broad-exception-caught
             return HealthStatus.UNHEALTHY, f"EventLog unreachable: {exc}"

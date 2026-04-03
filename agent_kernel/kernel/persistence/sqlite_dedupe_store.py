@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from pathlib import Path
 
@@ -114,17 +115,24 @@ class SQLiteDedupeStore:
         Raises:
             DedupeStoreStateError: If state transition is invalid.
         """
-        record = self._get_required_record(dispatch_idempotency_key)
-        if record.state not in ("reserved", "dispatched"):
-            raise DedupeStoreStateError(
-                f"Cannot transition {record.state} -> dispatched."
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            record = self._get_required_record(dispatch_idempotency_key)
+            if record.state not in ("reserved", "dispatched"):
+                raise DedupeStoreStateError(
+                    f"Cannot transition {record.state} -> dispatched."
+                )
+            self._update_state(
+                dispatch_idempotency_key=dispatch_idempotency_key,
+                state="dispatched",
+                peer_operation_id=peer_operation_id or record.peer_operation_id,
+                external_ack_ref=record.external_ack_ref,
             )
-        self._update_state(
-            dispatch_idempotency_key=dispatch_idempotency_key,
-            state="dispatched",
-            peer_operation_id=peer_operation_id or record.peer_operation_id,
-            external_ack_ref=record.external_ack_ref,
-        )
+            self._conn.execute("COMMIT")
+        except Exception:
+            with contextlib.suppress(Exception):
+                self._conn.execute("ROLLBACK")
+            raise
 
     def mark_acknowledged(
         self,
@@ -140,17 +148,24 @@ class SQLiteDedupeStore:
         Raises:
             DedupeStoreStateError: If state transition is invalid.
         """
-        record = self._get_required_record(dispatch_idempotency_key)
-        if record.state not in ("dispatched", "acknowledged"):
-            raise DedupeStoreStateError(
-                f"Cannot transition {record.state} -> acknowledged."
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            record = self._get_required_record(dispatch_idempotency_key)
+            if record.state not in ("dispatched", "acknowledged"):
+                raise DedupeStoreStateError(
+                    f"Cannot transition {record.state} -> acknowledged."
+                )
+            self._update_state(
+                dispatch_idempotency_key=dispatch_idempotency_key,
+                state="acknowledged",
+                peer_operation_id=record.peer_operation_id,
+                external_ack_ref=external_ack_ref or record.external_ack_ref,
             )
-        self._update_state(
-            dispatch_idempotency_key=dispatch_idempotency_key,
-            state="acknowledged",
-            peer_operation_id=record.peer_operation_id,
-            external_ack_ref=external_ack_ref or record.external_ack_ref,
-        )
+            self._conn.execute("COMMIT")
+        except Exception:
+            with contextlib.suppress(Exception):
+                self._conn.execute("ROLLBACK")
+            raise
 
     def mark_unknown_effect(self, dispatch_idempotency_key: str) -> None:
         """Marks record as unknown_effect.
@@ -161,17 +176,24 @@ class SQLiteDedupeStore:
         Raises:
             DedupeStoreStateError: If state transition is invalid.
         """
-        record = self._get_required_record(dispatch_idempotency_key)
-        if record.state not in ("dispatched", "unknown_effect"):
-            raise DedupeStoreStateError(
-                f"Cannot transition {record.state} -> unknown_effect."
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            record = self._get_required_record(dispatch_idempotency_key)
+            if record.state not in ("dispatched", "unknown_effect"):
+                raise DedupeStoreStateError(
+                    f"Cannot transition {record.state} -> unknown_effect."
+                )
+            self._update_state(
+                dispatch_idempotency_key=dispatch_idempotency_key,
+                state="unknown_effect",
+                peer_operation_id=record.peer_operation_id,
+                external_ack_ref=record.external_ack_ref,
             )
-        self._update_state(
-            dispatch_idempotency_key=dispatch_idempotency_key,
-            state="unknown_effect",
-            peer_operation_id=record.peer_operation_id,
-            external_ack_ref=record.external_ack_ref,
-        )
+            self._conn.execute("COMMIT")
+        except Exception:
+            with contextlib.suppress(Exception):
+                self._conn.execute("ROLLBACK")
+            raise
 
     def get(self, dispatch_idempotency_key: str) -> DedupeRecord | None:
         """Gets dedupe record by key.
@@ -259,7 +281,11 @@ class SQLiteDedupeStore:
                 dispatch_idempotency_key,
             ),
         )
-        # isolation_level=None (autocommit) — each statement commits automatically.
+        if cursor.rowcount != 1:
+            raise DedupeStoreStateError(
+                f"Lost-update: key {dispatch_idempotency_key!r} not found "
+                f"during state transition to {state!r}."
+            )
 
     def _ensure_schema(self) -> None:
         """Creates dedupe table if it does not exist."""

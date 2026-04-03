@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -39,6 +40,7 @@ class SQLiteCircuitBreakerStore:
         self._conn: sqlite3.Connection = sqlite3.connect(
             str(database_path), check_same_thread=False
         )
+        self._lock = threading.Lock()
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(self._CREATE_TABLE)
         self._conn.commit()
@@ -61,7 +63,8 @@ class SQLiteCircuitBreakerStore:
             "SELECT failure_count, last_failure_ts FROM circuit_breaker_state"
             " WHERE effect_class = ?"
         )
-        row = self._conn.execute(_sql, (effect_class,)).fetchone()
+        with self._lock:
+            row = self._conn.execute(_sql, (effect_class,)).fetchone()
         if row is None:
             return (0, 0.0)
         return (int(row[0]), float(row[1]))
@@ -79,22 +82,28 @@ class SQLiteCircuitBreakerStore:
             The new failure count after incrementing.
         """
         now = time.time()
-        self._conn.execute(
-            """
-            INSERT INTO circuit_breaker_state (effect_class, failure_count, last_failure_ts)
-            VALUES (?, 1, ?)
-            ON CONFLICT(effect_class) DO UPDATE SET
-                failure_count   = failure_count + 1,
-                last_failure_ts = excluded.last_failure_ts
-            """,
-            (effect_class, now),
-        )
-        self._conn.commit()
-        row = self._conn.execute(
-            "SELECT failure_count FROM circuit_breaker_state WHERE effect_class = ?",
-            (effect_class,),
-        ).fetchone()
-        return int(row[0])
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO circuit_breaker_state (effect_class, failure_count, last_failure_ts)
+                VALUES (?, 1, ?)
+                ON CONFLICT(effect_class) DO UPDATE SET
+                    failure_count   = failure_count + 1,
+                    last_failure_ts = excluded.last_failure_ts
+                """,
+                (effect_class, now),
+            )
+            self._conn.commit()
+            row = self._conn.execute(
+                "SELECT failure_count FROM circuit_breaker_state WHERE effect_class = ?",
+                (effect_class,),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError(
+                    f"circuit_breaker_store: row for effect_class={effect_class!r} "
+                    "disappeared after UPSERT"
+                )
+            return int(row[0])
 
     def reset(self, effect_class: str) -> None:
         """Deletes the failure row for *effect_class*, returning it to CLOSED state.
@@ -102,8 +111,9 @@ class SQLiteCircuitBreakerStore:
         Args:
             effect_class: The action effect class that just succeeded.
         """
-        self._conn.execute(
-            "DELETE FROM circuit_breaker_state WHERE effect_class = ?",
-            (effect_class,),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM circuit_breaker_state WHERE effect_class = ?",
+                (effect_class,),
+            )
+            self._conn.commit()

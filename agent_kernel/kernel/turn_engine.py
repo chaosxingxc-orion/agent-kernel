@@ -499,20 +499,36 @@ class TurnEngine:
         reasoning_idempotency_key = (
             f"{ctx.input_value.run_id}:{ctx.input_value.based_on_offset}:reasoning"
         )
-        reasoning_result = await self._reasoning_loop.run_once(
-            run_id=ctx.input_value.run_id,
-            snapshot=self._snapshot_builder.build(
-                CapabilitySnapshotInput(
-                    run_id=ctx.input_value.run_id,
-                    based_on_offset=ctx.input_value.based_on_offset,
-                    tenant_policy_ref="policy:default",
-                    permission_mode="strict",
-                )
-            ),
-            history=list(ctx.input_value.history),
-            inference_config=inference_config,
-            idempotency_key=reasoning_idempotency_key,
-        )
+        try:
+            reasoning_result = await self._reasoning_loop.run_once(
+                run_id=ctx.input_value.run_id,
+                snapshot=self._snapshot_builder.build(
+                    CapabilitySnapshotInput(
+                        run_id=ctx.input_value.run_id,
+                        based_on_offset=ctx.input_value.based_on_offset,
+                        tenant_policy_ref="policy:default",
+                        permission_mode="strict",
+                    )
+                ),
+                history=list(ctx.input_value.history),
+                inference_config=inference_config,
+                idempotency_key=reasoning_idempotency_key,
+            )
+        except Exception:
+            ctx.emitted_events.append(TurnStateEvent(state="completed_noop"))
+            ctx.result = TurnResult(
+                state="completed_noop",
+                outcome_kind="noop",
+                decision_ref=(
+                    f"decision:{ctx.input_value.run_id}:{ctx.input_value.based_on_offset}"
+                ),
+                decision_fingerprint=(
+                    f"{ctx.input_value.run_id}:{ctx.input_value.trigger_type}"
+                    f":noop:{ctx.input_value.based_on_offset}"
+                ),
+                emitted_events=ctx.emitted_events,
+            )
+            return
         if not reasoning_result.actions:
             ctx.emitted_events.append(TurnStateEvent(state="completed_noop"))
             ctx.result = TurnResult(
@@ -546,7 +562,7 @@ class TurnEngine:
             ctx.snapshot = self._snapshot_builder.build(snapshot_input)
             assert_snapshot_compatible(ctx.snapshot)
             ctx.emitted_events.append(TurnStateEvent(state="snapshot_built"))
-        except CapabilitySnapshotBuildError:
+        except (CapabilitySnapshotBuildError, ValueError):
             ctx.emitted_events.append(TurnStateEvent(state="completed_noop"))
             ti = ctx.turn_identity
             ctx.result = TurnResult(
@@ -659,7 +675,7 @@ class TurnEngine:
             if self._observability_hook is not None:
                 with contextlib.suppress(Exception):
                     self._observability_hook.on_dedupe_hit(
-                        run_id=ctx.input_value.execution_context.run_id,
+                        run_id=ctx.input_value.run_id,
                         action_id=ti.dispatch_dedupe_key,
                         outcome="duplicate",
                     )
@@ -672,7 +688,7 @@ class TurnEngine:
         if self._observability_hook is not None:
             with contextlib.suppress(Exception):
                 self._observability_hook.on_dedupe_hit(
-                    run_id=ctx.input_value.execution_context.run_id,
+                    run_id=ctx.input_value.run_id,
                     action_id=ti.dispatch_dedupe_key,
                     outcome=_dedupe_outcome,
                 )
@@ -721,7 +737,7 @@ class TurnEngine:
                     dedupe_outcome=_dedupe_outcome,
                     latency_ms=_dispatch_latency_ms,
                 )
-        acknowledged = bool(ctx.execute_result.get("acknowledged", True))
+        acknowledged = bool(ctx.execute_result.get("acknowledged", False))
         if acknowledged:
             if dedupe_available:
                 self._dedupe_store.mark_acknowledged(ti.dispatch_dedupe_key)
@@ -1275,7 +1291,10 @@ def _normalize_host_kind(value: Any) -> HostKind | None:
     if not isinstance(value, str):
         return None
     normalized_value = value.strip().lower()
-    if normalized_value in ("local_cli", "local_process", "remote_service"):
+    if normalized_value in (
+        "local_cli", "local_process", "remote_service",
+        "cli_process", "in_process_python",
+    ):
         return normalized_value
     return None
 

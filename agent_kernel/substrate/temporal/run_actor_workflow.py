@@ -18,6 +18,7 @@ Why a Temporal workflow?
 from __future__ import annotations
 
 import contextlib
+import threading
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -136,6 +137,7 @@ _RUN_ACTOR_CONFIG: ContextVar[RunActorDependencyBundle | None] = ContextVar(
 _RUN_ACTOR_CONFIG_FALLBACK: dict[str, RunActorDependencyBundle | None] = {
     "dependencies": None
 }
+_RUN_ACTOR_CONFIG_FALLBACK_LOCK = threading.Lock()
 
 
 def configure_run_actor_dependencies(
@@ -153,7 +155,8 @@ def configure_run_actor_dependencies(
         as an identity token for a scoped ``clear_run_actor_dependencies`` call.
     """
     _RUN_ACTOR_CONFIG.set(dependencies)
-    _RUN_ACTOR_CONFIG_FALLBACK["dependencies"] = dependencies
+    with _RUN_ACTOR_CONFIG_FALLBACK_LOCK:
+        _RUN_ACTOR_CONFIG_FALLBACK["dependencies"] = dependencies
     return dependencies
 
 
@@ -170,9 +173,10 @@ def clear_run_actor_dependencies(
         token: The bundle reference returned by ``configure_run_actor_dependencies``
             at start time.  Only clears if the current global matches this token.
     """
-    if _RUN_ACTOR_CONFIG_FALLBACK.get("dependencies") is token:
-        _RUN_ACTOR_CONFIG.set(None)
-        _RUN_ACTOR_CONFIG_FALLBACK["dependencies"] = None
+    with _RUN_ACTOR_CONFIG_FALLBACK_LOCK:
+        if _RUN_ACTOR_CONFIG_FALLBACK.get("dependencies") is token:
+            _RUN_ACTOR_CONFIG.set(None)
+            _RUN_ACTOR_CONFIG_FALLBACK["dependencies"] = None
 
 
 class RunActorWorkflow:
@@ -1116,7 +1120,8 @@ def _resolve_run_actor_dependencies(
                 else configured_dependencies.strict_mode
             ),
         )
-    fallback_dependencies = _RUN_ACTOR_CONFIG_FALLBACK["dependencies"]
+    with _RUN_ACTOR_CONFIG_FALLBACK_LOCK:
+        fallback_dependencies = _RUN_ACTOR_CONFIG_FALLBACK["dependencies"]
     if fallback_dependencies is not None:
         return RunActorDependencyBundle(
             event_log=fallback_dependencies.event_log,

@@ -19,7 +19,7 @@ import io
 import json
 import os
 import time
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from typing import Any
 
 from agent_kernel.kernel.contracts import ScriptActivityInput, ScriptResult
@@ -172,7 +172,7 @@ class InProcessPythonScriptRuntime:
         exc: BaseException | None = None
         exit_code = 0
         try:
-            with redirect_stdout(stdout_buf):
+            with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
                 exec(script_content, namespace)
         except SystemExit as e:
             exit_code = e.code if isinstance(e.code, int) else 1
@@ -272,6 +272,8 @@ class LocalProcessScriptRuntime:
         except TimeoutError:
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
             elapsed_ms = int((time.monotonic() - start) * 1000)
             return ScriptResult(
                 script_id=input_value.script_id,

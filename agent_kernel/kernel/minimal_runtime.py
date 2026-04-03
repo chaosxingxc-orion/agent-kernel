@@ -270,6 +270,7 @@ class AsyncExecutorService(ExecutorService):
                 "action_id": action.action_id,
                 "grant_ref": grant_ref,
                 "effect_observed": True,
+                "acknowledged": True,
             }
         return await self._handler(action, grant_ref)
 

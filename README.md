@@ -2,7 +2,7 @@
 
 > 企业级智能体执行内核 — 六权威生命周期协议 · Temporal 持久执行基底 · 单系统运行时
 
-**6 436 测试通过** | Python 3.14 | Google Python Style Guide
+**6 794 测试通过** | Python 3.14 | Google Python Style Guide
 
 ---
 
@@ -228,7 +228,8 @@ gate = PlannedRecoveryGateService(compensation_registry=registry)
 
 | 文件 | 内容 |
 |------|------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 完整架构图：全局 / 六权威 / 两层持久化 / 可观测性 / 协议扩展 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 完整架构图：全局 / 六权威 / 认知运行时 / 两层持久化 / 可观测性 / 协议扩展 |
+| [DEFECT_REGISTRY.md](DEFECT_REGISTRY.md) | 生产级缺陷扫描记录（Round 11 完成，27 defects，全部修复） |
 | [QUICKSTART.md](QUICKSTART.md) | 集成快速入门：依赖 / 启动 / 信号 / 查询 / 错误处理 |
 | [CLAUDE.md](CLAUDE.md) | AI 辅助开发指引（测试命令 / 架构规范 / 编码标准） |
 
@@ -237,7 +238,7 @@ gate = PlannedRecoveryGateService(compensation_registry=registry)
 ## 项目结构
 
 ```
-python_src/agent_kernel/
+agent_kernel/
 ├── kernel/
 │   ├── contracts.py                  # 所有 DTO + Protocol 接口
 │   ├── turn_engine.py                # TurnEngine FSM（唯一决策引擎）
@@ -248,12 +249,25 @@ python_src/agent_kernel/
 │   ├── dedupe_store.py               # at-most-once 状态机
 │   ├── failure_evidence.py           # FailureEnvelope 证据优先链
 │   ├── event_export.py               # 进化层：TurnTrace / RunTrace / InMemoryRunTraceStore
+│   ├── plan_executor.py              # ExecutionPlan 解释执行器（串行/并行）
 │   ├── remote_service_policy.py
+│   ├── cognitive/
+│   │   ├── reasoning_loop.py         # ReasoningLoop：ContextPort → LLM → OutputParser
+│   │   ├── context_port.py           # InMemoryContextPort（PoC）
+│   │   ├── llm_gateway.py            # OpenAI / Anthropic LLMGateway（PoC）
+│   │   ├── output_parser.py          # ToolCallOutputParser + JSONModeOutputParser
+│   │   ├── script_runtime.py         # Echo / InProcess / LocalProcess / DedupeAware
+│   │   ├── reflection_builder.py     # ReflectionContextBuilder
+│   │   └── mode_registry.py          # RecoveryModeRegistry
 │   ├── persistence/
 │   │   ├── sqlite_event_log.py       # SQLite 事件日志
 │   │   ├── sqlite_dedupe_store.py    # SQLite 幂等状态
+│   │   ├── sqlite_colocated_bundle.py# 共享连接 EventLog + DedupeStore
 │   │   ├── sqlite_recovery_outcome_store.py
-│   │   └── sqlite_turn_intent_log.py
+│   │   ├── sqlite_turn_intent_log.py
+│   │   ├── sqlite_circuit_breaker_store.py
+│   │   ├── consistency.py            # EventLog ↔ DedupeStore 一致性核查
+│   │   └── migrations.py             # SQLite schema 迁移框架
 │   └── recovery/
 │       ├── gate.py                   # PlannedRecoveryGateService
 │       ├── planner.py                # 确定性故障→恢复路由
@@ -270,13 +284,14 @@ python_src/agent_kernel/
 │   ├── gateway.py                    # Temporal SDK 适配器
 │   ├── worker.py                     # Worker 启动 + 优雅关闭
 │   ├── activity_gateway.py
+│   ├── dispatch_outbox_reconciler.py # At-least-once saga reconciler
 │   └── client.py
 ├── adapters/
 │   ├── facade/kernel_facade.py       # 唯一平台入口
 │   └── agent_core/                   # agent-core 适配层
 └── skills/                           # Skills 运行时
 
-python_tests/agent_kernel/            # 镜像 src 结构，6 235 测试
+python_tests/agent_kernel/            # 镜像 src 结构，6 794 测试
 ```
 
 ---
@@ -291,12 +306,12 @@ python -m pytest -q python_tests/agent_kernel
 python -m pytest -q python_tests/agent_kernel/kernel/test_turn_engine.py
 
 # 代码规范检查
-ruff check python_src/ python_tests/
-ruff format python_src/ python_tests/
-pylint python_src/
+ruff check agent_kernel/ python_tests/
+ruff format agent_kernel/ python_tests/
+pylint agent_kernel/
 ```
 
-配置见 `pyproject.toml`：`pythonpath = ["python_src"]`，目标 Python 3.14，行长 100。
+配置见 `pyproject.toml`：`pythonpath = ["."]`，目标 Python 3.14，行长 100。
 
 ---
 

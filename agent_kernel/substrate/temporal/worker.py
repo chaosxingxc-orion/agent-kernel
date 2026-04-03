@@ -13,6 +13,7 @@ from typing import Any
 from agent_kernel.substrate.temporal.run_actor_workflow import (
     RunActorDependencyBundle,
     RunActorWorkflow,
+    clear_run_actor_dependencies,
     configure_run_actor_dependencies,
 )
 
@@ -83,4 +84,4 @@ class TemporalKernelWorker:
         finally:
             # Always clear process-local workflow dependency override so
             # subsequent worker/test runs do not accidentally reuse it.
-            configure_run_actor_dependencies(None)
+            clear_run_actor_dependencies(self._dependencies)

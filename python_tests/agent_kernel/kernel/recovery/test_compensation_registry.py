@@ -152,7 +152,7 @@ class TestCompensationRegistry:
         action = _make_action("compensatable_write")
         # Must not raise
         result = asyncio.run(registry.execute(action))
-        assert result is True  # handler was found and invoked (even though it raised)
+        assert result is False  # handler raised → compensation failed, return False
 
     def test_multiple_effect_classes_isolated(self) -> None:
         registry = CompensationRegistry()

@@ -21,6 +21,7 @@ Boundary:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -252,4 +253,8 @@ class CompensationRegistry:
                 action.action_id,
                 exc,
             )
+            if dedupe_store is not None and idempotency_key is not None:
+                with contextlib.suppress(Exception):
+                    dedupe_store.mark_unknown_effect(idempotency_key)
+            return False
         return True

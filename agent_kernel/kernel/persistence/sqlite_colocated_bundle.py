@@ -56,10 +56,17 @@ class _SharedConnectionEventLog:
         """Appends one action commit inside the shared connection."""
         if not commit.events:
             raise ValueError("ActionCommit.events must contain at least one event.")
-        with self._lock, self._conn:
-            next_offset = self._next_offset(commit.run_id)
-            seq = self._insert_commit_row(commit)
-            self._insert_event_rows(commit.run_id, seq, commit.events, next_offset)
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN")
+                next_offset = self._next_offset(commit.run_id)
+                seq = self._insert_commit_row(commit)
+                self._insert_event_rows(commit.run_id, seq, commit.events, next_offset)
+                self._conn.execute("COMMIT")
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._conn.execute("ROLLBACK")
+                raise
         return f"commit-ref-{seq}"
 
     async def load(self, run_id: str, after_offset: int = 0) -> list[RuntimeEvent]:
@@ -218,47 +225,116 @@ class _SharedConnectionDedupeStore:
         self, dispatch_idempotency_key: str, peer_operation_id: str | None = None
     ) -> None:
         """Transitions record to ``dispatched`` state."""
-        record = self._require(dispatch_idempotency_key)
-        if record.state not in ("reserved", "dispatched"):
-            raise DedupeStoreStateError(
-                f"Cannot transition {record.state} -> dispatched."
-            )
-        self._update(
-            dispatch_idempotency_key,
-            "dispatched",
-            peer_operation_id or record.peer_operation_id,
-            record.external_ack_ref,
-        )
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                record = self._get(dispatch_idempotency_key)
+                if record is None:
+                    raise DedupeStoreStateError(
+                        f"Unknown dispatch_idempotency_key: {dispatch_idempotency_key}."
+                    )
+                if record.state not in ("reserved", "dispatched"):
+                    raise DedupeStoreStateError(
+                        f"Cannot transition {record.state} -> dispatched."
+                    )
+                cursor = self._conn.execute(
+                    """
+                    UPDATE colocated_dedupe_store
+                    SET state = ?, peer_operation_id = ?, external_ack_ref = ?
+                    WHERE dispatch_idempotency_key = ?
+                    """,
+                    (
+                        "dispatched",
+                        peer_operation_id or record.peer_operation_id,
+                        record.external_ack_ref,
+                        dispatch_idempotency_key,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise DedupeStoreStateError(
+                        f"Lost-update: key {dispatch_idempotency_key!r} disappeared."
+                    )
+                self._conn.execute("COMMIT")
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._conn.execute("ROLLBACK")
+                raise
 
     def mark_acknowledged(
         self, dispatch_idempotency_key: str, external_ack_ref: str | None = None
     ) -> None:
         """Transitions record to ``acknowledged`` state."""
-        record = self._require(dispatch_idempotency_key)
-        if record.state not in ("dispatched", "acknowledged"):
-            raise DedupeStoreStateError(
-                f"Cannot transition {record.state} -> acknowledged."
-            )
-        self._update(
-            dispatch_idempotency_key,
-            "acknowledged",
-            record.peer_operation_id,
-            external_ack_ref or record.external_ack_ref,
-        )
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                record = self._get(dispatch_idempotency_key)
+                if record is None:
+                    raise DedupeStoreStateError(
+                        f"Unknown dispatch_idempotency_key: {dispatch_idempotency_key}."
+                    )
+                if record.state not in ("dispatched", "acknowledged"):
+                    raise DedupeStoreStateError(
+                        f"Cannot transition {record.state} -> acknowledged."
+                    )
+                cursor = self._conn.execute(
+                    """
+                    UPDATE colocated_dedupe_store
+                    SET state = ?, peer_operation_id = ?, external_ack_ref = ?
+                    WHERE dispatch_idempotency_key = ?
+                    """,
+                    (
+                        "acknowledged",
+                        record.peer_operation_id,
+                        external_ack_ref or record.external_ack_ref,
+                        dispatch_idempotency_key,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise DedupeStoreStateError(
+                        f"Lost-update: key {dispatch_idempotency_key!r} disappeared."
+                    )
+                self._conn.execute("COMMIT")
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._conn.execute("ROLLBACK")
+                raise
 
     def mark_unknown_effect(self, dispatch_idempotency_key: str) -> None:
         """Transitions record to ``unknown_effect`` state."""
-        record = self._require(dispatch_idempotency_key)
-        if record.state not in ("dispatched", "unknown_effect"):
-            raise DedupeStoreStateError(
-                f"Cannot transition {record.state} -> unknown_effect."
-            )
-        self._update(
-            dispatch_idempotency_key,
-            "unknown_effect",
-            record.peer_operation_id,
-            record.external_ack_ref,
-        )
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                record = self._get(dispatch_idempotency_key)
+                if record is None:
+                    raise DedupeStoreStateError(
+                        f"Unknown dispatch_idempotency_key: {dispatch_idempotency_key}."
+                    )
+                if record.state not in ("dispatched", "unknown_effect"):
+                    raise DedupeStoreStateError(
+                        f"Cannot transition {record.state} -> unknown_effect."
+                    )
+                cursor = self._conn.execute(
+                    """
+                    UPDATE colocated_dedupe_store
+                    SET state = ?, peer_operation_id = ?, external_ack_ref = ?
+                    WHERE dispatch_idempotency_key = ?
+                    """,
+                    (
+                        "unknown_effect",
+                        record.peer_operation_id,
+                        record.external_ack_ref,
+                        dispatch_idempotency_key,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise DedupeStoreStateError(
+                        f"Lost-update: key {dispatch_idempotency_key!r} disappeared."
+                    )
+                self._conn.execute("COMMIT")
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._conn.execute("ROLLBACK")
+                raise
 
     def get(self, dispatch_idempotency_key: str) -> DedupeRecord | None:
         """Returns dedupe record by key, or ``None``."""
@@ -304,7 +380,7 @@ class _SharedConnectionDedupeStore:
         external_ack_ref: str | None,
     ) -> None:
         with self._lock:
-            self._conn.execute(
+            cursor = self._conn.execute(
                 """
                 UPDATE colocated_dedupe_store
                 SET state = ?, peer_operation_id = ?, external_ack_ref = ?
@@ -312,6 +388,11 @@ class _SharedConnectionDedupeStore:
                 """,
                 (state, peer_operation_id, external_ack_ref, key),
             )
+            if cursor.rowcount != 1:
+                raise DedupeStoreStateError(
+                    f"Lost-update: key {key!r} not found during state "
+                    f"transition to {state!r}."
+                )
 
 
 # ---------------------------------------------------------------------------

@@ -70,7 +70,14 @@ class SchemaMigrationManager:
         if extra_migrations:
             for m in extra_migrations:
                 self._migrations.append(m)
-            self._migrations.sort(key=lambda m: m.version)
+        self._migrations.sort(key=lambda m: m.version)
+        seen_versions: set[int] = set()
+        for m in self._migrations:
+            if m.version in seen_versions:
+                raise ValueError(
+                    f"Duplicate migration version {m.version!r} detected."
+                )
+            seen_versions.add(m.version)
 
     def apply_all(self) -> int:
         """Apply all pending migrations in version order.

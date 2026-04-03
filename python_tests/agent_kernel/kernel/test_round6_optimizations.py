@@ -101,8 +101,8 @@ class TestPlanExecutorBranchDedupe:
         executor = PlanExecutor(turn_runner=_runner, dedupe_store=store)
         result = asyncio.run(executor.execute_plan(plan, run_id="run-1"))
 
-        # Runner should NOT have been called since branch was already acknowledged.
-        assert runner_calls == []
+        # DEF-018: dead R6a crash-replay skip was removed; branch runs normally.
+        assert runner_calls == [action_id]
         assert result.succeeded == 1
         assert result.failed == 0
 
@@ -599,9 +599,8 @@ class TestHealthCheckFactories:
 
         check_fn = event_log_health_check(_BrokenLog())
         status, _msg = check_fn()
-        # Since events property raising is caught inside contextlib.suppress,
-        # count stays -1, but status is still OK (log is "reachable", just no events).
-        assert status == HealthStatus.OK
+        # DEF-012: errors propagate to outer except → correctly returns UNHEALTHY.
+        assert status == HealthStatus.UNHEALTHY
 
     def test_health_probe_with_registered_dedupe_check(self, tmp_path) -> None:
         from agent_kernel.kernel.persistence.sqlite_dedupe_store import SQLiteDedupeStore
