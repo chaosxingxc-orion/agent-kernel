@@ -39,7 +39,7 @@ class _SnapshotBuilder:
 class _AdmissionService:
     """Always admits to force TurnEngine into execution path."""
 
-    async def check(self, *_args: Any, **_kwargs: Any) -> bool:
+    async def admit(self, *_args: Any, **_kwargs: Any) -> bool:
         return True
 
 

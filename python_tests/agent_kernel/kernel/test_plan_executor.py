@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from agent_kernel.kernel.branch_monitor import BranchMonitor
 from agent_kernel.kernel.contracts import (
     Action,
     FailureEnvelope,
@@ -466,3 +467,233 @@ class TestParallelConcurrency:
         # All 3 should have started before all 3 finish.
         assert len(start_order) == 3
         assert len(finish_order) == 3
+
+
+# ---------------------------------------------------------------------------
+# BranchMonitor integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestBranchMonitorIntegration:
+    """Tests that PlanExecutor integrates BranchMonitor when provided."""
+
+    @pytest.mark.asyncio
+    async def test_branch_monitor_registers_and_completes_on_success(self) -> None:
+        """Successful actions should register and complete branches in the monitor."""
+        actions = [_make_action(f"a{i}") for i in range(3)]
+
+        async def runner(action: Action) -> TurnResult:
+            return _success_turn_result(action.action_id)
+
+        monitor = BranchMonitor()
+        executor = PlanExecutor(runner, branch_monitor=monitor)
+        group = ParallelGroup(
+            actions=tuple(actions),
+            join_strategy="all",
+            group_idempotency_key="grp-monitor",
+        )
+        plan = ParallelPlan(groups=(group,))
+        await executor.execute_plan(plan, run_id="run-1")
+
+        # All branches should be completed (no stalled branches).
+        assert monitor.get_stalled_branches() == []
+
+    @pytest.mark.asyncio
+    async def test_branch_monitor_completes_on_failure(self) -> None:
+        """Failed actions should still complete branches so monitor has no stalled."""
+        actions = [_make_action("a0")]
+
+        async def runner(action: Action) -> TurnResult:
+            return _recovery_turn_result(action.action_id)
+
+        monitor = BranchMonitor()
+        executor = PlanExecutor(runner, branch_monitor=monitor)
+        group = ParallelGroup(
+            actions=tuple(actions),
+            join_strategy="all",
+            group_idempotency_key="grp-fail",
+        )
+        plan = ParallelPlan(groups=(group,))
+        await executor.execute_plan(plan, run_id="run-1")
+
+        assert monitor.get_stalled_branches() == []
+
+    @pytest.mark.asyncio
+    async def test_branch_monitor_completes_on_exception(self) -> None:
+        """Exceptions from turn_runner should still complete branches."""
+        actions = [_make_action("a0")]
+
+        async def raising_runner(action: Action) -> TurnResult:
+            raise RuntimeError("boom")
+
+        monitor = BranchMonitor()
+        executor = PlanExecutor(raising_runner, branch_monitor=monitor)
+        group = ParallelGroup(
+            actions=tuple(actions),
+            join_strategy="all",
+            group_idempotency_key="grp-exc",
+        )
+        plan = ParallelPlan(groups=(group,))
+        await executor.execute_plan(plan, run_id="run-1")
+
+        assert monitor.get_stalled_branches() == []
+
+    @pytest.mark.asyncio
+    async def test_no_branch_monitor_does_not_break_execution(self) -> None:
+        """When branch_monitor is None, execution proceeds unchanged."""
+        actions = [_make_action(f"a{i}") for i in range(2)]
+
+        async def runner(action: Action) -> TurnResult:
+            return _success_turn_result(action.action_id)
+
+        executor = PlanExecutor(runner, branch_monitor=None)
+        group = ParallelGroup(
+            actions=tuple(actions),
+            join_strategy="all",
+            group_idempotency_key="grp-no-monitor",
+        )
+        result = await executor.execute_plan(
+            ParallelPlan(groups=(group,)), run_id="run-1"
+        )
+        assert result.all_succeeded is True
+
+
+# ---------------------------------------------------------------------------
+# P4b — observability_hook.on_parallel_branch_result emit
+# ---------------------------------------------------------------------------
+
+
+class _CapturingHook:
+    """Minimal ObservabilityHook that captures on_parallel_branch_result calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def on_turn_state_transition(self, **_: object) -> None:
+        pass
+
+    def on_run_lifecycle_transition(self, **_: object) -> None:
+        pass
+
+    def on_llm_call(self, **_: object) -> None:
+        pass
+
+    def on_action_dispatch(self, **_: object) -> None:
+        pass
+
+    def on_recovery_triggered(self, **_: object) -> None:
+        pass
+
+    def on_admission_evaluated(self, **_: object) -> None:
+        pass
+
+    def on_dispatch_attempted(self, **_: object) -> None:
+        pass
+
+    def on_parallel_branch_result(
+        self,
+        *,
+        run_id: str,
+        group_idempotency_key: str,
+        action_id: str,
+        outcome: str,
+        failure_code: str | None = None,
+    ) -> None:
+        self.calls.append(
+            {
+                "run_id": run_id,
+                "group_key": group_idempotency_key,
+                "action_id": action_id,
+                "outcome": outcome,
+                "failure_code": failure_code,
+            }
+        )
+
+
+class TestParallelBranchObservabilityHook:
+    """Tests that PlanExecutor emits on_parallel_branch_result for each branch."""
+
+    @pytest.mark.asyncio
+    async def test_acknowledged_branches_emit_acknowledged_outcome(self) -> None:
+        """Successful branches must emit on_parallel_branch_result with outcome=acknowledged."""
+        actions = [_make_action("a1"), _make_action("a2")]
+        hook = _CapturingHook()
+
+        async def runner(action: Action) -> TurnResult:
+            return _success_turn_result(action.action_id)
+
+        executor = PlanExecutor(runner, observability_hook=hook)
+        group = ParallelGroup(
+            actions=tuple(actions),
+            join_strategy="all",
+            group_idempotency_key="grp-obs",
+        )
+        await executor.execute_plan(ParallelPlan(groups=(group,)), run_id="run-obs")
+
+        assert len(hook.calls) == 2
+        outcomes = {c["action_id"]: c["outcome"] for c in hook.calls}
+        assert outcomes == {"a1": "acknowledged", "a2": "acknowledged"}
+
+    @pytest.mark.asyncio
+    async def test_failed_branches_emit_failed_outcome(self) -> None:
+        """Failing branches must emit on_parallel_branch_result with outcome=failed."""
+        actions = [_make_action("f1")]
+        hook = _CapturingHook()
+
+        async def runner(action: Action) -> TurnResult:
+            return TurnResult(
+                state="recovery_pending",
+                outcome_kind="recovery_pending",
+                decision_ref="d:f1",
+                decision_fingerprint="fp:f1",
+            )
+
+        executor = PlanExecutor(runner, observability_hook=hook)
+        group = ParallelGroup(
+            actions=tuple(actions),
+            join_strategy="any",
+            group_idempotency_key="grp-fail",
+        )
+        await executor.execute_plan(ParallelPlan(groups=(group,)), run_id="run-fail")
+
+        assert len(hook.calls) == 1
+        assert hook.calls[0]["outcome"] == "failed"
+        assert hook.calls[0]["failure_code"] == "recovery_pending"
+
+    @pytest.mark.asyncio
+    async def test_exception_branches_emit_failed_outcome_with_failure_code(self) -> None:
+        """Branches that raise exceptions emit outcome=failed with exc type as failure_code."""
+        actions = [_make_action("exc1")]
+        hook = _CapturingHook()
+
+        async def runner(action: Action) -> TurnResult:
+            raise ValueError("test error")
+
+        executor = PlanExecutor(runner, observability_hook=hook)
+        group = ParallelGroup(
+            actions=tuple(actions),
+            join_strategy="any",
+            group_idempotency_key="grp-exc-obs",
+        )
+        await executor.execute_plan(ParallelPlan(groups=(group,)), run_id="run-exc")
+
+        assert len(hook.calls) == 1
+        assert hook.calls[0]["outcome"] == "failed"
+        assert hook.calls[0]["failure_code"] == "ValueError"
+
+    @pytest.mark.asyncio
+    async def test_no_hook_does_not_break_execution(self) -> None:
+        """When observability_hook is None, execution proceeds without errors."""
+        actions = [_make_action("nh1"), _make_action("nh2")]
+
+        async def runner(action: Action) -> TurnResult:
+            return _success_turn_result(action.action_id)
+
+        executor = PlanExecutor(runner, observability_hook=None)
+        group = ParallelGroup(
+            actions=tuple(actions),
+            join_strategy="all",
+            group_idempotency_key="grp-nohook",
+        )
+        result = await executor.execute_plan(ParallelPlan(groups=(group,)), run_id="run-nh")
+        assert result.all_succeeded is True

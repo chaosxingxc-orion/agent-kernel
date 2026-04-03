@@ -13,20 +13,18 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent_kernel.runtime.health import HealthStatus
 from agent_kernel.runtime.heartbeat import (
     HeartbeatPolicy,
     HeartbeatWatchdog,
     KernelSelfHeartbeat,
     RunHeartbeatMonitor,
 )
-from agent_kernel.runtime.health import HealthStatus
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -92,7 +90,7 @@ class TestHeartbeatPolicy:
 
 
 # ---------------------------------------------------------------------------
-# RunHeartbeatMonitor – basic state tracking
+# RunHeartbeatMonitor - basic state tracking
 # ---------------------------------------------------------------------------
 
 
@@ -179,7 +177,7 @@ class TestRunHeartbeatMonitorStateTracking:
 
 
 # ---------------------------------------------------------------------------
-# RunHeartbeatMonitor – timeout detection + no-repeat guard
+# RunHeartbeatMonitor - timeout detection + no-repeat guard
 # ---------------------------------------------------------------------------
 
 
@@ -224,7 +222,7 @@ class TestRunHeartbeatMonitorTimeoutDetection:
 
 
 # ---------------------------------------------------------------------------
-# RunHeartbeatMonitor – lock correctness under concurrency
+# RunHeartbeatMonitor - lock correctness under concurrency
 # ---------------------------------------------------------------------------
 
 
@@ -321,7 +319,7 @@ class TestRunHeartbeatMonitorConcurrency:
 
 
 # ---------------------------------------------------------------------------
-# RunHeartbeatMonitor – watchdog_once signal injection
+# RunHeartbeatMonitor - watchdog_once signal injection
 # ---------------------------------------------------------------------------
 
 
@@ -383,7 +381,7 @@ class TestRunHeartbeatMonitorWatchdogOnce:
 
 
 # ---------------------------------------------------------------------------
-# RunHeartbeatMonitor – health check
+# RunHeartbeatMonitor - health check
 # ---------------------------------------------------------------------------
 
 
@@ -391,7 +389,7 @@ class TestRunHeartbeatMonitorHealthCheck:
     def test_ok_when_no_runs_tracked(self) -> None:
         monitor = _make_monitor()
         check_fn = monitor.make_health_check_fn()
-        status, msg = check_fn()
+        status, _msg = check_fn()
         assert status == HealthStatus.OK
 
     def test_ok_when_all_runs_healthy(self) -> None:
@@ -423,7 +421,7 @@ class TestRunHeartbeatMonitorHealthCheck:
 
 
 # ---------------------------------------------------------------------------
-# HeartbeatWatchdog – lifecycle
+# HeartbeatWatchdog - lifecycle
 # ---------------------------------------------------------------------------
 
 
@@ -481,7 +479,7 @@ class TestHeartbeatWatchdog:
 
 
 # ---------------------------------------------------------------------------
-# KernelSelfHeartbeat – probe staleness and responsiveness checks
+# KernelSelfHeartbeat - probe staleness and responsiveness checks
 # ---------------------------------------------------------------------------
 
 
@@ -513,7 +511,7 @@ class TestKernelSelfHeartbeat:
         await hb.refresh(event_log=event_log, projection=projection)
 
         check_fn = hb.event_log_check()
-        status, msg = check_fn()
+        status, _msg = check_fn()
         assert status == HealthStatus.OK
 
     @pytest.mark.asyncio

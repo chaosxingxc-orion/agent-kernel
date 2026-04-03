@@ -131,6 +131,7 @@ def test_execution_context_contract_contains_v64_trace_fields() -> None:
         "declarative_bundle_digest",
         "timeout_ms",
         "budget_ref",
+        "trace_context",
     ]
 
 

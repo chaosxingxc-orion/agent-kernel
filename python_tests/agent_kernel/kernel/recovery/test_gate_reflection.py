@@ -5,12 +5,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import pytest
-
-from agent_kernel.kernel.capability_snapshot import (
-    CapabilitySnapshotBuilder,
-    CapabilitySnapshotInput,
-)
 from agent_kernel.kernel.cognitive.context_port import InMemoryContextPort
 from agent_kernel.kernel.cognitive.llm_gateway import EchoLLMGateway
 from agent_kernel.kernel.cognitive.output_parser import ToolCallOutputParser
@@ -27,7 +21,6 @@ from agent_kernel.kernel.contracts import (
 from agent_kernel.kernel.reasoning_loop import ReasoningLoop
 from agent_kernel.kernel.recovery.gate import PlannedRecoveryGateService
 from agent_kernel.kernel.recovery.reflection_builder import ReflectionContextBuilder
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -95,10 +88,45 @@ class _ToolAwareContextPort:
         )
 
 
+class _AlwaysToolCallGateway:
+    """LLM gateway that always returns a fixed tool call for 'corrected_tool'.
+
+    Used in reflect_and_retry tests where prebuilt_context bypasses
+    context_port.assemble(), so the enriched context may not carry tool
+    definitions.  This gateway produces a corrected action regardless.
+    """
+
+    async def infer(
+        self,
+        context: ContextWindow,
+        config: InferenceConfig,
+        idempotency_key: str,
+    ) -> Any:
+        from agent_kernel.kernel.contracts import ModelOutput
+
+        return ModelOutput(
+            raw_text="",
+            tool_calls=[
+                {
+                    "id": f"always-{idempotency_key[:8]}",
+                    "name": "corrected_tool",
+                    "arguments": {},
+                }
+            ],
+            finish_reason="tool_calls",
+            usage={},
+        )
+
+
 def _make_reasoning_loop_with_tools() -> ReasoningLoop:
+    """Reasoning loop that always returns a 'corrected_tool' action.
+
+    Uses _AlwaysToolCallGateway so the corrected action is produced even when
+    the prebuilt enriched context carries no tool definitions (Fix 1 behaviour).
+    """
     return ReasoningLoop(
         context_port=_ToolAwareContextPort(),
-        llm_gateway=EchoLLMGateway(),
+        llm_gateway=_AlwaysToolCallGateway(),
         output_parser=ToolCallOutputParser(),
     )
 
@@ -359,3 +387,186 @@ class TestRecoveryDecisionBackwardCompatibility:
             corrected_action=action,
         )
         assert decision.corrected_action is action
+
+
+# ---------------------------------------------------------------------------
+# Test: enriched context is actually used (Fix 1 validation)
+# ---------------------------------------------------------------------------
+
+
+class TestEnrichedContextActuallyUsed:
+    """Verify that the enriched context built by ReflectionContextBuilder
+    is the actual context passed to the reasoning loop, not discarded."""
+
+    def test_enriched_context_reaches_reasoning_loop(self) -> None:
+        """The context_window in the reasoning result should be the enriched context.
+
+        This validates Fix 1: _EnrichedContextReasoningLoop must pass
+        prebuilt_context to the underlying loop so context_port.assemble()
+        is bypassed.
+        """
+        contexts_seen: list[Any] = []
+
+        class CapturingGateway:
+            """LLM gateway that records the ContextWindow it receives."""
+
+            async def infer(
+                self,
+                context: ContextWindow,
+                config: InferenceConfig,
+                idempotency_key: str,
+            ) -> Any:
+                contexts_seen.append(context)
+                from agent_kernel.kernel.contracts import ModelOutput
+
+                return ModelOutput(
+                    raw_text="",
+                    tool_calls=[],
+                    finish_reason="stop",
+                    usage={},
+                )
+
+        # Use a context port that would return a different context if called.
+        class SentinelContextPort:
+            async def assemble(
+                self,
+                run_id: str,
+                snapshot: Any,
+                history: list[Any],
+                inference_config: InferenceConfig | None = None,
+                recovery_context: dict | None = None,
+            ) -> ContextWindow:
+                return ContextWindow(system_instructions="SHOULD_NOT_BE_USED")
+
+        capturing_gateway = CapturingGateway()
+        reasoning_loop = ReasoningLoop(
+            context_port=SentinelContextPort(),
+            llm_gateway=capturing_gateway,
+            output_parser=ToolCallOutputParser(),
+        )
+        gate = PlannedRecoveryGateService(
+            reflection_policy=_make_permissive_policy(),
+            reasoning_loop=reasoning_loop,
+            reflection_builder=ReflectionContextBuilder(),
+        )
+        recovery_input = _make_recovery_input(
+            reason_code="runtime_error",
+            reflection_round=0,
+        )
+        asyncio.run(gate.decide(recovery_input))
+
+        assert len(contexts_seen) == 1, "Gateway must have been called once"
+        ctx = contexts_seen[0]
+        # The enriched context is built from an empty base ContextWindow by
+        # ReflectionContextBuilder; it must NOT be the sentinel string.
+        assert ctx.system_instructions != "SHOULD_NOT_BE_USED", (
+            "Enriched context was discarded — context_port.assemble() was called "
+            "instead of using the prebuilt context."
+        )
+
+
+# ---------------------------------------------------------------------------
+# P3a — reflection idempotency key is deterministic
+# ---------------------------------------------------------------------------
+
+
+class TestReflectionIdempotencyKey:
+    """Gate must pass a deterministic idempotency_key during reflect_and_retry."""
+
+    def test_reflection_key_is_deterministic_and_not_uuid(self) -> None:
+        """Same run_id + based_on_offset + reflection_round → same idempotency key.
+
+        We capture the key passed to LLM gateway infer() and verify it matches
+        the expected pattern: ``{run_id}:{based_on_offset}:reflection:{round}``.
+        """
+        received_keys: list[str] = []
+
+        class _KeyCapturingGateway:
+            async def infer(
+                self,
+                context: Any,
+                config: Any,
+                idempotency_key: str,
+            ) -> Any:
+                from agent_kernel.kernel.contracts import ModelOutput
+
+                received_keys.append(idempotency_key)
+                return ModelOutput(
+                    raw_text="",
+                    tool_calls=[
+                        {"id": "cap-1", "name": "corrected_tool", "arguments": {}}
+                    ],
+                    finish_reason="tool_calls",
+                    usage={},
+                )
+
+        loop = ReasoningLoop(
+            context_port=_ToolAwareContextPort(),
+            llm_gateway=_KeyCapturingGateway(),
+            output_parser=ToolCallOutputParser(),
+        )
+        gate = PlannedRecoveryGateService(
+            reasoning_loop=loop,
+            reflection_builder=ReflectionContextBuilder(),
+            reflection_policy=_make_permissive_policy(max_rounds=3),
+        )
+        recovery_input = _make_recovery_input(
+            run_id="run-key-test",
+            reflection_round=0,
+        )
+        # reflection_round=0 → round increments to 1 inside gate
+        asyncio.run(gate.decide(recovery_input))
+
+        assert len(received_keys) == 1
+        key = received_keys[0]
+        expected = (
+            f"{recovery_input.run_id}:{recovery_input.projection.projected_offset}"
+            f":reflection:1"
+        )
+        assert key == expected, f"Expected deterministic key {expected!r}, got {key!r}"
+
+    def test_reflection_key_changes_across_rounds(self) -> None:
+        """Different reflection rounds produce different idempotency keys."""
+        received_keys: list[str] = []
+
+        class _KeyCapturingGateway:
+            async def infer(
+                self,
+                context: Any,
+                config: Any,
+                idempotency_key: str,
+            ) -> Any:
+                from agent_kernel.kernel.contracts import ModelOutput
+
+                received_keys.append(idempotency_key)
+                return ModelOutput(
+                    raw_text="",
+                    tool_calls=[
+                        {"id": "cap-x", "name": "corrected_tool", "arguments": {}}
+                    ],
+                    finish_reason="tool_calls",
+                    usage={},
+                )
+
+        loop = ReasoningLoop(
+            context_port=_ToolAwareContextPort(),
+            llm_gateway=_KeyCapturingGateway(),
+            output_parser=ToolCallOutputParser(),
+        )
+        gate = PlannedRecoveryGateService(
+            reasoning_loop=loop,
+            reflection_builder=ReflectionContextBuilder(),
+            reflection_policy=_make_permissive_policy(max_rounds=3),
+        )
+
+        # Round 0 → key with :reflection:1
+        asyncio.run(gate.decide(_make_recovery_input(run_id="run-r", reflection_round=0)))
+        # Round 1 → key with :reflection:2
+        asyncio.run(gate.decide(_make_recovery_input(run_id="run-r", reflection_round=1)))
+
+        assert len(received_keys) == 2
+        assert received_keys[0] != received_keys[1], (
+            "Different reflection rounds must produce different idempotency keys"
+        )
+        assert ":reflection:1" in received_keys[0]
+        assert ":reflection:2" in received_keys[1]

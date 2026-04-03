@@ -1,5 +1,5 @@
 [tool.pytest.ini_options]
-pythonpath = ["python_src"]
+pythonpath = ["."]
 testpaths = ["python_tests"]
 
 [tool.agent_kernel.style_policy]
@@ -9,7 +9,7 @@ enforcement = "strict"
 [tool.ruff]
 line-length = 100
 target-version = "py314"
-src = ["python_src", "python_tests"]
+src = [".", "python_tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "C4", "SIM", "RUF"]

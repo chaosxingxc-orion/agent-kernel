@@ -5,11 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import pytest
-
 from agent_kernel.kernel.capability_snapshot import (
     CapabilitySnapshotBuilder,
-    CapabilitySnapshotInput,
 )
 from agent_kernel.kernel.cognitive.context_port import InMemoryContextPort
 from agent_kernel.kernel.cognitive.llm_gateway import EchoLLMGateway
@@ -18,11 +15,9 @@ from agent_kernel.kernel.contracts import Action, InferenceConfig
 from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
 from agent_kernel.kernel.minimal_runtime import (
     StaticDispatchAdmissionService,
-    AsyncExecutorService,
 )
 from agent_kernel.kernel.reasoning_loop import ReasoningLoop
-from agent_kernel.kernel.turn_engine import TurnEngine, TurnInput, TurnResult
-
+from agent_kernel.kernel.turn_engine import TurnEngine, TurnInput
 
 # ---------------------------------------------------------------------------
 # Helpers

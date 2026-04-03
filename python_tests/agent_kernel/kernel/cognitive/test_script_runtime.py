@@ -8,6 +8,7 @@ import json
 import pytest
 
 from agent_kernel.kernel.cognitive.script_runtime import (
+    DedupeAwareScriptRuntime,
     EchoScriptRuntime,
     InProcessPythonScriptRuntime,
     LocalProcessScriptRuntime,
@@ -153,24 +154,20 @@ class TestInProcessPythonScriptRuntime:
         assert result.exit_code != 0
 
     @pytest.mark.asyncio
-    async def test_timeout_raises_timeout_error(self) -> None:
-        """Script that blocks past timeout → asyncio.TimeoutError.
+    async def test_timeout_returns_script_result_exit_code_minus_one(self) -> None:
+        """Script that blocks past timeout → ScriptResult with exit_code=-1.
 
-        Uses asyncio.sleep (via event-loop mock) to simulate a long-running
-        script without spinning a real blocking thread. The real timeout
-        enforcement test for blocking scripts is covered by
-        TestLocalProcessScriptRuntime.test_timeout_raises.
+        The runtime now catches TimeoutError internally and returns a sentinel
+        ScriptResult instead of propagating the exception.
         """
         runtime = InProcessPythonScriptRuntime(default_timeout_ms=50)
-        # A script that loops using asyncio-compatible sleep via time.sleep.
-        # We test that the TimeoutError propagates from asyncio.wait_for when
-        # the executor future exceeds the deadline.
         script = "import time; time.sleep(10)"
-        with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(
-                runtime.execute_script(_make_input(script_content=script, timeout_ms=50)),
-                timeout=0.5,
-            )
+        result = await runtime.execute_script(
+            _make_input(script_content=script, timeout_ms=50)
+        )
+        assert result.exit_code == -1
+        assert "TimeoutError" in result.stderr
+        assert result.output_json is None
 
     @pytest.mark.asyncio
     async def test_validate_valid_python(self) -> None:
@@ -225,18 +222,20 @@ class TestLocalProcessScriptRuntime:
         assert result.exit_code != 0
 
     @pytest.mark.asyncio
-    async def test_timeout_raises(self) -> None:
-        """Long-running process killed after timeout."""
+    async def test_timeout_returns_script_result_exit_code_minus_one(self) -> None:
+        """Long-running process killed after timeout → ScriptResult with exit_code=-1."""
         runtime = LocalProcessScriptRuntime()
-        with pytest.raises(asyncio.TimeoutError):
-            await runtime.execute_script(
-                _make_input(
-                    # Platform-neutral sleep: Python -c works cross-platform
-                    script_content="python -c \"import time; time.sleep(60)\"",
-                    host_kind="local_process",
-                    timeout_ms=100,
-                )
+        result = await runtime.execute_script(
+            _make_input(
+                # Platform-neutral sleep: Python -c works cross-platform
+                script_content="python -c \"import time; time.sleep(60)\"",
+                host_kind="local_process",
+                timeout_ms=100,
             )
+        )
+        assert result.exit_code == -1
+        assert "TimeoutError" in result.stderr
+        assert result.output_json is None
 
     @pytest.mark.asyncio
     async def test_json_stdout_parsed_to_output_json(self) -> None:
@@ -273,3 +272,96 @@ class TestLocalProcessScriptRuntime:
             )
         )
         assert result.script_id == "proc-script"
+
+
+# ---------------------------------------------------------------------------
+# R3f — DedupeAwareScriptRuntime
+# ---------------------------------------------------------------------------
+
+
+class TestDedupeAwareScriptRuntime:
+    """Verifies at-most-once script execution via DedupeStore."""
+
+    def _make_script_input(
+        self,
+        action_id: str = "act-1",
+        script_id: str = "script-1",
+        run_id: str = "run-1",
+    ) -> ScriptActivityInput:
+        return ScriptActivityInput(
+            run_id=run_id,
+            action_id=action_id,
+            script_id=script_id,
+            script_content="print('hello')",
+            host_kind="in_process_python",
+        )
+
+    def test_execute_calls_inner_runtime_on_first_call(self) -> None:
+        from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
+
+        inner = EchoScriptRuntime()
+        store = InMemoryDedupeStore()
+        runtime = DedupeAwareScriptRuntime(inner=inner, dedupe_store=store)
+        result = asyncio.run(runtime.execute_script(self._make_script_input()))
+        assert result.script_id == "script-1"
+        assert result.exit_code == 0
+
+    def test_second_call_returns_noop_without_calling_inner(self) -> None:
+        from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
+
+        calls: list[str] = []
+
+        class _CountingInner:
+            async def execute_script(self, input_value: ScriptActivityInput) -> ScriptResult:
+                calls.append(input_value.action_id)
+                return ScriptResult(
+                    script_id=input_value.script_id,
+                    exit_code=0,
+                    stdout="",
+                    stderr="",
+                    output_json=None,
+                    execution_ms=1,
+                )
+
+        store = InMemoryDedupeStore()
+        runtime = DedupeAwareScriptRuntime(inner=_CountingInner(), dedupe_store=store)
+        inp = self._make_script_input()
+        asyncio.run(runtime.execute_script(inp))
+        asyncio.run(runtime.execute_script(inp))
+        assert len(calls) == 1  # inner called only once
+
+    def test_dedupe_key_is_acknowledged_after_success(self) -> None:
+        from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
+
+        inner = EchoScriptRuntime()
+        store = InMemoryDedupeStore()
+        runtime = DedupeAwareScriptRuntime(inner=inner, dedupe_store=store)
+        inp = self._make_script_input()
+        asyncio.run(runtime.execute_script(inp))
+        key = f"script:{inp.run_id}:{inp.action_id}:{inp.script_id}"
+        record = store.get(key)
+        assert record is not None
+        assert record.state == "acknowledged"
+
+    def test_different_action_ids_are_independent(self) -> None:
+        from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
+
+        calls: list[str] = []
+
+        class _CountingInner:
+            async def execute_script(self, input_value: ScriptActivityInput) -> ScriptResult:
+                calls.append(input_value.action_id)
+                return ScriptResult(
+                    script_id=input_value.script_id,
+                    exit_code=0,
+                    stdout="",
+                    stderr="",
+                    output_json=None,
+                    execution_ms=1,
+                )
+
+        store = InMemoryDedupeStore()
+        runtime = DedupeAwareScriptRuntime(inner=_CountingInner(), dedupe_store=store)
+        asyncio.run(runtime.execute_script(self._make_script_input(action_id="act-1")))
+        asyncio.run(runtime.execute_script(self._make_script_input(action_id="act-2")))
+        assert set(calls) == {"act-1", "act-2"}

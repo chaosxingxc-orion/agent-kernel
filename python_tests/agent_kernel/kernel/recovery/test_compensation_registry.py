@@ -3,12 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock
-
-import pytest
 
 from agent_kernel.kernel.contracts import (
     Action,
@@ -16,11 +12,9 @@ from agent_kernel.kernel.contracts import (
     RunProjection,
 )
 from agent_kernel.kernel.recovery.compensation_registry import (
-    CompensationEntry,
     CompensationRegistry,
 )
 from agent_kernel.kernel.recovery.gate import PlannedRecoveryGateService
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -260,3 +254,95 @@ class TestPlannedRecoveryGateServiceWithRegistry:
         decision = asyncio.run(gate.decide(recovery_input))
         # Gate cannot determine effect_class → passes through as compensation
         assert decision.mode == "static_compensation"
+
+
+# ---------------------------------------------------------------------------
+# R3e — Compensation execute() with DedupeStore idempotency
+# ---------------------------------------------------------------------------
+
+
+class TestCompensationRegistryDedupeIntegration:
+    """Verifies at-most-once execution via DedupeStore."""
+
+    def test_execute_without_dedupe_store_calls_handler(self) -> None:
+        """Baseline: no dedupe_store → handler called once normally."""
+        registry = CompensationRegistry()
+        calls: list[Any] = []
+
+        async def _handler(action: Any) -> None:
+            calls.append(action.action_id)
+
+        registry.register("write", _handler)
+        result = asyncio.run(registry.execute(_make_action("write")))
+        assert result is True
+        assert calls == ["act-1"]
+
+    def test_execute_with_dedupe_store_calls_handler_on_first_call(self) -> None:
+        from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
+
+        registry = CompensationRegistry()
+        calls: list[str] = []
+
+        async def _handler(action: Any) -> None:
+            calls.append(action.action_id)
+
+        registry.register("write", _handler)
+        store = InMemoryDedupeStore()
+        result = asyncio.run(registry.execute(_make_action("write"), dedupe_store=store))
+        assert result is True
+        assert calls == ["act-1"]
+
+    def test_execute_with_dedupe_store_skips_handler_on_second_call(self) -> None:
+        """Second execute() for the same action should not re-run the handler."""
+        from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
+
+        registry = CompensationRegistry()
+        calls: list[str] = []
+
+        async def _handler(action: Any) -> None:
+            calls.append(action.action_id)
+
+        registry.register("write", _handler)
+        store = InMemoryDedupeStore()
+        action = _make_action("write")
+
+        asyncio.run(registry.execute(action, dedupe_store=store))
+        # Second call with same action — should be skipped
+        asyncio.run(registry.execute(action, dedupe_store=store))
+        assert len(calls) == 1
+
+    def test_execute_marks_dedupe_acknowledged_after_success(self) -> None:
+        """After success, the dedupe key should be in 'acknowledged' state."""
+        from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
+
+        registry = CompensationRegistry()
+        registry.register("write", AsyncMock())
+        store = InMemoryDedupeStore()
+        asyncio.run(registry.execute(_make_action("write"), dedupe_store=store))
+        key = "compensation:write:act-1"
+        record = store.get(key)
+        assert record is not None
+        assert record.state == "acknowledged"
+
+    def test_different_actions_are_independent(self) -> None:
+        """Different action_ids should each get their own idempotency slot."""
+        from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
+
+        registry = CompensationRegistry()
+        calls: list[str] = []
+
+        async def _handler(action: Any) -> None:
+            calls.append(action.action_id)
+
+        registry.register("write", _handler)
+        store = InMemoryDedupeStore()
+
+        action1 = Action(
+            action_id="act-1", run_id="run-1", action_type="tool_call", effect_class="write"
+        )
+        action2 = Action(
+            action_id="act-2", run_id="run-1", action_type="tool_call", effect_class="write"
+        )
+        asyncio.run(registry.execute(action1, dedupe_store=store))
+        asyncio.run(registry.execute(action2, dedupe_store=store))
+        assert set(calls) == {"act-1", "act-2"}

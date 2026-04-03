@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent_kernel.kernel.contracts import StartRunRequest
 from agent_kernel.kernel.minimal_runtime import (
+    AsyncExecutorService,
+    InMemoryDecisionDeduper,
     InMemoryDecisionProjectionService,
     InMemoryKernelRuntimeEventLog,
     StaticDispatchAdmissionService,
-    AsyncExecutorService,
     StaticRecoveryGateService,
-    InMemoryDecisionDeduper,
 )
 from agent_kernel.runtime.kernel_runtime import (
     KernelRuntime,
@@ -26,7 +26,6 @@ from agent_kernel.substrate.temporal.run_actor_workflow import (
     configure_run_actor_dependencies,
 )
 
-
 # ---------------------------------------------------------------------------
 # _build_services unit tests
 # ---------------------------------------------------------------------------
@@ -35,7 +34,7 @@ from agent_kernel.substrate.temporal.run_actor_workflow import (
 def test_build_services_in_memory_returns_shared_event_log() -> None:
     """Event log and projection service share the same instance."""
     config = KernelRuntimeConfig()
-    event_log, projection, admission, executor, recovery, deduper, dedupe_store = (
+    event_log, projection, admission, executor, recovery, deduper, _dedupe_store = (
         _build_services(config)
     )
 
@@ -54,7 +53,7 @@ def test_build_services_sqlite_returns_sqlite_event_log() -> None:
     from agent_kernel.kernel.persistence.sqlite_event_log import SQLiteKernelRuntimeEventLog
 
     config = KernelRuntimeConfig(event_log_backend="sqlite", sqlite_database_path=":memory:")
-    event_log, projection, *_ = _build_services(config)
+    event_log, _projection, *_ = _build_services(config)
 
     assert isinstance(event_log, SQLiteKernelRuntimeEventLog)
 
@@ -99,7 +98,9 @@ def test_kernel_runtime_config_custom_values() -> None:
 def _make_mock_temporal_client() -> MagicMock:
     """Returns a minimal mock that satisfies TemporalSDKWorkflowGateway."""
     client = MagicMock()
-    client.start_workflow = AsyncMock(return_value=MagicMock(id="run:run-1", first_execution_run_id="wf-1"))
+    client.start_workflow = AsyncMock(
+        return_value=MagicMock(id="run:run-1", first_execution_run_id="wf-1")
+    )
     return client
 
 
@@ -121,7 +122,7 @@ async def test_kernel_runtime_start_creates_worker_task() -> None:
         kernel = await KernelRuntime.start(config, temporal_client=mock_client)
         try:
             assert not kernel._worker_task.done()
-            assert "kernel-worker:test-q" == kernel._worker_task.get_name()
+            assert kernel._worker_task.get_name() == "kernel-worker:test-q"
         finally:
             await kernel.stop()
 

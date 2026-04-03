@@ -14,13 +14,17 @@ from datetime import UTC, datetime
 
 import pytest
 
-from agent_kernel.kernel.contracts import ActionCommit, RecoveryOutcome, RuntimeEvent
+from agent_kernel.kernel.contracts import (
+    ActionCommit,
+    RecoveryOutcome,
+    RuntimeEvent,
+    TurnIntentRecord,
+)
 from agent_kernel.kernel.persistence.sqlite_event_log import SQLiteKernelRuntimeEventLog
 from agent_kernel.kernel.persistence.sqlite_recovery_outcome_store import (
     SQLiteRecoveryOutcomeStore,
 )
 from agent_kernel.kernel.persistence.sqlite_turn_intent_log import SQLiteTurnIntentLog
-from agent_kernel.kernel.contracts import TurnIntentRecord
 
 
 def _utc_now() -> str:
@@ -135,7 +139,7 @@ class TestSQLiteEventLogConcurrency:
                             _make_commit(run_id, thread_id * 100 + seq)
                         )
                     )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors.append(exc)
             finally:
                 loop.close()

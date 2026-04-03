@@ -4,25 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import Any
 
 import pytest
 
 from agent_kernel.kernel.contracts import (
-    AdmissionActivityInput,
     AdmissionResult,
     ContextWindow,
     InferenceActivityInput,
     InferenceConfig,
-    MCPActivityInput,
     ModelOutput,
-    ReconciliationActivityInput,
     ScriptActivityInput,
     ScriptResult,
-    ToolActivityInput,
-    VerificationActivityInput,
 )
 from agent_kernel.substrate.temporal.activity_gateway import (
     TemporalActivityBindings,

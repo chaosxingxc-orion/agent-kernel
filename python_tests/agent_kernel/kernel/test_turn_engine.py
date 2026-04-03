@@ -58,53 +58,6 @@ class _StubAdmissionService:
         self.calls += 1
         return self.admitted
 
-    async def check(self, *_args: Any, **_kwargs: Any) -> bool:
-        self.calls += 1
-        return self.admitted
-
-
-@dataclass(slots=True)
-class _LegacyCheckOnlyAdmissionService:
-    """Legacy admission stub that only supports ``check`` path."""
-
-    admitted: bool
-    calls: int = 0
-
-    async def check(self, *_args: Any, **_kwargs: Any) -> bool:
-        self.calls += 1
-        return self.admitted
-
-
-@dataclass(slots=True)
-class _DualPathAdmissionService:
-    """Admission stub exposing both admit/check with independent counters."""
-
-    admitted: bool
-    admit_calls: int = 0
-    check_calls: int = 0
-
-    async def admit(self, *_args: Any, **_kwargs: Any) -> bool:
-        self.admit_calls += 1
-        return self.admitted
-
-    async def check(self, *_args: Any, **_kwargs: Any) -> bool:
-        self.check_calls += 1
-        return self.admitted
-
-
-@dataclass(slots=True)
-class _SubjectCapturingLegacyAdmissionService:
-    """Legacy check-only admission that captures the provided subject object."""
-
-    admitted: bool
-    calls: int = 0
-    subjects: list[Any] = field(default_factory=list)
-
-    async def check(self, _action: Any, subject: Any) -> bool:
-        self.calls += 1
-        self.subjects.append(subject)
-        return self.admitted
-
 
 @dataclass(slots=True)
 class _StubExecutor:
@@ -299,92 +252,6 @@ def test_turn_engine_returns_dispatched_when_executor_acknowledged() -> None:
         "dispatch_acknowledged",
     ]
 
-
-def test_turn_engine_does_not_emit_legacy_fallback_state_on_admit_path() -> None:
-    """Primary admit path should not emit legacy check fallback state."""
-    turn_engine = TurnEngine(
-        snapshot_builder=_StubSnapshotBuilder(),
-        admission_service=_StubAdmissionService(admitted=True),
-        dedupe_store=InMemoryDedupeStore(),
-        executor=_StubExecutor(result={"acknowledged": True}),
-    )
-
-    result = asyncio.run(turn_engine.run_turn(_build_turn_input(), _build_action()))
-
-    assert all(
-        event.state != "admission_legacy_check_fallback"
-        for event in result.emitted_events
-    )
-
-
-def test_turn_engine_emits_legacy_fallback_state_when_only_check_is_available() -> None:
-    """Legacy check-only admission should emit fallback state for observability."""
-    turn_engine = TurnEngine(
-        snapshot_builder=_StubSnapshotBuilder(),
-        admission_service=_LegacyCheckOnlyAdmissionService(admitted=True),
-        dedupe_store=InMemoryDedupeStore(),
-        executor=_StubExecutor(result={"acknowledged": True}),
-    )
-
-    result = asyncio.run(turn_engine.run_turn(_build_turn_input(), _build_action()))
-
-    emitted_states = [event.state for event in result.emitted_events]
-    assert "admission_legacy_check_fallback" in emitted_states
-    assert emitted_states.index("admission_legacy_check_fallback") < emitted_states.index(
-        "admission_checked"
-    )
-    fallback_event = next(
-        event for event in result.emitted_events
-        if event.state == "admission_legacy_check_fallback"
-    )
-    assert fallback_event.metadata["severity"] == "warning"
-    assert fallback_event.metadata["deprecation_phase"] == "soft"
-    assert fallback_event.metadata["target_removal_version"] == "0.2"
-
-
-def test_turn_engine_prefers_admit_when_admit_and_check_both_exist() -> None:
-    """When both methods exist, admit path should be used and check should not run."""
-    admission = _DualPathAdmissionService(admitted=True)
-    turn_engine = TurnEngine(
-        snapshot_builder=_StubSnapshotBuilder(),
-        admission_service=admission,
-        dedupe_store=InMemoryDedupeStore(),
-        executor=_StubExecutor(result={"acknowledged": True}),
-    )
-
-    result = asyncio.run(turn_engine.run_turn(_build_turn_input(), _build_action()))
-
-    assert result.state == "dispatch_acknowledged"
-    assert admission.admit_calls == 1
-    assert admission.check_calls == 0
-    assert all(
-        event.state != "admission_legacy_check_fallback"
-        for event in result.emitted_events
-    )
-
-
-def test_turn_engine_legacy_check_fallback_uses_explicit_admission_subject() -> None:
-    """Legacy check fallback should receive explicit admission_subject when provided."""
-    admission = _SubjectCapturingLegacyAdmissionService(admitted=True)
-    turn_engine = TurnEngine(
-        snapshot_builder=_StubSnapshotBuilder(),
-        admission_service=admission,
-        dedupe_store=InMemoryDedupeStore(),
-        executor=_StubExecutor(result={"acknowledged": True}),
-    )
-    admission_subject = {"projection_like": True, "run_id": "run-1"}
-
-    result = asyncio.run(
-        turn_engine.run_turn(
-            _build_turn_input(),
-            _build_action(),
-            admission_subject=admission_subject,
-        )
-    )
-
-    assert result.state == "dispatch_acknowledged"
-    assert admission.calls == 1
-    assert admission.subjects[0] is admission_subject
 
 
 def test_turn_engine_effect_unknown_maps_to_recovery_pending() -> None:
@@ -647,3 +514,179 @@ def test_turn_engine_keeps_local_hosts_unaffected_by_remote_policy() -> None:
     assert local_cli_executor.envelopes[0].host_kind == "local_cli"
     assert local_cli_result.host_kind == "local_cli"
     assert local_cli_result.remote_policy_decision is None
+
+
+# ---------------------------------------------------------------------------
+# P4c — on_admission_evaluated + on_dispatch_attempted hook callbacks
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class _CapturingHook:
+    """Minimal ObservabilityHook stub that records P4c hook invocations."""
+
+    admission_calls: list[dict[str, Any]] = field(default_factory=list)
+    dispatch_calls: list[dict[str, Any]] = field(default_factory=list)
+
+    # required by Protocol — unused in these tests
+    def on_turn_state_transition(self, *_a: Any, **_kw: Any) -> None:
+        pass
+
+    def on_recovery_triggered(self, *_a: Any, **_kw: Any) -> None:
+        pass
+
+    def on_parallel_branch_result(self, *_a: Any, **_kw: Any) -> None:
+        pass
+
+    def on_admission_evaluated(
+        self,
+        *,
+        run_id: str,
+        action_id: str,
+        admitted: bool,
+        latency_ms: int,
+    ) -> None:
+        self.admission_calls.append(
+            {"run_id": run_id, "action_id": action_id, "admitted": admitted,
+             "latency_ms": latency_ms}
+        )
+
+    def on_dispatch_attempted(
+        self,
+        *,
+        run_id: str,
+        action_id: str,
+        dedupe_outcome: str,
+        latency_ms: int,
+    ) -> None:
+        self.dispatch_calls.append(
+            {"run_id": run_id, "action_id": action_id, "dedupe_outcome": dedupe_outcome,
+             "latency_ms": latency_ms}
+        )
+
+
+def _build_engine_with_hook(hook: _CapturingHook, admitted: bool = True) -> TurnEngine:
+    return TurnEngine(
+        snapshot_builder=_StubSnapshotBuilder(),
+        admission_service=_StubAdmissionService(admitted=admitted),
+        dedupe_store=InMemoryDedupeStore(),
+        executor=_StubExecutor(result={"acknowledged": True}),
+        observability_hook=hook,
+    )
+
+
+class TestObservabilityHookCallbacks:
+    """Verifies that TurnEngine invokes P4c hooks with correct arguments."""
+
+    def test_on_admission_evaluated_called_when_admitted(self) -> None:
+        hook = _CapturingHook()
+        engine = _build_engine_with_hook(hook, admitted=True)
+        asyncio.run(engine.run_turn(_build_turn_input(), _build_action()))
+
+        assert len(hook.admission_calls) == 1
+        call = hook.admission_calls[0]
+        assert call["admitted"] is True
+        assert call["run_id"] == "run-1"
+        assert isinstance(call["latency_ms"], int)
+        assert call["latency_ms"] >= 0
+
+    def test_on_admission_evaluated_called_when_blocked(self) -> None:
+        hook = _CapturingHook()
+        engine = _build_engine_with_hook(hook, admitted=False)
+        asyncio.run(engine.run_turn(_build_turn_input(), _build_action()))
+
+        assert len(hook.admission_calls) == 1
+        assert hook.admission_calls[0]["admitted"] is False
+        # dispatch hook should not be called when admission is blocked
+        assert len(hook.dispatch_calls) == 0
+
+    def test_on_dispatch_attempted_called_on_successful_dispatch(self) -> None:
+        hook = _CapturingHook()
+        engine = _build_engine_with_hook(hook, admitted=True)
+        asyncio.run(engine.run_turn(_build_turn_input(), _build_action()))
+
+        assert len(hook.dispatch_calls) == 1
+        call = hook.dispatch_calls[0]
+        assert call["run_id"] == "run-1"
+        assert isinstance(call["dedupe_outcome"], str)
+        assert isinstance(call["latency_ms"], int)
+        assert call["latency_ms"] >= 0
+
+    def test_no_hook_does_not_raise(self) -> None:
+        """TurnEngine without observability_hook must complete without error."""
+        engine = TurnEngine(
+            snapshot_builder=_StubSnapshotBuilder(),
+            admission_service=_StubAdmissionService(admitted=True),
+            dedupe_store=InMemoryDedupeStore(),
+            executor=_StubExecutor(result={"acknowledged": True}),
+        )
+        result = asyncio.run(engine.run_turn(_build_turn_input(), _build_action()))
+        assert result.outcome_kind == "dispatched"
+
+
+# ---------------------------------------------------------------------------
+# R3c — TurnEngine FSM dispatch table extensibility
+# ---------------------------------------------------------------------------
+
+
+class TestTurnEngineDispatchTableExtensibility:
+    """Verifies that _TURN_PHASES can be extended in subclasses."""
+
+    def test_turn_phases_is_class_variable_with_six_phases(self) -> None:
+        from agent_kernel.kernel.turn_engine import TurnEngine
+
+        assert hasattr(TurnEngine, "_TURN_PHASES")
+        assert len(TurnEngine._TURN_PHASES) == 6
+
+    def test_subclass_can_inject_custom_phase(self) -> None:
+        """A subclass that prepends a no-op phase must still complete normally."""
+        from agent_kernel.kernel.turn_engine import TurnEngine, TurnPhaseContext
+
+        intercepted: list[str] = []
+
+        class _CustomEngine(TurnEngine):
+            _TURN_PHASES = ("_phase_audit", *TurnEngine._TURN_PHASES)
+
+            async def _phase_audit(self, ctx: TurnPhaseContext) -> None:
+                intercepted.append("audit_called")
+
+        engine = _CustomEngine(
+            snapshot_builder=_StubSnapshotBuilder(),
+            admission_service=_StubAdmissionService(admitted=True),
+            dedupe_store=InMemoryDedupeStore(),
+            executor=_StubExecutor(result={"acknowledged": True}),
+        )
+        result = asyncio.run(engine.run_turn(_build_turn_input(), _build_action()))
+        assert result.outcome_kind == "dispatched"
+        assert intercepted == ["audit_called"]
+
+    def test_subclass_can_override_admission_phase(self) -> None:
+        """A subclass that overrides _phase_admission can short-circuit to blocked."""
+        from agent_kernel.kernel.turn_engine import TurnEngine, TurnPhaseContext, TurnResult
+
+        class _AlwaysBlockEngine(TurnEngine):
+            async def _phase_admission(self, ctx: TurnPhaseContext) -> None:
+                ctx.emitted_events.append(
+                    __import__(
+                        "agent_kernel.kernel.turn_engine",
+                        fromlist=["TurnStateEvent"],
+                    ).TurnStateEvent(state="dispatch_blocked")
+                )
+                assert ctx.turn_identity is not None
+                ti = ctx.turn_identity
+                ctx.result = TurnResult(
+                    state="dispatch_blocked",
+                    outcome_kind="blocked",
+                    decision_ref=ti.decision_ref,
+                    decision_fingerprint=ti.decision_fingerprint,
+                    emitted_events=ctx.emitted_events,
+                )
+
+        engine = _AlwaysBlockEngine(
+            snapshot_builder=_StubSnapshotBuilder(),
+            admission_service=_StubAdmissionService(admitted=True),
+            dedupe_store=InMemoryDedupeStore(),
+            executor=_StubExecutor(result={"acknowledged": True}),
+        )
+        result = asyncio.run(engine.run_turn(_build_turn_input(), _build_action()))
+        assert result.outcome_kind == "blocked"

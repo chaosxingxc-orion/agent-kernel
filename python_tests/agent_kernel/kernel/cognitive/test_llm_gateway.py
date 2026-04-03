@@ -7,12 +7,14 @@ Provider-dependent tests use mock/patch to avoid network calls.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from agent_kernel.kernel.cognitive.llm_gateway import (
+    BaseLLMGateway,
     EchoLLMGateway,
     LLMProviderError,
     LLMRateLimitError,
@@ -89,6 +91,16 @@ class TestLLMProviderError:
         exc = LLMRateLimitError("anthropic", 429, "too many requests")
         assert exc.provider == "anthropic"
         assert exc.status_code == 429
+
+    def test_rate_limit_error_retry_after_defaults_to_none(self) -> None:
+        """LLMRateLimitError.retry_after_s defaults to None when not provided."""
+        exc = LLMRateLimitError("openai", 429, "rate limited")
+        assert exc.retry_after_s is None
+
+    def test_rate_limit_error_accepts_retry_after_s(self) -> None:
+        """LLMRateLimitError accepts an explicit retry_after_s value."""
+        exc = LLMRateLimitError("openai", 429, "rate limited", retry_after_s=30.0)
+        assert exc.retry_after_s == 30.0
 
 
 # ---------------------------------------------------------------------------
@@ -422,3 +434,192 @@ class TestAnthropicLLMGatewayNormalise:
             assert tc["id"] == "tu-001"
             assert tc["name"] == "fetch_url"
             assert tc["arguments"] == {"url": "https://example.com"}
+
+
+# ---------------------------------------------------------------------------
+# P3e — _parse_retry_after and _with_rate_limit_retry with Retry-After header
+# ---------------------------------------------------------------------------
+
+
+class TestParseRetryAfter:
+    """Tests for the _parse_retry_after helper."""
+
+    def test_returns_none_for_none_response(self) -> None:
+        from agent_kernel.kernel.cognitive.llm_gateway import _parse_retry_after
+
+        assert _parse_retry_after(None) is None
+
+    def test_returns_none_when_no_headers(self) -> None:
+        from agent_kernel.kernel.cognitive.llm_gateway import _parse_retry_after
+
+        resp = MagicMock(spec=[])  # no .headers attribute
+        assert _parse_retry_after(resp) is None
+
+    def test_returns_float_from_integer_header(self) -> None:
+        from agent_kernel.kernel.cognitive.llm_gateway import _parse_retry_after
+
+        resp = MagicMock()
+        resp.headers = {"retry-after": "30"}
+        assert _parse_retry_after(resp) == 30.0
+
+    def test_returns_float_from_float_header(self) -> None:
+        from agent_kernel.kernel.cognitive.llm_gateway import _parse_retry_after
+
+        resp = MagicMock()
+        resp.headers = {"retry-after": "5.5"}
+        assert _parse_retry_after(resp) == 5.5
+
+    def test_returns_none_for_unparseable_header(self) -> None:
+        from agent_kernel.kernel.cognitive.llm_gateway import _parse_retry_after
+
+        resp = MagicMock()
+        resp.headers = {"retry-after": "Thu, 01 Jan 2099 00:00:00 GMT"}
+        assert _parse_retry_after(resp) is None
+
+    def test_returns_none_when_header_absent(self) -> None:
+        from agent_kernel.kernel.cognitive.llm_gateway import _parse_retry_after
+
+        resp = MagicMock()
+        resp.headers = {}
+        assert _parse_retry_after(resp) is None
+
+
+class TestWithRateLimitRetryHeader:
+    """Tests that _with_rate_limit_retry uses Retry-After over exponential backoff."""
+
+    def test_uses_retry_after_when_present(self) -> None:
+        """When exc.retry_after_s is set, sleep should use that value, not backoff."""
+        from agent_kernel.kernel.cognitive.llm_gateway import (
+            LLMRateLimitError,
+            _with_rate_limit_retry,
+        )
+
+        calls: list[float] = []
+        exc_with_header = LLMRateLimitError("openai", 429, "limited", retry_after_s=7.0)
+
+        async def _factory() -> None:
+            raise exc_with_header
+
+        async def _run() -> None:
+            with patch("agent_kernel.kernel.cognitive.llm_gateway.asyncio.sleep") as mock_sleep:
+                mock_sleep.return_value = None
+                with contextlib.suppress(LLMRateLimitError):
+                    await _with_rate_limit_retry(_factory, "openai")
+                for call in mock_sleep.call_args_list:
+                    calls.append(call.args[0])
+
+        asyncio.run(_run())
+        # All sleeps should use Retry-After (7.0), not the 1.0/2.0 exponential defaults
+        assert all(delay == 7.0 for delay in calls), f"Expected 7.0, got {calls}"
+
+    def test_falls_back_to_exponential_without_retry_after(self) -> None:
+        """When retry_after_s is None, backoff should use exponential schedule."""
+        from agent_kernel.kernel.cognitive.llm_gateway import (
+            LLMRateLimitError,
+            _with_rate_limit_retry,
+        )
+
+        calls: list[float] = []
+        exc_no_header = LLMRateLimitError("openai", 429, "limited", retry_after_s=None)
+
+        async def _factory() -> None:
+            raise exc_no_header
+
+        async def _run() -> None:
+            with patch("agent_kernel.kernel.cognitive.llm_gateway.asyncio.sleep") as mock_sleep:
+                mock_sleep.return_value = None
+                with contextlib.suppress(LLMRateLimitError):
+                    await _with_rate_limit_retry(_factory, "openai")
+                for call in mock_sleep.call_args_list:
+                    calls.append(call.args[0])
+
+        asyncio.run(_run())
+        # First sleep = 1.0, second sleep = 2.0
+        assert calls == [1.0, 2.0], f"Expected [1.0, 2.0], got {calls}"
+
+
+# ---------------------------------------------------------------------------
+# R4b — BaseLLMGateway shared base class
+# ---------------------------------------------------------------------------
+
+
+class TestBaseLLMGateway:
+    """Verifies the shared base class behaviour inherited by both concrete gateways."""
+
+    def _make_base(self) -> BaseLLMGateway:
+        return BaseLLMGateway()
+
+    def test_count_tokens_non_zero(self) -> None:
+        base = self._make_base()
+        ctx = _make_context(system_instructions="Hello, world!")
+        result = asyncio.run(base.count_tokens(ctx, "test-model"))
+        assert result >= 1
+
+    def test_count_tokens_proportional_to_input_length(self) -> None:
+        base = self._make_base()
+        short_ctx = _make_context(system_instructions="Hi")
+        long_ctx = _make_context(system_instructions="Hi " * 200)
+        short_result = asyncio.run(base.count_tokens(short_ctx, "test-model"))
+        long_result = asyncio.run(base.count_tokens(long_ctx, "test-model"))
+        assert long_result > short_result
+
+    def test_count_tokens_includes_history(self) -> None:
+        base = self._make_base()
+        ctx_no_history = _make_context(system_instructions="sys", history=[])
+        ctx_with_history = _make_context(
+            system_instructions="sys", history=[{"role": "user", "content": "x" * 400}]
+        )
+        no_hist = asyncio.run(base.count_tokens(ctx_no_history, "test-model"))
+        with_hist = asyncio.run(base.count_tokens(ctx_with_history, "test-model"))
+        assert with_hist > no_hist
+
+    def test_call_with_retry_returns_value_on_success(self) -> None:
+        base = self._make_base()
+
+        async def _factory() -> str:
+            return "ok"
+
+        result = asyncio.run(base._call_with_retry(_factory, "test"))
+        assert result == "ok"
+
+    def test_call_with_retry_propagates_rate_limit_after_exhaustion(self) -> None:
+        base = self._make_base()
+
+        async def _factory() -> None:
+            raise LLMRateLimitError("test", 429, "limited", retry_after_s=0.0)
+
+        async def _run() -> None:
+            with patch("agent_kernel.kernel.cognitive.llm_gateway.asyncio.sleep"):
+                await base._call_with_retry(_factory, "test")
+
+        with pytest.raises(LLMRateLimitError):
+            asyncio.run(_run())
+
+    def test_openai_gateway_inherits_base(self) -> None:
+        import importlib
+
+        import agent_kernel.kernel.cognitive.llm_gateway as _mod
+
+        _mod = importlib.reload(_mod)
+        assert issubclass(_mod.OpenAILLMGateway, _mod.BaseLLMGateway)
+
+    def test_anthropic_gateway_inherits_base(self) -> None:
+        import importlib
+
+        import agent_kernel.kernel.cognitive.llm_gateway as _mod
+
+        _mod = importlib.reload(_mod)
+        assert issubclass(_mod.AnthropicLLMGateway, _mod.BaseLLMGateway)
+
+    def test_openai_gateway_count_tokens_uses_base(self) -> None:
+        """OpenAI gateway count_tokens is inherited from base — not overridden."""
+        from agent_kernel.kernel.cognitive.llm_gateway import OpenAILLMGateway
+
+        # Verify the method is *not* defined on the concrete class itself.
+        assert "count_tokens" not in OpenAILLMGateway.__dict__
+
+    def test_anthropic_gateway_count_tokens_uses_base(self) -> None:
+        """Anthropic gateway count_tokens is inherited from base — not overridden."""
+        from agent_kernel.kernel.cognitive.llm_gateway import AnthropicLLMGateway
+
+        assert "count_tokens" not in AnthropicLLMGateway.__dict__

@@ -12,12 +12,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from agent_kernel.kernel.contracts import Action, ActionCommit, RuntimeEvent
-
 
 # ---------------------------------------------------------------------------
 # Minimal mock OTel tracer infrastructure (no sdk dependency)

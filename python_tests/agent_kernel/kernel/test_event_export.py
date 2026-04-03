@@ -12,22 +12,16 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, patch
-
-import pytest
+from unittest.mock import AsyncMock
 
 from agent_kernel.kernel.contracts import Action, ActionCommit, RuntimeEvent
 from agent_kernel.kernel.event_export import (
     EventExportingEventLog,
     InMemoryRunTraceStore,
-    RunTrace,
-    TurnTrace,
 )
 from agent_kernel.kernel.minimal_runtime import InMemoryKernelRuntimeEventLog
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -219,7 +213,9 @@ class TestInMemoryRunTraceStore:
             store.export_commit(_make_commit("run-b", offset=1, event_types=["run.started"]))
         )
         asyncio.run(
-            store.export_commit(_make_commit("run-b", offset=2, event_types=["run.started", "run.ready"]))
+            store.export_commit(
+                _make_commit("run-b", offset=2, event_types=["run.started", "run.ready"])
+            )
         )
         trace = store.get("run-b")
         assert trace is not None
@@ -393,7 +389,9 @@ class TestInMemoryRunTraceStore:
     def test_first_and_last_commit_timestamps_recorded(self) -> None:
         store = InMemoryRunTraceStore()
         asyncio.run(store.export_commit(_make_commit("run-ts", event_types=["run.started"])))
-        asyncio.run(store.export_commit(_make_commit("run-ts", offset=2, event_types=["run.ready"])))
+        asyncio.run(
+            store.export_commit(_make_commit("run-ts", offset=2, event_types=["run.ready"]))
+        )
         trace = store.get("run-ts")
         assert trace is not None
         assert trace.first_commit_at is not None
@@ -425,9 +423,8 @@ class TestKernelRuntimeConfigExportWiring:
 
     def test_build_services_projection_reads_from_inner_not_wrapper(self) -> None:
         """Projection service must always read from the raw storage layer."""
-        from agent_kernel.kernel.minimal_runtime import InMemoryDecisionProjectionService
-        from agent_kernel.runtime.kernel_runtime import KernelRuntimeConfig, _build_services
         from agent_kernel.kernel.minimal_runtime import InMemoryKernelRuntimeEventLog
+        from agent_kernel.runtime.kernel_runtime import KernelRuntimeConfig, _build_services
 
         store = InMemoryRunTraceStore()
         config = KernelRuntimeConfig(event_export_port=store)

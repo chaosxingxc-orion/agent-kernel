@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
-
-import pytest
+from unittest.mock import MagicMock
 
 from agent_kernel.kernel.capability_snapshot import CapabilitySnapshot
 from agent_kernel.kernel.cognitive.context_port import InMemoryContextPort
@@ -17,10 +15,8 @@ from agent_kernel.kernel.contracts import (
     ContextWindow,
     InferenceConfig,
     ModelOutput,
-    RuntimeEvent,
 )
 from agent_kernel.kernel.reasoning_loop import ReasoningLoop, ReasoningResult
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -349,3 +345,104 @@ class TestRecoveryContextPassthrough:
             )
         )
         assert captured_context == [None]
+
+
+# ---------------------------------------------------------------------------
+# Test: prebuilt_context bypasses context_port
+# ---------------------------------------------------------------------------
+
+
+class TestPrebuiltContext:
+    """Tests that prebuilt_context parameter bypasses context_port.assemble()."""
+
+    def test_prebuilt_context_skips_context_port(self) -> None:
+        """When prebuilt_context is provided, context_port.assemble is not called."""
+        assemble_called: list[bool] = []
+
+        class TrackingContextPort:
+            async def assemble(
+                self,
+                run_id: str,
+                snapshot: Any,
+                history: list[Any],
+                inference_config: InferenceConfig | None = None,
+                recovery_context: dict | None = None,
+            ) -> ContextWindow:
+                assemble_called.append(True)
+                return ContextWindow(system_instructions="from_port")
+
+        loop = ReasoningLoop(
+            context_port=TrackingContextPort(),
+            llm_gateway=EchoLLMGateway(),
+            output_parser=ToolCallOutputParser(),
+        )
+        snapshot = _make_snapshot()
+        prebuilt = ContextWindow(
+            system_instructions="prebuilt",
+            tool_definitions=(
+                MagicMock(name="my_tool"),
+            ),
+        )
+        asyncio.run(
+            loop.run_once(
+                run_id="run-1",
+                snapshot=snapshot,
+                history=[],
+                inference_config=_make_inference_config(),
+                prebuilt_context=prebuilt,
+            )
+        )
+        assert assemble_called == [], "context_port.assemble should NOT be called"
+
+    def test_prebuilt_context_used_as_context_window(self) -> None:
+        """When prebuilt_context is provided, the result contains it as context_window."""
+        loop = ReasoningLoop(
+            context_port=InMemoryContextPort(),
+            llm_gateway=EchoLLMGateway(),
+            output_parser=ToolCallOutputParser(),
+        )
+        snapshot = _make_snapshot()
+        prebuilt = ContextWindow(system_instructions="from_prebuilt")
+        result = asyncio.run(
+            loop.run_once(
+                run_id="run-1",
+                snapshot=snapshot,
+                history=[],
+                inference_config=_make_inference_config(),
+                prebuilt_context=prebuilt,
+            )
+        )
+        assert result.context_window is prebuilt
+
+    def test_none_prebuilt_context_uses_context_port(self) -> None:
+        """When prebuilt_context is None (default), context_port.assemble is called."""
+        assemble_called: list[bool] = []
+
+        class TrackingContextPort:
+            async def assemble(
+                self,
+                run_id: str,
+                snapshot: Any,
+                history: list[Any],
+                inference_config: InferenceConfig | None = None,
+                recovery_context: dict | None = None,
+            ) -> ContextWindow:
+                assemble_called.append(True)
+                return ContextWindow(system_instructions="from_port")
+
+        loop = ReasoningLoop(
+            context_port=TrackingContextPort(),
+            llm_gateway=EchoLLMGateway(),
+            output_parser=ToolCallOutputParser(),
+        )
+        snapshot = _make_snapshot()
+        asyncio.run(
+            loop.run_once(
+                run_id="run-1",
+                snapshot=snapshot,
+                history=[],
+                inference_config=_make_inference_config(),
+                prebuilt_context=None,
+            )
+        )
+        assert assemble_called == [True], "context_port.assemble SHOULD be called"

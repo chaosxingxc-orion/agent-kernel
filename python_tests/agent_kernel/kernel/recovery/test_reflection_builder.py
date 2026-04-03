@@ -14,7 +14,6 @@ from agent_kernel.kernel.contracts import (
 )
 from agent_kernel.kernel.recovery.reflection_builder import ReflectionContextBuilder
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

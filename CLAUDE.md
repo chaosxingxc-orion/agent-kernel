@@ -18,12 +18,12 @@ python -m pytest -q python_tests/agent_kernel/kernel/persistence
 python -m pytest -q python_tests/agent_kernel/kernel/test_turn_engine.py::TestClassName::test_method_name
 
 # Lint
-ruff check python_src/ python_tests/
-ruff format python_src/ python_tests/
-pylint python_src/
+ruff check agent_kernel/ python_tests/
+ruff format agent_kernel/ python_tests/
+pylint agent_kernel/
 ```
 
-Pytest is configured in `pyproject.toml` with `pythonpath = ["python_src"]` and `testpaths = ["python_tests"]`.
+Pytest is configured in `pyproject.toml` with `pythonpath = ["."]` and `testpaths = ["python_tests"]`.
 
 ## Architecture
 

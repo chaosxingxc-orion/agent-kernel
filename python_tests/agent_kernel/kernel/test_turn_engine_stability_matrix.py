@@ -48,9 +48,6 @@ class _Admission:
     async def admit(self, *_args: Any, **_kwargs: Any) -> bool:
         return self.admitted
 
-    async def check(self, *_args: Any, **_kwargs: Any) -> bool:
-        return self.admitted
-
 
 @dataclass(slots=True)
 class _Executor:
