@@ -4,7 +4,7 @@
 >
 > 标注说明：**✓ 已实现** | **○ 待实现**
 >
-> 测试覆盖：6 794 通过（2026-04-03）
+> 测试覆盖：6 814 通过（2026-04-04）
 
 ---
 
@@ -28,9 +28,12 @@
 ║                                                                              ║
 ║  KernelFacade ✓  ←── 唯一平台入口                                            ║
 ║  KernelRuntime ✓ ←── 单系统入口，一次 start() 装配全部服务                    ║
-║       ├── TemporalSDKWorkflowGateway ✓                                       ║
+║       ├── RuntimeSubstrate (Protocol) ✓  ←── 可插拔执行基底接口              ║
+║       │     ├── TemporalAdaptor ✓  ←── Temporal 作为托管组件                 ║
+║       │     │     ├── mode="sdk"  连接外部 Temporal 集群                     ║
+║       │     │     └── mode="host" 启动内嵌 dev-server（无需外部进程）         ║
+║       │     └── LocalFSMAdaptor ✓  ←── 直接驱动 TurnEngine（开发/嵌入）      ║
 ║       ├── KernelHealthProbe ✓ (liveness / readiness)                        ║
-║       ├── worker_task ✓ (asyncio background + done_callback)                ║
 ║       └── RunActorDependencyBundle ✓ (共享服务实例)                           ║
 ╚══════════════════════════════╦═══════════════════════════════════════════════╝
                                ║
@@ -61,7 +64,23 @@
                                ║
                                ▼
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  TEMPORAL SUBSTRATE（持久执行基底）                                            ║
+║  RUNTIME SUBSTRATE LAYER（可插拔执行基底层）                                   ║
+║                                                                              ║
+║  ┌──────────────────────────────────────┐  ┌───────────────────────────┐    ║
+║  │  TemporalAdaptor ✓                   │  │  LocalFSMAdaptor ✓         │    ║
+║  │  substrate/temporal/adaptor.py       │  │  substrate/local/adaptor.py│    ║
+║  │                                      │  │                           │    ║
+║  │  mode="sdk"                          │  │  直接驱动 RunActorWorkflow  │    ║
+║  │    Client.connect(address)           │  │  asyncio.create_task()     │    ║
+║  │    ── 外部 Temporal 集群             │  │  ── 无需外部进程            │    ║
+║  │                                      │  │  ── 适合开发/嵌入/测试      │    ║
+║  │  mode="host"                         │  │                           │    ║
+║  │    WorkflowEnvironment.start_local() │  │  LocalWorkflowGateway ✓   │    ║
+║  │    ── 内嵌 dev-server（无外部进程）   │  │    _workflows: dict        │    ║
+║  │                                      │  │    _run_tasks: dict        │    ║
+║  │  内核托管：start(deps) / stop()       │  │    signal/cancel/query     │    ║
+║  │  Temporal SDK 类型不逃逸出此模块      │  │    全部 in-process 路由     │    ║
+║  └──────────────────────────────────────┘  └───────────────────────────┘    ║
 ║                                                                              ║
 ║  Temporal Server: Workflow History │ Task Queues │ Timers │ Replay Engine   ║
 ╚══════════════════════════════╦═══════════════════════════════════════════════╝
@@ -462,7 +481,8 @@ RecoveryGateService        ←── PlannedGate             ML Planner / Rule D
 RecoveryOutcomeStore       ←── InMemory / SQLite        Postgres
 DedupeStorePort            ←── InMemory / SQLite        Redis
 TurnIntentLog              ←── InMemory / SQLite        SQLite
-TemporalWorkflowGateway    ←── TemporalSDK              Mock / Test harness
+TemporalWorkflowGateway    ←── TemporalSDKWorkflowGateway  Mock / Test harness
+RuntimeSubstrate           ←── TemporalAdaptor ✓          LocalFSMAdaptor ✓
 ObservabilityHook          ←── Logging / OTel           Composite / Custom
 EventExportPort            ←── InMemoryRunTrace         OTLPExporter / Kafka
 LLMGateway ✓               ←── OpenAI / Anthropic (PoC)  Full Provider Matrix ○
@@ -481,17 +501,18 @@ Registry Extension Points ✓：
 ## 十一、关键不变量
 
 ```
-1. ✓ 单一规范路径：Platform → KernelFacade → Temporal → RunActorWorkflow → TurnEngine
+1. ✓ 单一规范路径：Platform → KernelFacade → RuntimeSubstrate → RunActorWorkflow → TurnEngine
 2. ✓ 事件真相不可变：EventLog append-only，derived_diagnostic 不参与决策
 3. ✓ Admission 是副作用唯一门：approve_state 约束强制 readonly
 4. ✓ At-most-once dispatch：DedupeStore 单调状态机，无逆转
 5. ✓ Recovery 不写 EventLog：RecoveryOutcomeStore 独立存储
-6. ✓ Temporal 是 substrate：投影真相来自 EventLog replay
+6. ✓ 基底受内核托管：KernelRuntime 拥有 RuntimeSubstrate 生命周期，Temporal 是其中一个实现
 7. ✓ DTO 不可变：frozen=True, slots=True
 8. ✓ 进化层不阻塞操作层：fire-and-forget，Projection 读 raw inner
 9. ✓ 上下文工程不旁路：所有模型输入经 ContextPort，不允许平台直接拼 prompt 绕过内核
 10. ✓ 模型推理是受治理的动作：LLM 调用有幂等键 / Token 预算 / Temporal Activity 边界
 11. ✓ 反思轮次有上界：ReflectionPolicy.max_rounds 防止无限反思循环
+12. ✓ 基底连接模式可配置：TemporalSubstrateConfig.mode="sdk"|"host" 统一入口，无需外部脚本
 ```
 
 ---
@@ -503,6 +524,9 @@ Registry Extension Points ✓：
 | 六权威协议 | ✓ | `kernel/contracts.py` + 各实现 |
 | TurnEngine FSM（串行） | ✓ | `kernel/turn_engine.py` |
 | KernelRuntime 单系统入口 | ✓ | `runtime/kernel_runtime.py` |
+| RuntimeSubstrate Protocol | ✓ | `kernel/contracts.py` |
+| TemporalAdaptor（sdk + host 模式） | ✓ | `substrate/temporal/adaptor.py` |
+| LocalFSMAdaptor | ✓ | `substrate/local/adaptor.py` |
 | KernelFacade 平台入口 | ✓ | `adapters/facade/kernel_facade.py` |
 | CapabilitySnapshot v2 | ✓ | `kernel/capability_snapshot.py` |
 | DedupeStore（InMemory+SQLite） | ✓ | `kernel/dedupe_store.py` + persistence |

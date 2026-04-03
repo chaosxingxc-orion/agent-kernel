@@ -26,9 +26,9 @@ class _HostEchoSkillRuntime(SkillRuntime):
     async def execute(self, request: SkillRequest) -> SkillResult:
         """Executes request and returns deterministic success payload.
         Args:
-            request: (description)
+            request:
         Returns:
-            SkillResult: (description)
+            SkillResult:
         """
         return SkillResult(
             skill_id=self.definition.skill_id,
@@ -58,12 +58,12 @@ class DefaultSkillRuntimeFactory(
     ) -> SkillRuntime:
         """Creates runtime for one host kind.
         Args:
-            definition: (description)
-            host_kind: (description)
+            definition:
+            host_kind:
         Returns:
-            SkillRuntime: (description)
+            SkillRuntime:
         Raises:
-            Exception: (description)
+            Exception:
         """
         if host_kind == "cli_process":
             return await self.create_cli_process(definition)
@@ -76,26 +76,26 @@ class DefaultSkillRuntimeFactory(
     async def create_cli_process(self, definition: SkillDefinition) -> SkillRuntime:
         """Creates runtime bound to CLI process host.
         Args:
-            definition: (description)
+            definition:
         Returns:
-            SkillRuntime: (description)
+            SkillRuntime:
         """
         return _HostEchoSkillRuntime(definition=definition, host_kind="cli_process")
 
     async def create_in_process_python(self, definition: SkillDefinition) -> SkillRuntime:
         """Creates runtime bound to in-process Python host.
         Args:
-            definition: (description)
+            definition:
         Returns:
-            SkillRuntime: (description)
+            SkillRuntime:
         """
         return _HostEchoSkillRuntime(definition=definition, host_kind="in_process_python")
 
     async def create_remote_service(self, definition: SkillDefinition) -> SkillRuntime:
         """Creates runtime bound to remote-service host.
         Args:
-            definition: (description)
+            definition:
         Returns:
-            SkillRuntime: (description)
+            SkillRuntime:
         """
         return _HostEchoSkillRuntime(definition=definition, host_kind="remote_service")

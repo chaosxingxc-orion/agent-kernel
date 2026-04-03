@@ -34,8 +34,8 @@ from agent_kernel.substrate.temporal.run_actor_workflow import (
 def test_build_services_in_memory_returns_shared_event_log() -> None:
     """Event log and projection service share the same instance."""
     config = KernelRuntimeConfig()
-    event_log, projection, admission, executor, recovery, deduper, _dedupe_store = (
-        _build_services(config)
+    event_log, projection, admission, executor, recovery, deduper, _dedupe_store = _build_services(
+        config
     )
 
     assert isinstance(event_log, InMemoryKernelRuntimeEventLog)
@@ -116,7 +116,7 @@ async def test_kernel_runtime_start_creates_worker_task() -> None:
     config = KernelRuntimeConfig(task_queue="test-q")
 
     with patch(
-        "agent_kernel.runtime.kernel_runtime.TemporalKernelWorker.run",
+        "agent_kernel.substrate.temporal.adaptor.TemporalKernelWorker.run",
         side_effect=_fake_worker_run,
     ):
         kernel = await KernelRuntime.start(config, temporal_client=mock_client)
@@ -134,7 +134,7 @@ async def test_kernel_runtime_stop_cancels_worker_task() -> None:
     config = KernelRuntimeConfig(task_queue="test-q")
 
     with patch(
-        "agent_kernel.runtime.kernel_runtime.TemporalKernelWorker.run",
+        "agent_kernel.substrate.temporal.adaptor.TemporalKernelWorker.run",
         side_effect=_fake_worker_run,
     ):
         kernel = await KernelRuntime.start(config, temporal_client=mock_client)
@@ -149,7 +149,7 @@ async def test_kernel_runtime_stop_is_idempotent() -> None:
     config = KernelRuntimeConfig(task_queue="test-q")
 
     with patch(
-        "agent_kernel.runtime.kernel_runtime.TemporalKernelWorker.run",
+        "agent_kernel.substrate.temporal.adaptor.TemporalKernelWorker.run",
         side_effect=_fake_worker_run,
     ):
         kernel = await KernelRuntime.start(config, temporal_client=mock_client)
@@ -164,7 +164,7 @@ async def test_kernel_runtime_context_manager_stops_on_exit() -> None:
     config = KernelRuntimeConfig(task_queue="test-q")
 
     with patch(
-        "agent_kernel.runtime.kernel_runtime.TemporalKernelWorker.run",
+        "agent_kernel.substrate.temporal.adaptor.TemporalKernelWorker.run",
         side_effect=_fake_worker_run,
     ):
         async with await KernelRuntime.start(config, temporal_client=mock_client) as kernel:
@@ -180,7 +180,7 @@ async def test_kernel_runtime_exposes_facade_and_gateway() -> None:
     config = KernelRuntimeConfig(task_queue="test-q")
 
     with patch(
-        "agent_kernel.runtime.kernel_runtime.TemporalKernelWorker.run",
+        "agent_kernel.substrate.temporal.adaptor.TemporalKernelWorker.run",
         side_effect=_fake_worker_run,
     ):
         async with await KernelRuntime.start(config, temporal_client=mock_client) as kernel:
@@ -205,11 +205,11 @@ async def test_kernel_runtime_wires_dependencies_before_worker_task() -> None:
 
     with (
         patch(
-            "agent_kernel.runtime.kernel_runtime.TemporalKernelWorker.run",
+            "agent_kernel.substrate.temporal.adaptor.TemporalKernelWorker.run",
             side_effect=_fake_worker_run,
         ),
         patch(
-            "agent_kernel.runtime.kernel_runtime.configure_run_actor_dependencies",
+            "agent_kernel.substrate.temporal.adaptor.configure_run_actor_dependencies",
             side_effect=_capture_configure,
         ),
     ):
@@ -225,11 +225,12 @@ async def test_kernel_runtime_clears_dependencies_on_stop() -> None:
     from agent_kernel.substrate.temporal.run_actor_workflow import (
         _RUN_ACTOR_CONFIG_FALLBACK,
     )
+
     mock_client = _make_mock_temporal_client()
     config = KernelRuntimeConfig(task_queue="test-q")
 
     with patch(
-        "agent_kernel.runtime.kernel_runtime.TemporalKernelWorker.run",
+        "agent_kernel.substrate.temporal.adaptor.TemporalKernelWorker.run",
         side_effect=_fake_worker_run,
     ):
         kernel = await KernelRuntime.start(config, temporal_client=mock_client)
@@ -245,7 +246,7 @@ async def test_kernel_runtime_worker_failed_false_while_running() -> None:
     config = KernelRuntimeConfig(task_queue="test-q")
 
     with patch(
-        "agent_kernel.runtime.kernel_runtime.TemporalKernelWorker.run",
+        "agent_kernel.substrate.temporal.adaptor.TemporalKernelWorker.run",
         side_effect=_fake_worker_run,
     ):
         async with await KernelRuntime.start(config, temporal_client=mock_client) as kernel:
@@ -262,7 +263,7 @@ async def test_kernel_runtime_check_worker_raises_on_failure() -> None:
         raise RuntimeError("worker boom")
 
     with patch(
-        "agent_kernel.runtime.kernel_runtime.TemporalKernelWorker.run",
+        "agent_kernel.substrate.temporal.adaptor.TemporalKernelWorker.run",
         side_effect=_fail_immediately,
     ):
         kernel = await KernelRuntime.start(config, temporal_client=mock_client)
@@ -282,7 +283,7 @@ async def test_kernel_runtime_no_config_uses_defaults() -> None:
     mock_client = _make_mock_temporal_client()
 
     with patch(
-        "agent_kernel.runtime.kernel_runtime.TemporalKernelWorker.run",
+        "agent_kernel.substrate.temporal.adaptor.TemporalKernelWorker.run",
         side_effect=_fake_worker_run,
     ):
         async with await KernelRuntime.start(temporal_client=mock_client) as kernel:
@@ -297,7 +298,7 @@ async def test_kernel_runtime_worker_done_callback_fires_on_cancel() -> None:
     fired: list[Any] = []
 
     with patch(
-        "agent_kernel.runtime.kernel_runtime.TemporalKernelWorker.run",
+        "agent_kernel.substrate.temporal.adaptor.TemporalKernelWorker.run",
         side_effect=_fake_worker_run,
     ):
         kernel = await KernelRuntime.start(config, temporal_client=mock_client)
@@ -319,7 +320,7 @@ async def test_kernel_runtime_worker_done_callback_fires_on_failure() -> None:
         raise RuntimeError("boom")
 
     with patch(
-        "agent_kernel.runtime.kernel_runtime.TemporalKernelWorker.run",
+        "agent_kernel.substrate.temporal.adaptor.TemporalKernelWorker.run",
         side_effect=_fail_immediately,
     ):
         kernel = await KernelRuntime.start(config, temporal_client=mock_client)
@@ -340,7 +341,7 @@ async def test_kernel_runtime_services_share_event_log_instance() -> None:
     config = KernelRuntimeConfig()
 
     with patch(
-        "agent_kernel.runtime.kernel_runtime.TemporalKernelWorker.run",
+        "agent_kernel.substrate.temporal.adaptor.TemporalKernelWorker.run",
         side_effect=_fake_worker_run,
     ):
         async with await KernelRuntime.start(config, temporal_client=mock_client) as kernel:

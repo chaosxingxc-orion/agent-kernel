@@ -85,10 +85,10 @@ class _SharedConnectionEventLog:
     async def load(self, run_id: str, after_offset: int = 0) -> list[RuntimeEvent]:
         """Loads events for a run after ``after_offset``.
         Args:
-            run_id: (description)
-            after_offset: (description)
+            run_id:
+            after_offset:
         Returns:
-            list[RuntimeEvent]: (description)
+            list[RuntimeEvent]:
         """
         query = """
             SELECT
@@ -263,10 +263,10 @@ class _SharedConnectionDedupeStore:
     ) -> None:
         """Transitions record to ``dispatched`` state.
         Args:
-            dispatch_idempotency_key: (description)
-            peer_operation_id: (description)
+            dispatch_idempotency_key:
+            peer_operation_id:
         Raises:
-            Exception: (description)
+            Exception:
         """
         with self._lock:
             try:
@@ -306,10 +306,10 @@ class _SharedConnectionDedupeStore:
     ) -> None:
         """Transitions record to ``acknowledged`` state.
         Args:
-            dispatch_idempotency_key: (description)
-            external_ack_ref: (description)
+            dispatch_idempotency_key:
+            external_ack_ref:
         Raises:
-            Exception: (description)
+            Exception:
         """
         with self._lock:
             try:
@@ -349,9 +349,9 @@ class _SharedConnectionDedupeStore:
     def mark_unknown_effect(self, dispatch_idempotency_key: str) -> None:
         """Transitions record to ``unknown_effect`` state.
         Args:
-            dispatch_idempotency_key: (description)
+            dispatch_idempotency_key:
         Raises:
-            Exception: (description)
+            Exception:
         """
         with self._lock:
             try:
@@ -391,9 +391,9 @@ class _SharedConnectionDedupeStore:
     def get(self, dispatch_idempotency_key: str) -> DedupeRecord | None:
         """Returns dedupe record by key, or ``None``.
         Args:
-            dispatch_idempotency_key: (description)
+            dispatch_idempotency_key:
         Returns:
-            DedupeRecord | None: (description)
+            DedupeRecord | None:
         """
         with self._lock:
             return self._get(dispatch_idempotency_key)
@@ -573,7 +573,8 @@ class ColocatedSQLiteBundle:
 
     def _initialize_schema(self) -> None:
         """Creates colocated tables and indexes when absent."""
-        self._conn.executescript("""
+        self._conn.executescript(
+            """
             CREATE TABLE IF NOT EXISTS colocated_action_commits (
                 commit_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                 stream_run_id TEXT NOT NULL,
@@ -617,4 +618,5 @@ class ColocatedSQLiteBundle:
                 peer_operation_id TEXT,
                 external_ack_ref TEXT
             );
-            """)
+            """
+        )

@@ -59,7 +59,7 @@ class ConsistencyReport:
     def is_consistent(self) -> bool:
         """``True`` when no violations were detected.
         Returns:
-            bool: (description)
+            bool:
         """
         return len(self.violations) == 0
 

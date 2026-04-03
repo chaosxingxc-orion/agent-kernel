@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from agent_kernel.kernel.contracts import ScriptActivityInput, ScriptResult
 
+
 # ---------------------------------------------------------------------------
 # Descriptor
 # ---------------------------------------------------------------------------
@@ -97,32 +98,32 @@ class ScriptRuntimeRegistry:
     def get(self, host_kind: str) -> Any | None:
         """Return the registered runtime for *host_kind*, or ``None``.
         Args:
-            host_kind: (description)
+            host_kind:
         Returns:
-            Any | None: (description)
+            Any | None:
         """
         return self._runtimes.get(host_kind)
 
     def get_descriptor(self, host_kind: str) -> ScriptRuntimeDescriptor | None:
         """Return the descriptor for *host_kind*, or ``None``.
         Args:
-            host_kind: (description)
+            host_kind:
         Returns:
-            ScriptRuntimeDescriptor | None: (description)
+            ScriptRuntimeDescriptor | None:
         """
         return self._descriptors.get(host_kind)
 
     def known_host_kinds(self) -> list[str]:
         """Return all registered host_kind strings.
         Returns:
-            list[str]: (description)
+            list[str]:
         """
         return list(self._runtimes.keys())
 
     def all_descriptors(self) -> list[ScriptRuntimeDescriptor]:
         """Return all registered descriptors.
         Returns:
-            list[ScriptRuntimeDescriptor]: (description)
+            list[ScriptRuntimeDescriptor]:
         """
         return list(self._descriptors.values())
 
@@ -197,6 +198,7 @@ def _register_builtin_runtimes(registry: ScriptRuntimeRegistry) -> None:
 KERNEL_SCRIPT_RUNTIME_REGISTRY = ScriptRuntimeRegistry()
 _register_builtin_runtimes(KERNEL_SCRIPT_RUNTIME_REGISTRY)
 
+
 # ---------------------------------------------------------------------------
 # Convenience validator
 # ---------------------------------------------------------------------------
@@ -213,7 +215,7 @@ def validate_host_kind(host_kind: str, *, strict: bool = False) -> bool:
         True if known, False otherwise (unless *strict* raises first).
 
         Raises:
-            Exception: (description)
+            Exception:
     """
     if host_kind in KERNEL_SCRIPT_RUNTIME_REGISTRY.known_host_kinds():
         return True

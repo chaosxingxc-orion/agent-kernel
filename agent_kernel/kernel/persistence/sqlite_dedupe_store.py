@@ -49,8 +49,6 @@ class SQLiteDedupeStore:
         The checkpoint is best-effort — failures are silently suppressed so
         that a crashed connection can still be closed.
         """
-        import contextlib
-
         with contextlib.suppress(Exception):
             self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         self._conn.close()
@@ -65,7 +63,7 @@ class SQLiteDedupeStore:
             Reservation result indicating acceptance or duplicate.
 
         Raises:
-            Exception: (description)
+            DedupeStoreStateError: If the key exists in an incompatible state.
         """
         # BEGIN IMMEDIATE acquires a write lock upfront, preventing TOCTOU
         # between the existence check and the INSERT across concurrent processes.

@@ -1,27 +1,36 @@
 """Unified kernel runtime: single-system lifecycle for kernel + Temporal worker.
 
 Design rationale:
-  The prior dual-system approach required the caller to:
-    1. Start a Temporal worker separately.
-    2. Call ``configure_run_actor_dependencies()`` at the right time.
-    3. Build ``AgentKernelRuntimeBundle`` with a matching config.
-  Any ordering mistake produced silent state divergence between the
-  facade's event log and the workflow's event log.
+  ``KernelRuntime`` is the single entry point that assembles the kernel and
+  its execution substrate into one managed system.
 
-  ``KernelRuntime`` eliminates this by owning the full lifecycle:
-    - One call to ``KernelRuntime.start()`` connects to Temporal, wires
-      all service instances, starts the worker as a background asyncio task,
-      and returns a fully operational kernel handle.
-    - ``KernelRuntime.stop()`` (or the async context manager) gracefully
-      shuts down the worker and clears process-local dependency state.
+  Substrate architecture:
+    The kernel *owns* its substrate — the substrate is a managed component,
+    not a dependency the kernel passively connects to.  ``KernelRuntime.start()``
+    creates a ``TemporalAdaptor`` (or a custom ``RuntimeSubstrate``), wires
+    all service instances into it, and starts it.  ``stop()`` (or the async
+    context manager) shuts everything down in the correct order.
 
-  The kernel and its Temporal worker are now one system, not two.
+  Temporal connection modes (via ``TemporalSubstrateConfig.mode``):
+    ``"sdk"``  — connects to an external Temporal cluster via
+                 ``Client.connect(address)``.  The default; suitable for
+                 production with a managed Temporal service.
+    ``"host"`` — starts an embedded Temporal dev-server via
+                 ``WorkflowEnvironment.start_local()`` (requires
+                 ``pip install 'temporalio[testing]'``).  No external process
+                 needed; suitable for local development and CI.
+
+  Backward compatibility:
+    The flat ``temporal_address``, ``temporal_namespace``, ``task_queue``,
+    ``workflow_id_prefix``, and ``strict_mode_enabled`` fields on
+    ``KernelRuntimeConfig`` remain available.  When ``substrate`` is ``None``
+    (the default) those fields are forwarded to a ``TemporalSubstrateConfig``
+    automatically.  Pass an explicit ``substrate`` to use a different mode or
+    override individual Temporal settings.
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Self
@@ -47,20 +56,11 @@ from agent_kernel.kernel.minimal_runtime import (
     StaticRecoveryGateService,
 )
 from agent_kernel.runtime.health import KernelHealthProbe
-from agent_kernel.substrate.temporal.gateway import (
-    TemporalGatewayConfig,
-    TemporalSDKWorkflowGateway,
-)
+from agent_kernel.substrate.local.adaptor import LocalFSMAdaptor, LocalSubstrateConfig
+from agent_kernel.substrate.temporal.adaptor import TemporalAdaptor, TemporalSubstrateConfig
 from agent_kernel.substrate.temporal.run_actor_workflow import (
     RunActorDependencyBundle,
     RunActorStrictModeConfig,
-    RunActorWorkflow,
-    clear_run_actor_dependencies,
-    configure_run_actor_dependencies,
-)
-from agent_kernel.substrate.temporal.worker import (
-    TemporalKernelWorker,
-    TemporalWorkerConfig,
 )
 
 _runtime_logger = logging.getLogger(__name__)
@@ -70,29 +70,45 @@ _runtime_logger = logging.getLogger(__name__)
 class KernelRuntimeConfig:
     """Unified configuration for the single-system kernel runtime.
 
-    All components — event log, worker, facade, and gateway — are wired
-    from this one config object.  No external bootstrap code required.
+    All components — event log, substrate adaptor, facade, and gateway — are
+    wired from this one config object.  No external bootstrap code required.
+
+    Substrate selection:
+        When ``substrate`` is ``None`` (default) the flat ``temporal_address``,
+        ``temporal_namespace``, ``task_queue``, ``workflow_id_prefix``, and
+        ``strict_mode_enabled`` fields are forwarded to a default
+        ``TemporalSubstrateConfig(mode="sdk")`` automatically.
+
+        Pass an explicit ``TemporalSubstrateConfig`` to switch modes or
+        override individual Temporal settings::
+
+            # Host mode — embedded dev-server, no external Temporal needed
+            config = KernelRuntimeConfig(
+                substrate=TemporalSubstrateConfig(mode="host"),
+            )
 
     Attributes:
-        task_queue: Temporal task queue for kernel workflow workers.
+        task_queue: Temporal task queue.  Ignored when ``substrate`` is set.
         temporal_address: Temporal server address (host:port).
-        temporal_namespace: Temporal namespace for workflow isolation.
+            Ignored when ``substrate`` is set.
+        temporal_namespace: Temporal namespace.  Ignored when ``substrate`` is set.
         event_log_backend: Storage backend for the kernel event log.
         sqlite_database_path: SQLite file path when backend is ``"sqlite"``.
             Use ``":memory:"`` for an in-process SQLite store.
         strict_mode_enabled: Requires ``capability_snapshot_input`` and
             ``declarative_bundle_digest`` on every workflow turn when True.
-        workflow_id_prefix: Prefix used to build Temporal workflow ids from
-            run ids (e.g. ``"run"`` yields workflow id ``"run:<run_id>"``).
+            Ignored when ``substrate`` is set (use ``substrate.strict_mode_enabled``).
+        workflow_id_prefix: Prefix used to build Temporal workflow ids.
+            Ignored when ``substrate`` is set.
         observability_hook: Optional hook that receives FSM state transition
             events.  Defaults to no-op when None.
         event_export_port: Optional platform-facing export sink.  When set,
             every ``ActionCommit`` is exported asynchronously after being
-            written to the kernel event log.  Use ``InMemoryRunTraceStore``
-            for development; use a streaming backend in production.
-        export_timeout_ms: Per-export soft timeout in milliseconds.  Exports
-            that exceed this are cancelled and logged at WARNING level.
+            written to the kernel event log.
+        export_timeout_ms: Per-export soft timeout in milliseconds.
             Default 5 000 ms.
+        substrate: Optional explicit substrate configuration.  When provided
+            takes full precedence over the flat Temporal fields above.
     """
 
     task_queue: str = "agent-kernel"
@@ -105,13 +121,14 @@ class KernelRuntimeConfig:
     observability_hook: ObservabilityHook | None = None
     event_export_port: EventExportPort | None = None
     export_timeout_ms: int = 5000
+    substrate: TemporalSubstrateConfig | LocalSubstrateConfig | None = None
 
 
 class KernelRuntime:
     """Single-system kernel runtime.
 
-    The kernel and its Temporal worker share one lifecycle.  Starting the
-    kernel starts the worker; stopping the kernel stops the worker.
+    The kernel and its substrate adaptor share one lifecycle.  Starting the
+    kernel starts the substrate; stopping the kernel stops the substrate.
 
     Typical usage::
 
@@ -119,6 +136,14 @@ class KernelRuntime:
         async with await KernelRuntime.start(config) as kernel:
             await kernel.facade.start_run(request)
             projection = await kernel.gateway.query_projection(run_id)
+
+    Host mode (embedded Temporal dev-server, no external process needed)::
+
+        config = KernelRuntimeConfig(
+            substrate=TemporalSubstrateConfig(mode="host"),
+        )
+        async with await KernelRuntime.start(config) as kernel:
+            ...
 
     For testing with a pre-wired Temporal client::
 
@@ -132,44 +157,29 @@ class KernelRuntime:
         self,
         *,
         facade: KernelFacade,
-        gateway: TemporalSDKWorkflowGateway,
+        adaptor: TemporalAdaptor,
         health: KernelHealthProbe,
-        worker_task: asyncio.Task[Any],
-        deps: RunActorDependencyBundle,
     ) -> None:
         self._facade = facade
-        self._gateway = gateway
+        self._adaptor = adaptor
         self._health = health
-        self._worker_task = worker_task
-        self._deps = deps
-        # Register a done callback so worker failures are never silently
-        # swallowed.
-        # The callback runs in the event loop thread and only logs; callers may
-        # also register their own callbacks via add_worker_done_callback().
-        self._worker_task.add_done_callback(self._on_worker_done)
-        self._worker_done_callbacks: list[Any] = []
 
-    def _on_worker_done(self, task: asyncio.Task[Any]) -> None:
-        """Internal done callback — logs worker exit and dispatches user callbacks."""
-        if task.cancelled():
-            _runtime_logger.info("KernelRuntime worker task cancelled — task=%s", task.get_name())
-        elif task.exception() is not None:
-            _runtime_logger.critical(
-                "KernelRuntime worker task FAILED — task=%s error=%r",
-                task.get_name(),
-                task.exception(),
-            )
-        else:
-            _runtime_logger.info(
-                "KernelRuntime worker task completed cleanly — task=%s",
-                task.get_name(),
-            )
-        for cb in self._worker_done_callbacks:
-            with contextlib.suppress(Exception):
-                cb(task)
+    # ------------------------------------------------------------------
+    # Backward-compat internal accessors (used by tests and heartbeat)
+    # ------------------------------------------------------------------
+
+    @property
+    def _worker_task(self) -> Any:
+        """Delegates to the adaptor's worker task (backward compat)."""
+        return self._adaptor._worker_task
+
+    @property
+    def _deps(self) -> Any:
+        """Delegates to the adaptor's dependency bundle (backward compat)."""
+        return self._adaptor._deps
 
     def add_worker_done_callback(self, callback: Any) -> None:
-        """Register a callback invoked when the worker background task exits.
+        """Register a callback invoked when the substrate worker task exits.
 
         Useful for triggering alerts or automatic restarts in long-running
         services.  The callback receives the completed ``asyncio.Task`` as its
@@ -178,7 +188,7 @@ class KernelRuntime:
         Args:
             callback: Callable that accepts one ``asyncio.Task`` argument.
         """
-        self._worker_done_callbacks.append(callback)
+        self._adaptor.add_worker_done_callback(callback)
 
     # ------------------------------------------------------------------
     # Factory
@@ -191,15 +201,19 @@ class KernelRuntime:
         *,
         temporal_client: Any | None = None,
     ) -> KernelRuntime:
-        """Start the kernel and its Temporal worker in a single call.
+        """Start the kernel and its substrate in a single call.
+
+        Assembles the service layer, builds the substrate adaptor, starts the
+        Temporal worker (in background), and returns a fully operational
+        ``KernelRuntime`` handle.
 
         Args:
             config: Runtime configuration.  Defaults to
                 ``KernelRuntimeConfig()`` when omitted.
             temporal_client: Pre-existing Temporal client.  When provided
-                the ``temporal_address`` and ``temporal_namespace`` fields
-                in ``config`` are ignored.  Useful for integration tests
-                that use ``WorkflowEnvironment``.
+                the ``temporal_address``, ``temporal_namespace``, and
+                ``substrate.mode`` fields are ignored.  Intended for
+                integration tests that supply a ``WorkflowEnvironment`` client.
 
         Returns:
             A fully operational ``KernelRuntime`` instance.
@@ -210,7 +224,20 @@ class KernelRuntime:
         if config is None:
             config = KernelRuntimeConfig()
 
-        client = temporal_client or await _connect_temporal(config)
+        # Build the substrate config — explicit substrate takes precedence
+        # over the flat backward-compat fields.
+        substrate_config: TemporalSubstrateConfig | LocalSubstrateConfig
+        if config.substrate is not None:
+            substrate_config = config.substrate
+        else:
+            substrate_config = TemporalSubstrateConfig(
+                mode="sdk",
+                address=config.temporal_address,
+                namespace=config.temporal_namespace,
+                task_queue=config.task_queue,
+                workflow_id_prefix=config.workflow_id_prefix,
+                strict_mode_enabled=config.strict_mode_enabled,
+            )
 
         # Build the shared service layer.  All components receive the
         # *same* instances so there is no risk of projection divergence.
@@ -226,76 +253,41 @@ class KernelRuntime:
             recovery=recovery,
             deduper=deduper,
             dedupe_store=dedupe_store,
-            strict_mode=RunActorStrictModeConfig(enabled=config.strict_mode_enabled),
-            workflow_id_prefix=config.workflow_id_prefix,
+            strict_mode=RunActorStrictModeConfig(enabled=substrate_config.strict_mode_enabled),
+            workflow_id_prefix=substrate_config.workflow_id_prefix,
             observability_hook=config.observability_hook,
         )
 
-        # Wire dependencies into the process-local registry immediately so
-        # they are available before the worker background task runs its
-        # first turn.  Store the returned token so stop() can clear *only
-        # this runtime's* registration without disturbing other runtimes.
-        configure_run_actor_dependencies(deps)
+        # Dispatch to the appropriate substrate adaptor.
+        adaptor: TemporalAdaptor | LocalFSMAdaptor
+        if isinstance(substrate_config, LocalSubstrateConfig):
+            adaptor = LocalFSMAdaptor(substrate_config)
+            await adaptor.start(deps)
+        else:
+            adaptor = TemporalAdaptor(substrate_config)
+            await adaptor.start(deps, temporal_client=temporal_client)
 
-        gateway_config = TemporalGatewayConfig(
-            task_queue=config.task_queue,
-            workflow_id_prefix=config.workflow_id_prefix,
-            workflow_run_callable=RunActorWorkflow.run,
-            signal_method_name="signal",
-            query_method_name="query",
-        )
-        gateway = TemporalSDKWorkflowGateway(client, gateway_config)
-        facade = KernelFacade(gateway)
+        facade = KernelFacade(adaptor.gateway)
         health = KernelHealthProbe()
 
-        # Start the Temporal worker as a background asyncio task.
-        # The kernel owns this task — it is NOT the caller's responsibility.
-        worker = TemporalKernelWorker(
-            client=client,
-            config=TemporalWorkerConfig(task_queue=config.task_queue),
-            dependencies=deps,
-        )
-        worker_task = asyncio.create_task(
-            worker.run(),
-            name=f"kernel-worker:{config.task_queue}",
-        )
-
         _runtime_logger.info(
-            "KernelRuntime started — task_queue=%s worker_task=%s",
-            config.task_queue,
-            worker_task.get_name(),
+            "KernelRuntime started — substrate=%s",
+            type(substrate_config).__name__,
         )
-        return cls(
-            facade=facade,
-            gateway=gateway,
-            health=health,
-            worker_task=worker_task,
-            deps=deps,
-        )
+        return cls(facade=facade, adaptor=adaptor, health=health)
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def stop(self) -> None:
-        """Gracefully stop the Temporal worker and clear kernel state.
+        """Gracefully stop the substrate and clear kernel state.
 
-        Safe to call multiple times.  Cancels the worker background task
-        and waits for it to finish cleanup.
+        Delegates to the substrate adaptor which cancels the worker task,
+        waits for cleanup, and (in host mode) shuts down the embedded
+        dev-server.  Safe to call multiple times.
         """
-        if self._worker_task.done():
-            return
-        _runtime_logger.info(
-            "KernelRuntime stopping — cancelling worker task %s",
-            self._worker_task.get_name(),
-        )
-        self._worker_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await self._worker_task
-        # Clear only this runtime's registration.  If another KernelRuntime
-        # has already registered its own bundle, this is a no-op and the new
-        # runtime's state is left intact.
-        clear_run_actor_dependencies(self._deps)
+        await self._adaptor.stop()
 
     async def __aenter__(self) -> Self:
         """Enters the async context manager and returns this runtime.
@@ -316,38 +308,38 @@ class KernelRuntime:
     @property
     def facade(self) -> KernelFacade:
         """The kernel facade — the only allowed platform entrypoint.
+
         Returns:
-            KernelFacade: (description)
+            KernelFacade: The wired facade instance.
         """
         return self._facade
 
     @property
     def gateway(self) -> TemporalWorkflowGateway:
-        """The Temporal workflow gateway for direct substrate access.
+        """The workflow gateway for direct substrate access.
+
         Returns:
-            TemporalWorkflowGateway: (description)
+            TemporalWorkflowGateway: The gateway wired by the active substrate.
         """
-        return self._gateway
+        return self._adaptor.gateway
 
     @property
     def health(self) -> KernelHealthProbe:
         """K8s-style liveness/readiness probes for this runtime.
+
         Returns:
-            KernelHealthProbe: (description)
+            KernelHealthProbe: The health probe instance.
         """
         return self._health
 
     @property
     def worker_failed(self) -> bool:
-        """True when the background worker task has exited with an error.
+        """True when the substrate's background worker has exited with an error.
+
         Returns:
-            bool: (description)
+            bool: Worker failure state.
         """
-        return (
-            self._worker_task.done()
-            and not self._worker_task.cancelled()
-            and (self._worker_task.exception() is not None)
-        )
+        return self._adaptor.worker_failed
 
     def check_worker(self) -> None:
         """Raise the worker exception if the background task has failed.
@@ -358,37 +350,12 @@ class KernelRuntime:
         Raises:
             Exception: The exception that caused the worker to exit.
         """
-        if self.worker_failed:
-            raise self._worker_task.exception()  # type: ignore[misc]
+        self._adaptor.check_worker()
 
 
 # ------------------------------------------------------------------
 # Internal helpers
 # ------------------------------------------------------------------
-
-
-async def _connect_temporal(config: KernelRuntimeConfig) -> Any:
-    """Connect to Temporal server using SDK client.
-
-    Args:
-        config: Runtime configuration with address and namespace.
-
-    Returns:
-        Connected Temporal client instance.
-
-    Raises:
-        RuntimeError: If the Temporal Python SDK is not installed.
-    """
-    try:
-        from temporalio.client import Client  # type: ignore[import]
-    except ImportError as exc:
-        raise RuntimeError(
-            "Temporal SDK is required. Install with: pip install temporalio"
-        ) from exc
-    return await Client.connect(
-        config.temporal_address,
-        namespace=config.temporal_namespace,
-    )
 
 
 def _build_services(

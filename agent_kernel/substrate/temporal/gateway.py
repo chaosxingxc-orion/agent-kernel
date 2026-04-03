@@ -87,9 +87,9 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
     async def start_workflow(self, request: StartRunRequest) -> dict[str, str]:
         """Starts one run workflow and returns a facade-safe workflow id.
         Args:
-            request: (description)
+            request: The incoming request object.
         Returns:
-            dict[str, str]: (description)
+            dict[str, str]: Mapping with ``workflow_id`` and ``run_id`` keys.
         """
         run_id = self._build_run_id(request)
         workflow_id = self._workflow_id_for_run(run_id)
@@ -115,8 +115,8 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
     ) -> None:
         """Routes one kernel signal into the Temporal workflow.
         Args:
-            run_id: (description)
-            signal: (description)
+            run_id: Identifier of the target run.
+            signal: Kernel signal request to dispatch.
         """
         handle = self._client.get_workflow_handle(
             self._workflow_id_for_run(run_id),
@@ -144,8 +144,8 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         path and falls back to no-arg cancel for older SDKs.
 
         Args:
-            run_id: (description)
-            reason: (description)
+            run_id: Identifier of the target run.
+            reason: Cancellation reason forwarded to Temporal.
         """
         handle = self._client.get_workflow_handle(
             self._workflow_id_for_run(run_id),
@@ -236,10 +236,10 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
     ) -> dict[str, str]:
         """Starts one child run workflow linked to parent run id.
         Args:
-            parent_run_id: (description)
-            request: (description)
+            parent_run_id: Identifier of the parent run that spawns the child.
+            request: The incoming request object.
         Returns:
-            dict[str, str]: (description)
+            dict[str, str]: Mapping with ``workflow_id`` and ``run_id`` keys.
         """
         child_run_id = request.input_json.get("child_run_id") if request.input_json else None
         if not isinstance(child_run_id, str) or not child_run_id:

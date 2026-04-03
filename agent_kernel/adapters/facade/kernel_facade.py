@@ -209,7 +209,7 @@ class KernelFacade:
             request: Cancellation request produced by the platform.
 
         Raises:
-            Exception: (description)
+            Exception:
         """
         await self._workflow_gateway.signal_workflow(
             request.run_id,
@@ -243,7 +243,7 @@ class KernelFacade:
             RuntimeError: If checkpoint adapter is not configured.
 
         Args:
-            request: (description)
+            request:
         """
         if self._checkpoint_adapter is None:
             raise RuntimeError("checkpoint_adapter is required for resume_run.")

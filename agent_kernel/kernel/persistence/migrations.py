@@ -97,13 +97,15 @@ class SchemaMigrationManager:
         return len(pending)
 
     def _ensure_migrations_table(self) -> None:
-        self._connection.execute("""
+        self._connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 version     INTEGER PRIMARY KEY,
                 description TEXT    NOT NULL,
                 applied_at  TEXT    NOT NULL DEFAULT (datetime('now'))
             )
-            """)
+            """
+        )
         self._connection.commit()
 
     def _applied_versions(self) -> frozenset[int]:

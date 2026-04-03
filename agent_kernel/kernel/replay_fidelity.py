@@ -53,7 +53,7 @@ class FidelityReport:
     def snapshot_hash_matches(self) -> bool:
         """True when both runs produced the same capability snapshot hash.
         Returns:
-            bool: (description)
+            bool: ``True`` if the check passes, ``False`` otherwise.
         """
         return self.original.snapshot_hash == self.replay.snapshot_hash
 

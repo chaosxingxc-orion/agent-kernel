@@ -95,11 +95,11 @@ _logger = logging.getLogger(__name__)
 _MONITORED_STATES: frozenset[str] = frozenset(
     {
         "dispatching",
-            # executor called; Temporal activity governs activity side
+        # executor called; Temporal activity governs activity side
         "waiting_result",  # awaiting external tool/MCP result
         "waiting_external",  # external callback; has its own ceiling
         "waiting_human_input",
-            # human approval/clarification; very long ceiling
+        # human approval/clarification; very long ceiling
         "recovering",  # recovery gate active; should complete quickly
     }
 )
@@ -111,7 +111,7 @@ _DEFAULT_STATE_TIMEOUTS: dict[str, int] = {
     "waiting_result": 600,  # 10 min: activity timeout should fire first
     "waiting_external": 3600,  # 1 hr: external callback ceiling
     "waiting_human_input": 86400,
-        # 24 hr: human interaction can take a full day
+    # 24 hr: human interaction can take a full day
     "recovering": 180,  # 3 min: recovery planner call should be fast
 }
 
@@ -183,9 +183,7 @@ class RunHeartbeatMonitor:
         self._policy = policy or HeartbeatPolicy()
         self._entries: dict[str, _RunHeartbeatEntry] = {}
         self._lock = threading.Lock()
-        self._timed_out: set[str] = (
-            set()
-        )  # runs already signalled; avoid repeat
+        self._timed_out: set[str] = set()  # runs already signalled; avoid repeat
 
     # ------------------------------------------------------------------
     # ObservabilityHook implementation
@@ -348,7 +346,7 @@ class RunHeartbeatMonitor:
             age_s = self.last_seen_age_s(run_id) or 0.0
             _logger.warning(
                 "Run heartbeat timeout: run_id=%s silent_s=%.1f — injecting"
-                    "heartbeat_timeout signal",
+                "heartbeat_timeout signal",
                 run_id,
                 age_s,
             )
@@ -365,8 +363,7 @@ class RunHeartbeatMonitor:
             except Exception as exc:
                 # Signal delivery is best-effort; log but never crash watchdog
                 _logger.warning(
-                    "Failed to deliver heartbeat_timeout signal to run_id=%s:"
-                        "%s",
+                    "Failed to deliver heartbeat_timeout signal to run_id=%s:%s",
                     run_id,
                     exc,
                 )
@@ -426,9 +423,7 @@ class RunHeartbeatMonitor:
             already_timed_out: list[str] = []
             with monitor._lock:
                 for run_id, entry in monitor._entries.items():
-                    timeout_s = monitor._policy.timeout_for(
-                        entry.lifecycle_state
-                    )
+                    timeout_s = monitor._policy.timeout_for(entry.lifecycle_state)
                     if timeout_s is None:
                         continue
                     age_s = (now - entry.last_seen_ms) / 1000.0
@@ -618,9 +613,7 @@ class KernelSelfHeartbeat:
         with self._lock:
             if self._state.last_refresh_at_ms == 0:
                 return True
-            return (
-                _now_ms() - self._state.last_refresh_at_ms
-            ) / 1000.0 > self._stale_age_s
+            return (_now_ms() - self._state.last_refresh_at_ms) / 1000.0 > self._stale_age_s
 
     # ------------------------------------------------------------------
     # Internal async probes
@@ -678,35 +671,25 @@ class HeartbeatWatchdog:
 
     async def start(self) -> None:
         """Start the background watchdog asyncio task."""
-        import asyncio as _asyncio
-
         if self._task is not None and not self._task.done():
-            _logger.warning(
-                "HeartbeatWatchdog already running; ignoring start()."
-            )
+            _logger.warning("HeartbeatWatchdog already running; ignoring start().")
             return
-        self._task = _asyncio.ensure_future(self._loop())
-        _logger.info(
-            "HeartbeatWatchdog started with interval_s=%d", self._interval_s
-        )
+        self._task = asyncio.ensure_future(self._loop())
+        _logger.info("HeartbeatWatchdog started with interval_s=%d", self._interval_s)
 
     async def stop(self) -> None:
         """Cancel the background watchdog task and wait for clean shutdown."""
-        import asyncio as _asyncio
-
         if self._task is None or self._task.done():
             return
         self._task.cancel()
-        with contextlib.suppress(_asyncio.CancelledError):
+        with contextlib.suppress(asyncio.CancelledError):
             await self._task
         _logger.info("HeartbeatWatchdog stopped.")
 
     async def _loop(self) -> None:
         """Internal: periodic watchdog scan loop."""
-        import asyncio as _asyncio
-
         while True:
-            await _asyncio.sleep(self._interval_s)
+            await asyncio.sleep(self._interval_s)
             try:
                 await self._monitor.watchdog_once(self._gateway)
             except Exception as exc:

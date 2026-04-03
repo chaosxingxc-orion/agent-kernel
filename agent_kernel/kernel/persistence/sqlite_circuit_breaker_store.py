@@ -85,7 +85,7 @@ class SQLiteCircuitBreakerStore:
             The new failure count after incrementing.
 
         Raises:
-            Exception: (description)
+            sqlite3.Error: On database write failure.
         """
         now = time.time()
         with self._lock:

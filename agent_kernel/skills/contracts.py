@@ -277,7 +277,7 @@ class ManagedSkillRuntime(SkillRuntime, Protocol):
     async def validate(self, request: SkillRequest) -> None:
         """Validates one request before execute.
         Args:
-            request: (description)
+            request: The incoming request object.
         """
         ...
 
@@ -331,18 +331,18 @@ class LocalSkillRuntimeFactory(Protocol):
     async def create_cli_process(self, definition: SkillDefinition) -> SkillRuntime:
         """Creates runtime for ``cli_process`` host.
         Args:
-            definition: (description)
+            definition: Skill definition governing the runtime instance.
         Returns:
-            SkillRuntime: (description)
+            SkillRuntime: Initialized skill runtime instance.
         """
         ...
 
     async def create_in_process_python(self, definition: SkillDefinition) -> SkillRuntime:
         """Creates runtime for ``in_process_python`` host.
         Args:
-            definition: (description)
+            definition: Skill definition governing the runtime instance.
         Returns:
-            SkillRuntime: (description)
+            SkillRuntime: Initialized skill runtime instance.
         """
         ...
 

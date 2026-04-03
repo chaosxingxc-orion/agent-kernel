@@ -29,9 +29,9 @@ class SQLiteRecoveryOutcomeStore(RecoveryOutcomeStore):
     async def write_outcome(self, outcome: RecoveryOutcome) -> None:
         """Persists one recovery outcome row.
         Args:
-            outcome: (description)
+            outcome: Recovery outcome record to persist.
         Raises:
-            Exception: (description)
+            sqlite3.Error: On database write failure.
         """
         try:
             self._conn.execute(
@@ -65,9 +65,9 @@ class SQLiteRecoveryOutcomeStore(RecoveryOutcomeStore):
     async def latest_for_run(self, run_id: str) -> RecoveryOutcome | None:
         """Returns latest recovery outcome for one run, if present.
         Args:
-            run_id: (description)
+            run_id: Identifier of the target run.
         Returns:
-            RecoveryOutcome | None: (description)
+            RecoveryOutcome | None: Latest recovery outcome, or ``None`` if absent.
         """
         row = self._conn.execute(
             """
@@ -99,7 +99,8 @@ class SQLiteRecoveryOutcomeStore(RecoveryOutcomeStore):
         )
 
     def _ensure_schema(self) -> None:
-        self._conn.execute("""
+        self._conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS recovery_outcome (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               run_id TEXT NOT NULL,
@@ -110,11 +111,14 @@ class SQLiteRecoveryOutcomeStore(RecoveryOutcomeStore):
               operator_escalation_ref TEXT,
               emitted_event_ids_json TEXT NOT NULL
             )
-            """)
-        self._conn.execute("""
+            """
+        )
+        self._conn.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_recovery_outcome_run_written
             ON recovery_outcome(run_id, written_at DESC, id DESC)
-            """)
+            """
+        )
         self._conn.commit()
 
 

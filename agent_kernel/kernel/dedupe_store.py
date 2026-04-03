@@ -224,8 +224,8 @@ class InMemoryDedupeStore:
             DedupeStoreStateError: If key is missing or transition is invalid.
 
         Args:
-            dispatch_idempotency_key: (description)
-            external_ack_ref: (description)
+            dispatch_idempotency_key: The deduplication key to look up or transition.
+            external_ack_ref: Optional external acknowledgement reference.
         """
         record = self._get_required_record(dispatch_idempotency_key)
         if record.state not in ("dispatched", "acknowledged"):

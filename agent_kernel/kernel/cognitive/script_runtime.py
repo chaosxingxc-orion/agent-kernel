@@ -366,7 +366,7 @@ class DedupeAwareScriptRuntime:
             idempotency key.
 
         Raises:
-            Exception: (description)
+            Exception:
         """
         idempotency_key = (
             f"script:{input_value.run_id}:{input_value.action_id}:{input_value.script_id}"

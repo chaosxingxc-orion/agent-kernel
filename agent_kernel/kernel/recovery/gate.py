@@ -133,7 +133,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
     def compensation_registry(self) -> CompensationRegistry | None:
         """The compensation registry, if any was provided at construction.
         Returns:
-            CompensationRegistry | None: (description)
+            CompensationRegistry | None: The compensation registry, or ``None`` if not configured.
         """
         return self._compensation_registry
 

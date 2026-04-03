@@ -159,27 +159,27 @@ class AgentCoreToolMCPAdapter:
     async def resolve_tool_bindings(self, action: Action) -> list[ToolBinding]:
         """CapabilityAdapter-compatible tool bindings resolver.
         Args:
-            action: (description)
+            action: The action to evaluate or process.
         Returns:
-            list[ToolBinding]: (description)
+            list[ToolBinding]: List of resolved tool binding descriptors.
         """
         return [await self.resolve_tool(action)]
 
     async def resolve_mcp_bindings(self, action: Action) -> list[MCPBinding]:
         """CapabilityAdapter-compatible MCP bindings resolver.
         Args:
-            action: (description)
+            action: The action to evaluate or process.
         Returns:
-            list[MCPBinding]: (description)
+            list[MCPBinding]: List of resolved MCP binding descriptors.
         """
         return [await self.resolve_mcp(action)]
 
     async def resolve_skill_bindings(self, action: Action) -> list[str]:
         """Resolves skill binding references from action payload hints.
         Args:
-            action: (description)
+            action: The action to evaluate or process.
         Returns:
-            list[str]: (description)
+            list[str]: List of resolved identifiers.
         """
         payload = action.input_json if isinstance(action.input_json, dict) else {}
         raw_bindings = payload.get("skill_bindings")
@@ -194,9 +194,9 @@ class AgentCoreToolMCPAdapter:
     async def resolve_declarative_bundle(self, action: Action) -> dict[str, str] | None:
         """Resolves declarative bundle digest payload from action input JSON.
         Args:
-            action: (description)
+            action: The action to evaluate or process.
         Returns:
-            dict[str, str] | None: (description)
+            dict[str, str] | None: Key-value digest map, or ``None`` when no bundle is declared.
         """
         payload = action.input_json if isinstance(action.input_json, dict) else {}
         bundle = payload.get("declarative_bundle_digest")

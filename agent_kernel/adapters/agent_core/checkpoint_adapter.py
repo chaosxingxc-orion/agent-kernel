@@ -101,9 +101,9 @@ class AgentCoreCheckpointAdapter:
     async def export_checkpoint(self, run_id: str) -> AgentCoreCheckpointView:
         """CheckpointResumePort-compatible alias.
         Args:
-            run_id: (description)
+            run_id: Identifier of the target run.
         Returns:
-            AgentCoreCheckpointView: (description)
+            AgentCoreCheckpointView: Platform-specific checkpoint view object.
         """
         return await self.export_checkpoint_view(run_id)
 
@@ -177,8 +177,8 @@ class AgentCoreCheckpointAdapter:
     async def import_resume(self, input_value: AgentCoreResumeInput) -> KernelResumeRequest:
         """CheckpointResumePort-compatible alias.
         Args:
-            input_value: (description)
+            input_value: Platform-specific input payload.
         Returns:
-            KernelResumeRequest: (description)
+            KernelResumeRequest: Kernel-safe resume request object.
         """
         return await self.import_resume_request(input_value)

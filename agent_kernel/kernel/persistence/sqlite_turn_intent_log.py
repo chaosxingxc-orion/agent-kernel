@@ -28,9 +28,9 @@ class SQLiteTurnIntentLog(TurnIntentLog):
     async def write_intent(self, intent: TurnIntentRecord) -> None:
         """Writes one turn intent with idempotent semantics by intent ref.
         Args:
-            intent: (description)
+            intent: Turn intent record to persist.
         Raises:
-            Exception: (description)
+            sqlite3.Error: On database write failure.
         """
         try:
             self._conn.execute(
@@ -77,9 +77,9 @@ class SQLiteTurnIntentLog(TurnIntentLog):
     async def latest_for_run(self, run_id: str) -> TurnIntentRecord | None:
         """Returns latest persisted turn intent record for one run.
         Args:
-            run_id: (description)
+            run_id: Identifier of the target run.
         Returns:
-            TurnIntentRecord | None: (description)
+            TurnIntentRecord | None: Latest turn intent record, or ``None`` if absent.
         """
         row = self._conn.execute(
             """
@@ -115,7 +115,8 @@ class SQLiteTurnIntentLog(TurnIntentLog):
         )
 
     def _ensure_schema(self) -> None:
-        self._conn.execute("""
+        self._conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS turn_intent_log (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               run_id TEXT NOT NULL,
@@ -128,9 +129,12 @@ class SQLiteTurnIntentLog(TurnIntentLog):
               written_at TEXT NOT NULL,
               reflection_round INTEGER DEFAULT 0
             )
-            """)
-        self._conn.execute("""
+            """
+        )
+        self._conn.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_turn_intent_log_run_written
             ON turn_intent_log(run_id, written_at DESC, id DESC)
-            """)
+            """
+        )
         self._conn.commit()

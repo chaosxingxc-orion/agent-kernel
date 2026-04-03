@@ -1070,27 +1070,27 @@ class IngressAdapter(Protocol):
     def from_runner_start(self, input_value: Any) -> StartRunRequest:
         """Builds start-run request from runner-originated input.
         Args:
-            input_value: (description)
+            input_value: Platform-specific input payload.
         Returns:
-            StartRunRequest: (description)
+            StartRunRequest: A ``StartRunRequest`` ready for kernel submission.
         """
         ...
 
     def from_session_signal(self, input_value: Any) -> SignalRunRequest:
         """Builds signal request from session-level input.
         Args:
-            input_value: (description)
+            input_value: Platform-specific input payload.
         Returns:
-            SignalRunRequest: (description)
+            SignalRunRequest: A ``SignalRunRequest`` ready for kernel signal dispatch.
         """
         ...
 
     def from_callback(self, input_value: Any) -> SignalRunRequest:
         """Builds signal request from callback input.
         Args:
-            input_value: (description)
+            input_value: Platform-specific input payload.
         Returns:
-            SignalRunRequest: (description)
+            SignalRunRequest: A ``SignalRunRequest`` ready for kernel signal dispatch.
         """
         ...
 
@@ -1101,9 +1101,9 @@ class ContextBindingPort(Protocol):
     def bind_context(self, input_value: Any) -> Any:
         """Resolves runtime context binding from platform input.
         Args:
-            input_value: (description)
+            input_value: Platform-specific input payload.
         Returns:
-            Any: (description)
+            Any: Platform-specific context or result object.
         """
         ...
 
@@ -1114,18 +1114,18 @@ class CheckpointResumePort(Protocol):
     async def export_checkpoint(self, run_id: str) -> Any:
         """Exports platform-facing checkpoint view for one run.
         Args:
-            run_id: (description)
+            run_id: Identifier of the target run.
         Returns:
-            Any: (description)
+            Any: Platform-specific context or result object.
         """
         ...
 
     async def import_resume(self, input_value: Any) -> Any:
         """Imports platform resume payload into kernel-safe request.
         Args:
-            input_value: (description)
+            input_value: Platform-specific input payload.
         Returns:
-            Any: (description)
+            Any: Platform-specific context or result object.
         """
         ...
 

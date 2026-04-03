@@ -151,7 +151,7 @@ def configure_run_actor_dependencies(
         as an identity token for a scoped ``clear_run_actor_dependencies`` call.
 
         Args:
-            dependencies: (description)
+            dependencies:
     """
     _RUN_ACTOR_CONFIG.set(dependencies)
     with _RUN_ACTOR_CONFIG_FALLBACK_LOCK:
@@ -427,7 +427,7 @@ class RunActorWorkflow:
 
 
         Raises:
-            Exception: (description)
+            Exception:
         """
         _assert_no_derived_diagnostic_authority_input(commit)
         projection = await self._projection.catch_up(

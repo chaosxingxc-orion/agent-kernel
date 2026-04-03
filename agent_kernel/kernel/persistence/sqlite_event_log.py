@@ -126,7 +126,8 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
 
     def _initialize_schema(self) -> None:
         """Creates required tables and indexes when absent."""
-        self._connection.executescript("""
+        self._connection.executescript(
+            """
             CREATE TABLE IF NOT EXISTS action_commits (
                 commit_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                 stream_run_id TEXT NOT NULL,
@@ -161,7 +162,8 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
 
             CREATE INDEX IF NOT EXISTS idx_runtime_events_stream_offset
                 ON runtime_events(stream_run_id, commit_offset);
-            """)
+            """
+        )
 
     def _load_next_offset(self, stream_run_id: str) -> int:
         """Returns the next offset to assign for one run stream.

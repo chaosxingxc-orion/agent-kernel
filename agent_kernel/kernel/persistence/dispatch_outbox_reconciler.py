@@ -80,7 +80,7 @@ class ReconciliationResult:
     def is_clean(self) -> bool:
         """``True`` when no violations were detected.
         Returns:
-            bool: (description)
+            bool:
         """
         return self.violations_found == 0
 

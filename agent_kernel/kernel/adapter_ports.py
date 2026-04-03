@@ -19,9 +19,9 @@ class ChildRunIngressPort(Protocol):
     def from_runner_child_spawn(self, input_value: Any) -> SpawnChildRunRequest:
         """Translates child-run spawn payload into SpawnChildRunRequest.
         Args:
-            input_value: (description)
+            input_value:
         Returns:
-            SpawnChildRunRequest: (description)
+            SpawnChildRunRequest:
         """
         ...
 
