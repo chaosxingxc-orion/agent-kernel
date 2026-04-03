@@ -8,8 +8,10 @@ It intentionally performs no lifecycle mutation and no recovery decisions.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from agent_kernel.kernel.contracts import RunLifecycleState, RunProjection
+if TYPE_CHECKING:
+    from agent_kernel.kernel.contracts import RunLifecycleState, RunProjection
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +99,12 @@ class AgentCoreCheckpointAdapter:
         )
 
     async def export_checkpoint(self, run_id: str) -> AgentCoreCheckpointView:
-        """CheckpointResumePort-compatible alias."""
+        """CheckpointResumePort-compatible alias.
+        Args:
+            run_id: (description)
+        Returns:
+            AgentCoreCheckpointView: (description)
+        """
         return await self.export_checkpoint_view(run_id)
 
     @staticmethod
@@ -119,9 +126,7 @@ class AgentCoreCheckpointAdapter:
             ValueError: If `snapshot_id` does not match the expected format.
         """
         if not snapshot_id.startswith("snapshot:"):
-            raise ValueError(
-                "Invalid snapshot_id format. Expected 'snapshot:<run_id>:<offset>'."
-            )
+            raise ValueError("Invalid snapshot_id format. Expected 'snapshot:<run_id>:<offset>'.")
 
         # run_id may itself contain ":" (for example parent/child lineage ids).
         # The adapter therefore treats the final ":" as the offset separator and
@@ -129,9 +134,7 @@ class AgentCoreCheckpointAdapter:
         body = snapshot_id[len("snapshot:") :]
         run_id, separator, offset_value = body.rpartition(":")
         if separator != ":":
-            raise ValueError(
-                "Invalid snapshot_id format. Expected 'snapshot:<run_id>:<offset>'."
-            )
+            raise ValueError("Invalid snapshot_id format. Expected 'snapshot:<run_id>:<offset>'.")
         if not run_id:
             raise ValueError("Invalid snapshot_id: run_id must be non-empty.")
         if not offset_value.isdigit():
@@ -163,9 +166,7 @@ class AgentCoreCheckpointAdapter:
         if input_value.snapshot_id is not None:
             parsed_run_id, parsed_offset = self.parse_snapshot_id(input_value.snapshot_id)
             if parsed_run_id != input_value.run_id:
-                raise ValueError(
-                    "snapshot_id run_id does not match resume request run_id."
-                )
+                raise ValueError("snapshot_id run_id does not match resume request run_id.")
             snapshot_offset = parsed_offset
         return KernelResumeRequest(
             run_id=input_value.run_id,
@@ -174,5 +175,10 @@ class AgentCoreCheckpointAdapter:
         )
 
     async def import_resume(self, input_value: AgentCoreResumeInput) -> KernelResumeRequest:
-        """CheckpointResumePort-compatible alias."""
+        """CheckpointResumePort-compatible alias.
+        Args:
+            input_value: (description)
+        Returns:
+            KernelResumeRequest: (description)
+        """
         return await self.import_resume_request(input_value)

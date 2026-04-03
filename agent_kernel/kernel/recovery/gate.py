@@ -41,7 +41,10 @@ from agent_kernel.kernel.contracts import (
     ReflectionPolicy,
     ScriptFailureEvidence,
 )
-from agent_kernel.kernel.recovery.compensation_registry import CompensationRegistry
+
+if TYPE_CHECKING:
+    from agent_kernel.kernel.recovery.compensation_registry import CompensationRegistry
+
 from agent_kernel.kernel.recovery.mode_registry import KERNEL_RECOVERY_MODE_REGISTRY
 from agent_kernel.kernel.recovery.planner import RecoveryPlanner
 
@@ -128,7 +131,10 @@ class PlannedRecoveryGateService(RecoveryGateService):
 
     @property
     def compensation_registry(self) -> CompensationRegistry | None:
-        """The compensation registry, if any was provided at construction."""
+        """The compensation registry, if any was provided at construction.
+        Returns:
+            CompensationRegistry | None: (description)
+        """
         return self._compensation_registry
 
     async def decide(
@@ -188,10 +194,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         effective_escalation_ref = plan.escalation_channel_ref
 
         # Validate compensation feasibility when a registry is present.
-        if (
-            mode == "static_compensation"
-            and self._compensation_registry is not None
-        ):
+        if mode == "static_compensation" and self._compensation_registry is not None:
             comp_effect_class = _extract_effect_class(recovery_input)
             if comp_effect_class is not None and not self._compensation_registry.has_handler(
                 comp_effect_class
@@ -434,8 +437,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         # Prevents duplicate inference charges when the gate retries reflection.
         _based_on_offset = recovery_input.projection.projected_offset
         _reflection_key = (
-            f"{recovery_input.run_id}:{_based_on_offset}"
-            f":reflection:{reflection_round}"
+            f"{recovery_input.run_id}:{_based_on_offset}:reflection:{reflection_round}"
         )
         try:
             result = await self._reasoning_loop.run_once(
@@ -576,9 +578,7 @@ def _build_evidence_from_input(recovery_input: RecoveryInput) -> ScriptFailureEv
     )
 
 
-_RETRYABLE_MODES: frozenset[str] = frozenset(
-    {"static_compensation", "reflect_and_retry"}
-)
+_RETRYABLE_MODES: frozenset[str] = frozenset({"static_compensation", "reflect_and_retry"})
 _BACKOFF_BASE_MS: int = 500
 _BACKOFF_MAX_MS: int = 30_000
 
@@ -627,5 +627,3 @@ def _attach_backoff(decision: RecoveryDecision, failure_count: int) -> RecoveryD
         retry_after_ms=retry_after_ms,
         failure_count=failure_count,
     )
-
-

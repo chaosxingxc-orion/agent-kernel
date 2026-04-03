@@ -151,6 +151,9 @@ class AgentCoreSessionAdapter:
 
         Returns:
             Bound run ids. Empty list when session cannot be identified.
+
+        Args:
+            session: (description)
         """
         session_id = self._extract_session_id(session)
         if not session_id:
@@ -184,11 +187,21 @@ class AgentCoreSessionAdapter:
         )
 
     def from_session_signal(self, input_value: AgentCoreCallbackInput) -> SignalRunRequest:
-        """Ingress-compatible alias for translating session signal input."""
+        """Ingress-compatible alias for translating session signal input.
+        Args:
+            input_value: (description)
+        Returns:
+            SignalRunRequest: (description)
+        """
         return self.translate_callback(input_value)
 
     def from_callback(self, input_value: AgentCoreCallbackInput) -> SignalRunRequest:
-        """Ingress-compatible alias for translating callback input."""
+        """Ingress-compatible alias for translating callback input.
+        Args:
+            input_value: (description)
+        Returns:
+            SignalRunRequest: (description)
+        """
         return self.translate_callback(input_value)
 
     @staticmethod

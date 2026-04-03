@@ -51,16 +51,20 @@ class FidelityReport:
 
     @property
     def snapshot_hash_matches(self) -> bool:
-        """True when both runs produced the same capability snapshot hash."""
+        """True when both runs produced the same capability snapshot hash.
+        Returns:
+            bool: (description)
+        """
         return self.original.snapshot_hash == self.replay.snapshot_hash
 
     @property
     def is_idempotent(self) -> bool:
-        """True if replay produces same snapshot hash and no new events."""
-        return (
-            self.snapshot_hash_matches
-            and self.replay.event_count == self.original.event_count
-        )
+        """True if replay produces same snapshot hash and no new events.
+
+        Returns:
+            ``True`` when replay is fully idempotent relative to the original.
+        """
+        return self.snapshot_hash_matches and self.replay.event_count == self.original.event_count
 
 
 class ReplayFidelityVerifier:

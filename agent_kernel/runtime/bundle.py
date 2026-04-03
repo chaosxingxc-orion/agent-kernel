@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
 
 from agent_kernel.adapters.agent_core.checkpoint_adapter import (
     AgentCoreCheckpointAdapter,
@@ -188,13 +190,13 @@ class AgentKernelRuntimeBundle:
     checkpoint_adapter: AgentCoreCheckpointAdapter
     tool_mcp_adapter: AgentCoreToolMCPAdapter
     # Optional cognitive services — typed as Any to avoid circular imports.
-    cognitive_context_port: Any | None = None    # ContextPort Protocol
-    cognitive_llm_gateway: Any | None = None     # LLMGateway Protocol
-    cognitive_output_parser: Any | None = None   # OutputParser Protocol
+    cognitive_context_port: Any | None = None  # ContextPort Protocol
+    cognitive_llm_gateway: Any | None = None  # LLMGateway Protocol
+    cognitive_output_parser: Any | None = None  # OutputParser Protocol
     cognitive_reflection_policy: Any | None = None  # ReflectionPolicy
     # Optional observability hook — fanned out to TurnEngine, ReasoningLoop,
     # and PlannedRecoveryGateService so all emit points are live.
-    observability_hook: Any | None = None        # ObservabilityHook Protocol
+    observability_hook: Any | None = None  # ObservabilityHook Protocol
 
     @classmethod
     def build_minimal_complete(
@@ -208,12 +210,8 @@ class AgentKernelRuntimeBundle:
         strict_mode_config: RuntimeStrictModeConfig | None = None,
         enable_activity_backed_executor: bool = False,
         activity_gateway: TemporalActivityGateway | None = None,
-        tool_handlers: (
-            Mapping[str, ToolActivityCallable] | None
-        ) = None,
-        mcp_handlers: (
-            Mapping[MCPHandlerKey, MCPActivityCallable] | None
-        ) = None,
+        tool_handlers: (Mapping[str, ToolActivityCallable] | None) = None,
+        mcp_handlers: (Mapping[MCPHandlerKey, MCPActivityCallable] | None) = None,
         context_port: Any | None = None,
         llm_gateway: Any | None = None,
         output_parser: Any | None = None,
@@ -263,9 +261,7 @@ class AgentKernelRuntimeBundle:
             dedupe_config=dedupe_config,
             recovery_outcome_config=recovery_outcome_config,
             turn_intent_log_config=turn_intent_log_config,
-            enable_activity_backed_executor=(
-                enable_activity_backed_executor
-            ),
+            enable_activity_backed_executor=(enable_activity_backed_executor),
             activity_gateway=activity_gateway,
             tool_handlers=tool_handlers,
             mcp_handlers=mcp_handlers,
@@ -290,9 +286,7 @@ class AgentKernelRuntimeBundle:
             deduper=kernel_core["deduper"],
             dedupe_store=kernel_core["dedupe_store"],
             turn_intent_log=kernel_core["turn_intent_log"],
-            strict_mode_config=(
-                strict_mode_config or RuntimeStrictModeConfig()
-            ),
+            strict_mode_config=(strict_mode_config or RuntimeStrictModeConfig()),
             gateway=boundary["gateway"],
             facade=boundary["facade"],
             runner_adapter=boundary["runner_adapter"],
@@ -315,12 +309,8 @@ class AgentKernelRuntimeBundle:
         turn_intent_log_config: RuntimeTurnIntentLogConfig | None = None,
         enable_activity_backed_executor: bool = False,
         activity_gateway: TemporalActivityGateway | None = None,
-        tool_handlers: (
-            Mapping[str, ToolActivityCallable] | None
-        ) = None,
-        mcp_handlers: (
-            Mapping[MCPHandlerKey, MCPActivityCallable] | None
-        ) = None,
+        tool_handlers: (Mapping[str, ToolActivityCallable] | None) = None,
+        mcp_handlers: (Mapping[MCPHandlerKey, MCPActivityCallable] | None) = None,
         cognitive_context_port: Any | None = None,
         cognitive_llm_gateway: Any | None = None,
         cognitive_output_parser: Any | None = None,
@@ -399,9 +389,7 @@ class AgentKernelRuntimeBundle:
             ),
             "admission": StaticDispatchAdmissionService(),
             "executor": AgentKernelRuntimeBundle._build_executor(
-                enable_activity_backed_executor=(
-                    enable_activity_backed_executor
-                ),
+                enable_activity_backed_executor=(enable_activity_backed_executor),
                 activity_gateway=activity_gateway,
                 tool_handlers=tool_handlers,
                 mcp_handlers=mcp_handlers,
@@ -424,12 +412,8 @@ class AgentKernelRuntimeBundle:
     def _build_executor(
         enable_activity_backed_executor: bool,
         activity_gateway: TemporalActivityGateway | None,
-        tool_handlers: (
-            Mapping[str, ToolActivityCallable] | None
-        ) = None,
-        mcp_handlers: (
-            Mapping[MCPHandlerKey, MCPActivityCallable] | None
-        ) = None,
+        tool_handlers: (Mapping[str, ToolActivityCallable] | None) = None,
+        mcp_handlers: (Mapping[MCPHandlerKey, MCPActivityCallable] | None) = None,
     ) -> ExecutorService:
         """Builds executor service from feature-toggle and deps.
 
@@ -450,12 +434,10 @@ class AgentKernelRuntimeBundle:
         """
         if not enable_activity_backed_executor:
             return AsyncExecutorService()
-        resolved_gateway = (
-            AgentKernelRuntimeBundle._resolve_activity_gateway(
-                activity_gateway=activity_gateway,
-                tool_handlers=tool_handlers,
-                mcp_handlers=mcp_handlers,
-            )
+        resolved_gateway = AgentKernelRuntimeBundle._resolve_activity_gateway(
+            activity_gateway=activity_gateway,
+            tool_handlers=tool_handlers,
+            mcp_handlers=mcp_handlers,
         )
         if resolved_gateway is None:
             raise ValueError(
@@ -468,12 +450,8 @@ class AgentKernelRuntimeBundle:
     @staticmethod
     def _resolve_activity_gateway(
         activity_gateway: TemporalActivityGateway | None,
-        tool_handlers: (
-            Mapping[str, ToolActivityCallable] | None
-        ),
-        mcp_handlers: (
-            Mapping[MCPHandlerKey, MCPActivityCallable] | None
-        ),
+        tool_handlers: (Mapping[str, ToolActivityCallable] | None),
+        mcp_handlers: (Mapping[MCPHandlerKey, MCPActivityCallable] | None),
     ) -> TemporalActivityGateway | None:
         """Resolves activity gateway from dependency or handlers.
 
@@ -493,29 +471,19 @@ class AgentKernelRuntimeBundle:
         has_mcp_handlers = bool(mcp_handlers)
         if activity_gateway is not None:
             if has_tool_handlers or has_mcp_handlers:
-                raise ValueError(
-                    "Pass either activity_gateway or"
-                    " tool/mcp handlers, not both."
-                )
+                raise ValueError("Pass either activity_gateway or tool/mcp handlers, not both.")
             return activity_gateway
         if not has_tool_handlers and not has_mcp_handlers:
             return None
-        return (
-            AgentKernelRuntimeBundle
-            ._build_activity_gateway_from_handlers(
-                tool_handlers=tool_handlers,
-                mcp_handlers=mcp_handlers,
-            )
+        return AgentKernelRuntimeBundle._build_activity_gateway_from_handlers(
+            tool_handlers=tool_handlers,
+            mcp_handlers=mcp_handlers,
         )
 
     @staticmethod
     def _build_activity_gateway_from_handlers(
-        tool_handlers: (
-            Mapping[str, ToolActivityCallable] | None
-        ),
-        mcp_handlers: (
-            Mapping[MCPHandlerKey, MCPActivityCallable] | None
-        ),
+        tool_handlers: (Mapping[str, ToolActivityCallable] | None),
+        mcp_handlers: (Mapping[MCPHandlerKey, MCPActivityCallable] | None),
     ) -> TemporalActivityGateway:
         """Builds strict Temporal activity gateway from handlers.
 
@@ -536,12 +504,8 @@ class AgentKernelRuntimeBundle:
                 ),
                 tool_activity=lambda _request: None,
                 mcp_activity=lambda _request: None,
-                verification_activity=(
-                    lambda _request: {}
-                ),
-                reconciliation_activity=(
-                    lambda _request: {}
-                ),
+                verification_activity=(lambda _request: {}),
+                reconciliation_activity=(lambda _request: {}),
             ),
             tool_handlers=tool_handlers,
             mcp_handlers=mcp_handlers,
@@ -570,10 +534,7 @@ class AgentKernelRuntimeBundle:
             return SQLiteKernelRuntimeEventLog(
                 event_log_config.sqlite_database_path,
             )
-        raise ValueError(
-            f"Unsupported event log backend:"
-            f" {event_log_config.backend}"
-        )
+        raise ValueError(f"Unsupported event log backend: {event_log_config.backend}")
 
     @staticmethod
     def _build_dedupe_store(
@@ -594,9 +555,7 @@ class AgentKernelRuntimeBundle:
             return InMemoryDedupeStore()
         if dedupe_config.backend == "sqlite":
             return SQLiteDedupeStore(dedupe_config.sqlite_database_path)
-        raise ValueError(
-            f"Unsupported dedupe backend: {dedupe_config.backend}"
-        )
+        raise ValueError(f"Unsupported dedupe backend: {dedupe_config.backend}")
 
     @staticmethod
     def _build_recovery_outcomes(
@@ -607,10 +566,7 @@ class AgentKernelRuntimeBundle:
             return InMemoryRecoveryOutcomeStore()
         if recovery_outcome_config.backend == "sqlite":
             return SQLiteRecoveryOutcomeStore(recovery_outcome_config.sqlite_database_path)
-        raise ValueError(
-            "Unsupported recovery_outcome backend: "
-            f"{recovery_outcome_config.backend}"
-        )
+        raise ValueError(f"Unsupported recovery_outcome backend: {recovery_outcome_config.backend}")
 
     @staticmethod
     def _build_turn_intent_log(
@@ -621,10 +577,7 @@ class AgentKernelRuntimeBundle:
             return None
         if turn_intent_log_config.backend == "sqlite":
             return SQLiteTurnIntentLog(turn_intent_log_config.sqlite_database_path)
-        raise ValueError(
-            "Unsupported turn_intent_log backend: "
-            f"{turn_intent_log_config.backend}"
-        )
+        raise ValueError(f"Unsupported turn_intent_log backend: {turn_intent_log_config.backend}")
 
     @staticmethod
     def _build_boundary_components(
@@ -641,7 +594,8 @@ class AgentKernelRuntimeBundle:
             Dictionary of boundary component instances.
         """
         gateway = TemporalSDKWorkflowGateway(
-            temporal_client, temporal_config,
+            temporal_client,
+            temporal_config,
         )
         context_adapter = AgentCoreContextAdapter()
         checkpoint_adapter = AgentCoreCheckpointAdapter()
@@ -681,9 +635,7 @@ class AgentKernelRuntimeBundle:
             turn_intent_log=self.turn_intent_log,
             deduper=self.deduper,
             dedupe_store=self.dedupe_store,
-            strict_mode=RunActorStrictModeConfig(
-                enabled=self.strict_mode_config.enabled
-            ),
+            strict_mode=RunActorStrictModeConfig(enabled=self.strict_mode_config.enabled),
             context_port=self.cognitive_context_port,
             llm_gateway=self.cognitive_llm_gateway,
             output_parser=self.cognitive_output_parser,

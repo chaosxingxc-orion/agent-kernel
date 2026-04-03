@@ -5,7 +5,10 @@ from __future__ import annotations
 import contextlib
 import json
 import sqlite3
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from agent_kernel.kernel.contracts import RecoveryOutcome, RecoveryOutcomeStore
 
@@ -24,7 +27,12 @@ class SQLiteRecoveryOutcomeStore(RecoveryOutcomeStore):
         self._conn.close()
 
     async def write_outcome(self, outcome: RecoveryOutcome) -> None:
-        """Persists one recovery outcome row."""
+        """Persists one recovery outcome row.
+        Args:
+            outcome: (description)
+        Raises:
+            Exception: (description)
+        """
         try:
             self._conn.execute(
                 """
@@ -55,7 +63,12 @@ class SQLiteRecoveryOutcomeStore(RecoveryOutcomeStore):
             raise
 
     async def latest_for_run(self, run_id: str) -> RecoveryOutcome | None:
-        """Returns latest recovery outcome for one run, if present."""
+        """Returns latest recovery outcome for one run, if present.
+        Args:
+            run_id: (description)
+        Returns:
+            RecoveryOutcome | None: (description)
+        """
         row = self._conn.execute(
             """
             SELECT
@@ -86,8 +99,7 @@ class SQLiteRecoveryOutcomeStore(RecoveryOutcomeStore):
         )
 
     def _ensure_schema(self) -> None:
-        self._conn.execute(
-            """
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS recovery_outcome (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               run_id TEXT NOT NULL,
@@ -98,14 +110,11 @@ class SQLiteRecoveryOutcomeStore(RecoveryOutcomeStore):
               operator_escalation_ref TEXT,
               emitted_event_ids_json TEXT NOT NULL
             )
-            """
-        )
-        self._conn.execute(
-            """
+            """)
+        self._conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_recovery_outcome_run_written
             ON recovery_outcome(run_id, written_at DESC, id DESC)
-            """
-        )
+            """)
         self._conn.commit()
 
 
@@ -118,4 +127,3 @@ def _deserialize_ids(payload: str) -> list[str]:
     if not isinstance(value, list):
         return []
     return [entry for entry in value if isinstance(entry, str)]
-

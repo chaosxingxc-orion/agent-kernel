@@ -18,9 +18,11 @@ from __future__ import annotations
 import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from agent_kernel.kernel.capability_snapshot import CapabilitySnapshot
+if TYPE_CHECKING:
+    from agent_kernel.kernel.capability_snapshot import CapabilitySnapshot
+
 from agent_kernel.kernel.contracts import (
     Action,
     ActionCommit,
@@ -133,9 +135,7 @@ class InMemoryDecisionProjectionService(DecisionProjectionService):
         """
         self._event_log = event_log
         self._projection_by_run: dict[str, RunProjection] = {}
-        self._reject_derived_diagnostic_authority_input = (
-            reject_derived_diagnostic_authority_input
-        )
+        self._reject_derived_diagnostic_authority_input = reject_derived_diagnostic_authority_input
 
     async def catch_up(self, run_id: str, through_offset: int) -> RunProjection:
         """Catches up projection state through the requested offset.
@@ -447,10 +447,7 @@ def _resolve_dispatch_host_kind(action: Action) -> DispatchHostKind:
     explicit_host_kind = _resolve_explicit_host_kind(action)
     if explicit_host_kind is not None:
         return explicit_host_kind
-    if (
-        action.effect_class != "read_only"
-        and action.external_idempotency_level is not None
-    ):
+    if action.effect_class != "read_only" and action.external_idempotency_level is not None:
         return "remote_service"
     return "local_cli"
 
@@ -582,11 +579,7 @@ def _evaluate_action_policy_denies(action: Action) -> AdmissionResult | None:
         return AdmissionResult(admitted=False, reason_code="policy_denied")
     max_cost = _extract_max_cost_from_policy_tags(action.policy_tags)
     estimated_cost = _extract_estimated_cost(action.input_json)
-    if (
-        max_cost is not None
-        and estimated_cost is not None
-        and estimated_cost > max_cost
-    ):
+    if max_cost is not None and estimated_cost is not None and estimated_cost > max_cost:
         return AdmissionResult(admitted=False, reason_code="quota_exceeded")
     if _requires_remote_idempotency_contract_block(action):
         return AdmissionResult(
@@ -765,10 +758,7 @@ def _resolve_projection_transition(
     blocked_by_terminal_or_priority = (
         projection.lifecycle_state == "completed"
         or _is_lower_priority_operational_conflict(projection=projection, event=event)
-        or (
-            projection.lifecycle_state == "aborted"
-            and event.event_type != "run.cancel_requested"
-        )
+        or (projection.lifecycle_state == "aborted" and event.event_type != "run.cancel_requested")
     )
     if blocked_by_terminal_or_priority:
         return transition
@@ -833,9 +823,9 @@ def _is_lower_priority_operational_conflict(
     incoming_priority = _event_operational_priority(event.event_type)
     if current_priority is None or incoming_priority is None:
         return False
-    return _OPERATIONAL_PRIORITY_RANK[incoming_priority] < _OPERATIONAL_PRIORITY_RANK[
-        current_priority
-    ]
+    return (
+        _OPERATIONAL_PRIORITY_RANK[incoming_priority] < _OPERATIONAL_PRIORITY_RANK[current_priority]
+    )
 
 
 def _projection_operational_priority(

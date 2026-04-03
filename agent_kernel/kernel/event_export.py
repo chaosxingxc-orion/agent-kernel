@@ -26,9 +26,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from agent_kernel.kernel.contracts import ActionCommit, EventExportPort, RuntimeEvent
+if TYPE_CHECKING:
+    from agent_kernel.kernel.contracts import ActionCommit, EventExportPort, RuntimeEvent
 
 _export_logger = logging.getLogger(__name__)
 
@@ -414,9 +415,7 @@ def _infer_recovery_mode(
     """
     # Prefer the structured diagnostic event payload
     for event in events:
-        if event.event_type == "recovery.plan_selected" and isinstance(
-            event.payload_json, dict
-        ):
+        if event.event_type == "recovery.plan_selected" and isinstance(event.payload_json, dict):
             planned_mode = event.payload_json.get("planned_mode")
             if isinstance(planned_mode, str):
                 return planned_mode

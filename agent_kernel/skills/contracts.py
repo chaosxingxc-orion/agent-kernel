@@ -8,12 +8,13 @@ authority, event authority, and recovery authority.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-from agent_kernel.kernel.contracts import (
-    EffectClass,
-    ExternalIdempotencyLevel,
-)
+if TYPE_CHECKING:
+    from agent_kernel.kernel.contracts import (
+        EffectClass,
+        ExternalIdempotencyLevel,
+    )
 
 SkillFailureCode = Literal[
     "tool_error",
@@ -274,7 +275,10 @@ class ManagedSkillRuntime(SkillRuntime, Protocol):
     """Extends skill runtime with optional managed lifecycle hooks."""
 
     async def validate(self, request: SkillRequest) -> None:
-        """Validates one request before execute."""
+        """Validates one request before execute.
+        Args:
+            request: (description)
+        """
         ...
 
     async def warmup(self) -> None:
@@ -309,7 +313,15 @@ class SkillRuntimeHostFactory(Protocol):
         definition: SkillDefinition,
         host_kind: SkillRuntimeHost,
     ) -> SkillRuntime:
-        """Creates runtime for a concrete host kind."""
+        """Creates runtime for a concrete host kind.
+
+        Args:
+            definition: Skill definition governing the runtime instance.
+            host_kind: Target host kind to create the runtime for.
+
+        Returns:
+            Initialized skill runtime for the requested host kind.
+        """
         ...
 
 
@@ -317,11 +329,21 @@ class LocalSkillRuntimeFactory(Protocol):
     """Creates local-host skill runtimes."""
 
     async def create_cli_process(self, definition: SkillDefinition) -> SkillRuntime:
-        """Creates runtime for ``cli_process`` host."""
+        """Creates runtime for ``cli_process`` host.
+        Args:
+            definition: (description)
+        Returns:
+            SkillRuntime: (description)
+        """
         ...
 
     async def create_in_process_python(self, definition: SkillDefinition) -> SkillRuntime:
-        """Creates runtime for ``in_process_python`` host."""
+        """Creates runtime for ``in_process_python`` host.
+        Args:
+            definition: (description)
+        Returns:
+            SkillRuntime: (description)
+        """
         ...
 
 
@@ -329,5 +351,12 @@ class RemoteSkillGatewayFactory(Protocol):
     """Creates remote-service skill gateway runtimes."""
 
     async def create_remote_service(self, definition: SkillDefinition) -> SkillRuntime:
-        """Creates runtime for ``remote_service`` host."""
+        """Creates runtime for ``remote_service`` host.
+
+        Args:
+            definition: Skill definition governing the runtime instance.
+
+        Returns:
+            Initialized remote-service skill runtime.
+        """
         ...

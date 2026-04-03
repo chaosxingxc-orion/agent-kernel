@@ -194,14 +194,16 @@ class InMemoryDedupeStore:
     ) -> None:
         """Marks record as dispatched.
 
+        Args:
+            dispatch_idempotency_key: The deduplication key to transition.
+            peer_operation_id: Optional peer operation identifier.
+
         Raises:
             DedupeStoreStateError: If key is missing or transition is invalid.
         """
         record = self._get_required_record(dispatch_idempotency_key)
         if record.state not in ("reserved", "dispatched"):
-            raise DedupeStoreStateError(
-                f"Cannot transition {record.state} -> dispatched."
-            )
+            raise DedupeStoreStateError(f"Cannot transition {record.state} -> dispatched.")
         self._records_by_key[dispatch_idempotency_key] = DedupeRecord(
             dispatch_idempotency_key=record.dispatch_idempotency_key,
             operation_fingerprint=record.operation_fingerprint,
@@ -220,12 +222,14 @@ class InMemoryDedupeStore:
 
         Raises:
             DedupeStoreStateError: If key is missing or transition is invalid.
+
+        Args:
+            dispatch_idempotency_key: (description)
+            external_ack_ref: (description)
         """
         record = self._get_required_record(dispatch_idempotency_key)
         if record.state not in ("dispatched", "acknowledged"):
-            raise DedupeStoreStateError(
-                f"Cannot transition {record.state} -> acknowledged."
-            )
+            raise DedupeStoreStateError(f"Cannot transition {record.state} -> acknowledged.")
         self._records_by_key[dispatch_idempotency_key] = DedupeRecord(
             dispatch_idempotency_key=record.dispatch_idempotency_key,
             operation_fingerprint=record.operation_fingerprint,
@@ -238,14 +242,15 @@ class InMemoryDedupeStore:
     def mark_unknown_effect(self, dispatch_idempotency_key: str) -> None:
         """Marks record as unknown_effect for ambiguous side-effect outcomes.
 
+        Args:
+            dispatch_idempotency_key: The deduplication key to transition.
+
         Raises:
             DedupeStoreStateError: If key is missing or transition is invalid.
         """
         record = self._get_required_record(dispatch_idempotency_key)
         if record.state not in ("dispatched", "unknown_effect"):
-            raise DedupeStoreStateError(
-                f"Cannot transition {record.state} -> unknown_effect."
-            )
+            raise DedupeStoreStateError(f"Cannot transition {record.state} -> unknown_effect.")
         self._records_by_key[dispatch_idempotency_key] = DedupeRecord(
             dispatch_idempotency_key=record.dispatch_idempotency_key,
             operation_fingerprint=record.operation_fingerprint,

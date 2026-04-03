@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import sqlite3
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from agent_kernel.kernel.contracts import TurnIntentLog, TurnIntentRecord
 
@@ -23,7 +26,12 @@ class SQLiteTurnIntentLog(TurnIntentLog):
         self._conn.close()
 
     async def write_intent(self, intent: TurnIntentRecord) -> None:
-        """Writes one turn intent with idempotent semantics by intent ref."""
+        """Writes one turn intent with idempotent semantics by intent ref.
+        Args:
+            intent: (description)
+        Raises:
+            Exception: (description)
+        """
         try:
             self._conn.execute(
                 """
@@ -67,7 +75,12 @@ class SQLiteTurnIntentLog(TurnIntentLog):
             raise
 
     async def latest_for_run(self, run_id: str) -> TurnIntentRecord | None:
-        """Returns latest persisted turn intent record for one run."""
+        """Returns latest persisted turn intent record for one run.
+        Args:
+            run_id: (description)
+        Returns:
+            TurnIntentRecord | None: (description)
+        """
         row = self._conn.execute(
             """
             SELECT
@@ -102,8 +115,7 @@ class SQLiteTurnIntentLog(TurnIntentLog):
         )
 
     def _ensure_schema(self) -> None:
-        self._conn.execute(
-            """
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS turn_intent_log (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               run_id TEXT NOT NULL,
@@ -116,12 +128,9 @@ class SQLiteTurnIntentLog(TurnIntentLog):
               written_at TEXT NOT NULL,
               reflection_round INTEGER DEFAULT 0
             )
-            """
-        )
-        self._conn.execute(
-            """
+            """)
+        self._conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_turn_intent_log_run_written
             ON turn_intent_log(run_id, written_at DESC, id DESC)
-            """
-        )
+            """)
         self._conn.commit()

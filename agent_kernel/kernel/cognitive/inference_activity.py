@@ -16,12 +16,14 @@ Responsibility split:
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from agent_kernel.kernel.contracts import (
-    InferenceActivityInput,
-    LLMGateway,
-    ModelOutput,
-)
+if TYPE_CHECKING:
+    from agent_kernel.kernel.contracts import (
+        InferenceActivityInput,
+        LLMGateway,
+        ModelOutput,
+    )
 
 _LOG = logging.getLogger(__name__)
 
@@ -68,8 +70,7 @@ async def execute_inference(
     max_input = input_value.config.token_budget.max_input
     if estimated_tokens > max_input:
         _LOG.warning(
-            "execute_inference: estimated_tokens=%d exceeds max_input=%d "
-            "for run_id=%s turn_id=%s",
+            "execute_inference: estimated_tokens=%d exceeds max_input=%d for run_id=%s turn_id=%s",
             estimated_tokens,
             max_input,
             input_value.run_id,

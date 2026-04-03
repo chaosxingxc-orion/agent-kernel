@@ -19,9 +19,10 @@ Principle:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from agent_kernel.kernel.contracts import Action
+if TYPE_CHECKING:
+    from agent_kernel.kernel.contracts import Action
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,15 +157,30 @@ class AgentCoreToolMCPAdapter:
         )
 
     async def resolve_tool_bindings(self, action: Action) -> list[ToolBinding]:
-        """CapabilityAdapter-compatible tool bindings resolver."""
+        """CapabilityAdapter-compatible tool bindings resolver.
+        Args:
+            action: (description)
+        Returns:
+            list[ToolBinding]: (description)
+        """
         return [await self.resolve_tool(action)]
 
     async def resolve_mcp_bindings(self, action: Action) -> list[MCPBinding]:
-        """CapabilityAdapter-compatible MCP bindings resolver."""
+        """CapabilityAdapter-compatible MCP bindings resolver.
+        Args:
+            action: (description)
+        Returns:
+            list[MCPBinding]: (description)
+        """
         return [await self.resolve_mcp(action)]
 
     async def resolve_skill_bindings(self, action: Action) -> list[str]:
-        """Resolves skill binding references from action payload hints."""
+        """Resolves skill binding references from action payload hints.
+        Args:
+            action: (description)
+        Returns:
+            list[str]: (description)
+        """
         payload = action.input_json if isinstance(action.input_json, dict) else {}
         raw_bindings = payload.get("skill_bindings")
         if isinstance(raw_bindings, list):
@@ -176,7 +192,12 @@ class AgentCoreToolMCPAdapter:
         return [token] if token != "" else []
 
     async def resolve_declarative_bundle(self, action: Action) -> dict[str, str] | None:
-        """Resolves declarative bundle digest payload from action input JSON."""
+        """Resolves declarative bundle digest payload from action input JSON.
+        Args:
+            action: (description)
+        Returns:
+            dict[str, str] | None: (description)
+        """
         payload = action.input_json if isinstance(action.input_json, dict) else {}
         bundle = payload.get("declarative_bundle_digest")
         if not isinstance(bundle, dict):

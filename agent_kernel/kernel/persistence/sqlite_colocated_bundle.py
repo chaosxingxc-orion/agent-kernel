@@ -25,7 +25,10 @@ import contextlib
 import json
 import sqlite3
 import threading
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from agent_kernel.kernel.contracts import ActionCommit, RuntimeEvent
 from agent_kernel.kernel.dedupe_store import (
@@ -53,7 +56,17 @@ class _SharedConnectionEventLog:
         self._lock = lock
 
     async def append_action_commit(self, commit: ActionCommit) -> str:
-        """Appends one action commit inside the shared connection."""
+        """Appends one action commit inside the shared connection.
+
+        Args:
+            commit: The action commit containing events to persist.
+
+        Returns:
+            A commit reference string encoding the sequence number.
+
+        Raises:
+            ValueError: If ``commit.events`` is empty.
+        """
         if not commit.events:
             raise ValueError("ActionCommit.events must contain at least one event.")
         with self._lock:
@@ -70,7 +83,13 @@ class _SharedConnectionEventLog:
         return f"commit-ref-{seq}"
 
     async def load(self, run_id: str, after_offset: int = 0) -> list[RuntimeEvent]:
-        """Loads events for a run after ``after_offset``."""
+        """Loads events for a run after ``after_offset``.
+        Args:
+            run_id: (description)
+            after_offset: (description)
+        Returns:
+            list[RuntimeEvent]: (description)
+        """
         query = """
             SELECT
                 event_run_id, event_id, commit_offset, event_type, event_class,
@@ -85,7 +104,14 @@ class _SharedConnectionEventLog:
         return [self._row_to_event(row) for row in rows]
 
     async def max_offset(self, run_id: str) -> int:
-        """Returns the highest committed offset for a run, or 0."""
+        """Returns the highest committed offset for a run, or 0.
+
+        Args:
+            run_id: Target run identifier.
+
+        Returns:
+            Maximum commit offset, or 0 when no events exist.
+        """
         with self._lock:
             cursor = self._conn.execute(
                 "SELECT COALESCE(MAX(commit_offset), 0) FROM colocated_runtime_events "
@@ -187,7 +213,18 @@ class _SharedConnectionDedupeStore:
         self._lock = lock
 
     def reserve(self, envelope: IdempotencyEnvelope) -> DedupeReservation:
-        """Reserves dispatch idempotency key if absent (thread-safe)."""
+        """Reserves dispatch idempotency key if absent.
+
+        Args:
+            envelope: Idempotency envelope carrying the deduplication key.
+
+        Returns:
+            ``DedupeReservation`` indicating acceptance or rejection.
+
+        Raises:
+            DedupeStoreStateError: If the key already exists in an incompatible state.
+        """
+        # (thread-safe)
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
@@ -224,7 +261,13 @@ class _SharedConnectionDedupeStore:
     def mark_dispatched(
         self, dispatch_idempotency_key: str, peer_operation_id: str | None = None
     ) -> None:
-        """Transitions record to ``dispatched`` state."""
+        """Transitions record to ``dispatched`` state.
+        Args:
+            dispatch_idempotency_key: (description)
+            peer_operation_id: (description)
+        Raises:
+            Exception: (description)
+        """
         with self._lock:
             try:
                 self._conn.execute("BEGIN IMMEDIATE")
@@ -234,9 +277,7 @@ class _SharedConnectionDedupeStore:
                         f"Unknown dispatch_idempotency_key: {dispatch_idempotency_key}."
                     )
                 if record.state not in ("reserved", "dispatched"):
-                    raise DedupeStoreStateError(
-                        f"Cannot transition {record.state} -> dispatched."
-                    )
+                    raise DedupeStoreStateError(f"Cannot transition {record.state} -> dispatched.")
                 cursor = self._conn.execute(
                     """
                     UPDATE colocated_dedupe_store
@@ -263,7 +304,13 @@ class _SharedConnectionDedupeStore:
     def mark_acknowledged(
         self, dispatch_idempotency_key: str, external_ack_ref: str | None = None
     ) -> None:
-        """Transitions record to ``acknowledged`` state."""
+        """Transitions record to ``acknowledged`` state.
+        Args:
+            dispatch_idempotency_key: (description)
+            external_ack_ref: (description)
+        Raises:
+            Exception: (description)
+        """
         with self._lock:
             try:
                 self._conn.execute("BEGIN IMMEDIATE")
@@ -300,7 +347,12 @@ class _SharedConnectionDedupeStore:
                 raise
 
     def mark_unknown_effect(self, dispatch_idempotency_key: str) -> None:
-        """Transitions record to ``unknown_effect`` state."""
+        """Transitions record to ``unknown_effect`` state.
+        Args:
+            dispatch_idempotency_key: (description)
+        Raises:
+            Exception: (description)
+        """
         with self._lock:
             try:
                 self._conn.execute("BEGIN IMMEDIATE")
@@ -337,7 +389,12 @@ class _SharedConnectionDedupeStore:
                 raise
 
     def get(self, dispatch_idempotency_key: str) -> DedupeRecord | None:
-        """Returns dedupe record by key, or ``None``."""
+        """Returns dedupe record by key, or ``None``.
+        Args:
+            dispatch_idempotency_key: (description)
+        Returns:
+            DedupeRecord | None: (description)
+        """
         with self._lock:
             return self._get(dispatch_idempotency_key)
 
@@ -390,8 +447,7 @@ class _SharedConnectionDedupeStore:
             )
             if cursor.rowcount != 1:
                 raise DedupeStoreStateError(
-                    f"Lost-update: key {key!r} not found during state "
-                    f"transition to {state!r}."
+                    f"Lost-update: key {key!r} not found during state transition to {state!r}."
                 )
 
 
@@ -503,9 +559,7 @@ class ColocatedSQLiteBundle:
                 # Append event commit.
                 next_offset = self.event_log._next_offset(commit.run_id)
                 seq = self.event_log._insert_commit_row(commit)
-                self.event_log._insert_event_rows(
-                    commit.run_id, seq, commit.events, next_offset
-                )
+                self.event_log._insert_event_rows(commit.run_id, seq, commit.events, next_offset)
 
                 self._conn.execute("COMMIT")
             except Exception:
@@ -519,8 +573,7 @@ class ColocatedSQLiteBundle:
 
     def _initialize_schema(self) -> None:
         """Creates colocated tables and indexes when absent."""
-        self._conn.executescript(
-            """
+        self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS colocated_action_commits (
                 commit_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                 stream_run_id TEXT NOT NULL,
@@ -564,5 +617,4 @@ class ColocatedSQLiteBundle:
                 peer_operation_id TEXT,
                 external_ack_ref TEXT
             );
-            """
-        )
+            """)

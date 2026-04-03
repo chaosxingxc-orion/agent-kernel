@@ -78,7 +78,10 @@ class ReconciliationResult:
 
     @property
     def is_clean(self) -> bool:
-        """``True`` when no violations were detected."""
+        """``True`` when no violations were detected.
+        Returns:
+            bool: (description)
+        """
         return self.violations_found == 0
 
 
@@ -304,8 +307,7 @@ class DispatchOutboxReconciler:
             dedupe_store.mark_unknown_effect(key)
         except DedupeStoreStateError as exc:
             self._log.warning(
-                "Reconciler could not repair orphaned key %r in run %r — "
-                "DedupeStoreStateError: %s",
+                "Reconciler could not repair orphaned key %r in run %r — DedupeStoreStateError: %s",
                 key,
                 run_id,
                 exc,
@@ -318,8 +320,7 @@ class DispatchOutboxReconciler:
             )
 
         self._log.info(
-            "Reconciler marked orphaned key %r as unknown_effect in run %r "
-            "(was %r).",
+            "Reconciler marked orphaned key %r as unknown_effect in run %r (was %r).",
             key,
             run_id,
             current_state,

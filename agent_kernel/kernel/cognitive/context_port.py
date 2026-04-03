@@ -7,9 +7,11 @@ without calling any external services.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from agent_kernel.kernel.capability_snapshot import CapabilitySnapshot
+if TYPE_CHECKING:
+    from agent_kernel.kernel.capability_snapshot import CapabilitySnapshot
+
 from agent_kernel.kernel.contracts import (
     ContextWindow,
     InferenceConfig,

@@ -17,9 +17,12 @@ import asyncio
 import contextlib
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from agent_kernel.kernel.branch_monitor import BranchMonitor
+if TYPE_CHECKING:
+    from agent_kernel.kernel.branch_monitor import BranchMonitor
+    from agent_kernel.kernel.dedupe_store import DedupeStorePort
+
 from agent_kernel.kernel.contracts import (
     Action,
     BranchFailure,
@@ -32,7 +35,6 @@ from agent_kernel.kernel.contracts import (
     ParallelPlan,
     SequentialPlan,
 )
-from agent_kernel.kernel.dedupe_store import DedupeStorePort
 from agent_kernel.kernel.turn_engine import TurnResult
 
 
@@ -57,7 +59,11 @@ class PlanResult:
 
     @property
     def all_succeeded(self) -> bool:
-        """Returns True when every submitted action succeeded."""
+        """Returns True when every action succeeded.
+
+        Returns:
+            ``True`` if ``failed`` is zero.
+        """
         return self.succeeded == self.total_actions
 
 
@@ -226,10 +232,7 @@ class PlanExecutor:
 
         if group.timeout_ms is not None:
             timeout_s = group.timeout_ms / 1000.0
-            tasks = [
-                asyncio.create_task(_monitored_run(action))
-                for action in group.actions
-            ]
+            tasks = [asyncio.create_task(_monitored_run(action)) for action in group.actions]
             done, pending = await asyncio.wait(tasks, timeout=timeout_s)
             for t in pending:
                 t.cancel()
@@ -240,9 +243,7 @@ class PlanExecutor:
                     exc = task.exception()
                     raw_results.append(exc if exc is not None else task.result())
                 else:
-                    raw_results.append(
-                        TimeoutError(f"Branch timeout after {group.timeout_ms}ms")
-                    )
+                    raw_results.append(TimeoutError(f"Branch timeout after {group.timeout_ms}ms"))
         else:
             coros = [_monitored_run(action) for action in group.actions]
             raw_results = await asyncio.gather(*coros, return_exceptions=True)

@@ -48,9 +48,10 @@ Usage::
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from agent_kernel.kernel.contracts import ActionCommit
+if TYPE_CHECKING:
+    from agent_kernel.kernel.contracts import ActionCommit
 
 _otel_logger = logging.getLogger(__name__)
 

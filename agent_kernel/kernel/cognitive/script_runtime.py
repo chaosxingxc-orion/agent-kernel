@@ -131,7 +131,7 @@ class InProcessPythonScriptRuntime:
                 timeout_ms,
             )
             result = await asyncio.wait_for(fut, timeout=timeout_s)
-        except (TimeoutError, asyncio.CancelledError):
+        except TimeoutError, asyncio.CancelledError:
             executor.shutdown(wait=False, cancel_futures=True)
             elapsed_ms = int((time.monotonic() - start) * 1000)
             return ScriptResult(
@@ -252,9 +252,7 @@ class LocalProcessScriptRuntime:
         start = time.monotonic()
 
         # Inject parameters as environment variables for subprocess access.
-        env_params = {
-            f"PARAM_{k.upper()}": str(v) for k, v in input_value.parameters.items()
-        }
+        env_params = {f"PARAM_{k.upper()}": str(v) for k, v in input_value.parameters.items()}
         full_env = {**os.environ, **env_params}
 
         proc = await asyncio.create_subprocess_shell(
@@ -366,6 +364,9 @@ class DedupeAwareScriptRuntime:
             ``ScriptResult`` from the inner runtime on first call, or a
             pre-acknowledged noop result on subsequent calls for the same
             idempotency key.
+
+        Raises:
+            Exception: (description)
         """
         idempotency_key = (
             f"script:{input_value.run_id}:{input_value.action_id}:{input_value.script_id}"

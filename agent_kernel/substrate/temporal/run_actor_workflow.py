@@ -118,15 +118,13 @@ class RunActorDependencyBundle:
     dedupe_store: DedupeStorePort | None = None
     recovery_outcomes: RecoveryOutcomeStore | None = None
     turn_intent_log: TurnIntentLog | None = None
-    strict_mode: RunActorStrictModeConfig = field(
-        default_factory=RunActorStrictModeConfig
-    )
+    strict_mode: RunActorStrictModeConfig = field(default_factory=RunActorStrictModeConfig)
     workflow_id_prefix: str = "run"
     observability_hook: ObservabilityHook | None = None
-    context_port: Any | None = None        # ContextPort Protocol
-    llm_gateway: Any | None = None         # LLMGateway Protocol
-    output_parser: Any | None = None       # OutputParser Protocol
-    reflection_policy: Any | None = None   # ReflectionPolicy
+    context_port: Any | None = None  # ContextPort Protocol
+    llm_gateway: Any | None = None  # LLMGateway Protocol
+    output_parser: Any | None = None  # OutputParser Protocol
+    reflection_policy: Any | None = None  # ReflectionPolicy
     reflection_builder: Any | None = None  # ReflectionContextBuilder
 
 
@@ -134,9 +132,7 @@ _RUN_ACTOR_CONFIG: ContextVar[RunActorDependencyBundle | None] = ContextVar(
     "run_actor_dependencies",
     default=None,
 )
-_RUN_ACTOR_CONFIG_FALLBACK: dict[str, RunActorDependencyBundle | None] = {
-    "dependencies": None
-}
+_RUN_ACTOR_CONFIG_FALLBACK: dict[str, RunActorDependencyBundle | None] = {"dependencies": None}
 _RUN_ACTOR_CONFIG_FALLBACK_LOCK = threading.Lock()
 
 
@@ -153,6 +149,9 @@ def configure_run_actor_dependencies(
     Returns:
         The ``dependencies`` argument, allowing callers to use the return value
         as an identity token for a scoped ``clear_run_actor_dependencies`` call.
+
+        Args:
+            dependencies: (description)
     """
     _RUN_ACTOR_CONFIG.set(dependencies)
     with _RUN_ACTOR_CONFIG_FALLBACK_LOCK:
@@ -277,9 +276,7 @@ class RunActorWorkflow:
         """
         self._run_id = input_value.run_id
         self._session_id = input_value.session_id
-        self._last_projection = (
-            await self._projection.get(input_value.run_id)
-        )
+        self._last_projection = await self._projection.get(input_value.run_id)
         if self._pending_signals:
             pending_signals = list(self._pending_signals)
             self._pending_signals.clear()
@@ -327,7 +324,7 @@ class RunActorWorkflow:
         try:
             parent_handle = temporal_workflow.get_external_workflow_handle(parent_workflow_id)
             await parent_handle.signal("signal", child_signal_payload)
-        except (TemporalError, RuntimeError):
+        except TemporalError, RuntimeError:
             # Parent notification is best-effort; do not fail child completion.
             return
 
@@ -428,6 +425,9 @@ class RunActorWorkflow:
             commit: Action-level commit that should trigger one authoritative
                 decision round.
 
+
+        Raises:
+            Exception: (description)
         """
         _assert_no_derived_diagnostic_authority_input(commit)
         projection = await self._projection.catch_up(
@@ -642,12 +642,8 @@ class RunActorWorkflow:
                         payload_json={
                             "planned_mode": recovery_decision.mode,
                             "reason": recovery_decision.reason,
-                            "compensation_action_id": (
-                                recovery_decision.compensation_action_id
-                            ),
-                            "escalation_channel_ref": (
-                                recovery_decision.escalation_channel_ref
-                            ),
+                            "compensation_action_id": (recovery_decision.compensation_action_id),
+                            "escalation_channel_ref": (recovery_decision.escalation_channel_ref),
                         },
                         created_at=_utc_now_iso(),
                     ),
@@ -676,9 +672,7 @@ class RunActorWorkflow:
                     action_id=caused_by,
                     recovery_mode=recovery_decision.mode,
                     outcome_state=_recovery_outcome_state(recovery_decision.mode),
-                    operator_escalation_ref=(
-                        recovery_decision.escalation_channel_ref
-                    ),
+                    operator_escalation_ref=(recovery_decision.escalation_channel_ref),
                     emitted_event_ids=[
                         f"evt-recovery-plan-{offset}",
                         f"evt-recovery-{offset}",
@@ -1007,22 +1001,14 @@ def _assert_no_derived_diagnostic_authority_input(commit: ActionCommit) -> None:
     """Guards authority input path from derived diagnostic events."""
     for event in commit.events:
         if event.event_authority == "derived_diagnostic":
-            raise ValueError(
-                "derived_diagnostic events must not enter authority input path."
-            )
+            raise ValueError("derived_diagnostic events must not enter authority input path.")
 
 
 def _assert_single_dispatch_attempt_in_turn(turn_result: TurnResult) -> None:
     """Ensures one turn contains at most one authoritative dispatch state."""
-    dispatch_count = sum(
-        1
-        for event in turn_result.emitted_events
-        if event.state == "dispatched"
-    )
+    dispatch_count = sum(1 for event in turn_result.emitted_events if event.state == "dispatched")
     if dispatch_count > 1:
-        raise RuntimeError(
-            "Single turn must not contain multiple authoritative dispatch attempts."
-        )
+        raise RuntimeError("Single turn must not contain multiple authoritative dispatch attempts.")
 
 
 def _assert_recovery_gate_is_read_only(before_offset: int, after_offset: int) -> None:
@@ -1036,9 +1022,7 @@ def _assert_recovery_gate_is_read_only(before_offset: int, after_offset: int) ->
 def _assert_recovery_event_type_allowed(event_type: str) -> None:
     """Ensures recovery append path emits only recovery-class event types."""
     if event_type not in ("run.recovering", "run.waiting_external", "run.recovery_aborted"):
-        raise RuntimeError(
-            f"Recovery event type is not allowed for lifecycle safety: {event_type}"
-        )
+        raise RuntimeError(f"Recovery event type is not allowed for lifecycle safety: {event_type}")
 
 
 def _resolve_run_actor_dependencies(
@@ -1073,8 +1057,12 @@ def _resolve_run_actor_dependencies(
     if all(
         dependency is not None
         for dependency in (
-            event_log, projection, admission,
-            executor, recovery, deduper,
+            event_log,
+            projection,
+            admission,
+            executor,
+            recovery,
+            deduper,
         )
     ):
         return RunActorDependencyBundle(
@@ -1099,9 +1087,7 @@ def _resolve_run_actor_dependencies(
             executor=configured_dependencies.executor,
             recovery=configured_dependencies.recovery,
             dedupe_store=(
-                dedupe_store
-                if dedupe_store is not None
-                else configured_dependencies.dedupe_store
+                dedupe_store if dedupe_store is not None else configured_dependencies.dedupe_store
             ),
             recovery_outcomes=(
                 recovery_outcomes
@@ -1115,9 +1101,7 @@ def _resolve_run_actor_dependencies(
             ),
             deduper=configured_dependencies.deduper,
             strict_mode=(
-                strict_mode
-                if strict_mode is not None
-                else configured_dependencies.strict_mode
+                strict_mode if strict_mode is not None else configured_dependencies.strict_mode
             ),
         )
     with _RUN_ACTOR_CONFIG_FALLBACK_LOCK:
@@ -1130,9 +1114,7 @@ def _resolve_run_actor_dependencies(
             executor=fallback_dependencies.executor,
             recovery=fallback_dependencies.recovery,
             dedupe_store=(
-                dedupe_store
-                if dedupe_store is not None
-                else fallback_dependencies.dedupe_store
+                dedupe_store if dedupe_store is not None else fallback_dependencies.dedupe_store
             ),
             recovery_outcomes=(
                 recovery_outcomes
@@ -1146,9 +1128,7 @@ def _resolve_run_actor_dependencies(
             ),
             deduper=fallback_dependencies.deduper,
             strict_mode=(
-                strict_mode
-                if strict_mode is not None
-                else fallback_dependencies.strict_mode
+                strict_mode if strict_mode is not None else fallback_dependencies.strict_mode
             ),
         )
 

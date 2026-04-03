@@ -10,13 +10,14 @@ where reproducibility matters.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from agent_kernel.kernel.contracts import (
-    RecoveryDecision,
-    RecoveryInput,
-    RunProjection,
-)
+if TYPE_CHECKING:
+    from agent_kernel.kernel.contracts import (
+        RecoveryDecision,
+        RecoveryInput,
+        RunProjection,
+    )
 
 RecoveryPlanAction = Literal[
     "schedule_compensation",
@@ -213,8 +214,7 @@ class RecoveryPlanner:
 
         reason = f"{self._policy.reason_prefix}:{recovery_input.reason_code}"
         compensation_action_id = (
-            recovery_input.failed_action_id
-            or recovery_input.projection.current_action_id
+            recovery_input.failed_action_id or recovery_input.projection.current_action_id
         )
 
         action = "abort_run"
@@ -235,9 +235,7 @@ class RecoveryPlanner:
             normalized_reason = recovery_input.reason_code.strip().lower()
             if recovery_input.lifecycle_state == "waiting_external":
                 action = "notify_human_operator"
-                escalation_channel_ref = (
-                    self._policy.default_escalation_channel_ref
-                )
+                escalation_channel_ref = self._policy.default_escalation_channel_ref
             else:
                 classification = self._policy.classify_reason(normalized_reason)
                 action = self._policy.action_for_classification(classification)

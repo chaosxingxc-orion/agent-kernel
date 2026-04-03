@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import sqlite3
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from agent_kernel.kernel.dedupe_store import (
     DedupeRecord,
@@ -60,6 +63,9 @@ class SQLiteDedupeStore:
 
         Returns:
             Reservation result indicating acceptance or duplicate.
+
+        Raises:
+            Exception: (description)
         """
         # BEGIN IMMEDIATE acquires a write lock upfront, preventing TOCTOU
         # between the existence check and the INSERT across concurrent processes.
@@ -119,9 +125,7 @@ class SQLiteDedupeStore:
             self._conn.execute("BEGIN IMMEDIATE")
             record = self._get_required_record(dispatch_idempotency_key)
             if record.state not in ("reserved", "dispatched"):
-                raise DedupeStoreStateError(
-                    f"Cannot transition {record.state} -> dispatched."
-                )
+                raise DedupeStoreStateError(f"Cannot transition {record.state} -> dispatched.")
             self._update_state(
                 dispatch_idempotency_key=dispatch_idempotency_key,
                 state="dispatched",
@@ -152,9 +156,7 @@ class SQLiteDedupeStore:
             self._conn.execute("BEGIN IMMEDIATE")
             record = self._get_required_record(dispatch_idempotency_key)
             if record.state not in ("dispatched", "acknowledged"):
-                raise DedupeStoreStateError(
-                    f"Cannot transition {record.state} -> acknowledged."
-                )
+                raise DedupeStoreStateError(f"Cannot transition {record.state} -> acknowledged.")
             self._update_state(
                 dispatch_idempotency_key=dispatch_idempotency_key,
                 state="acknowledged",
@@ -180,9 +182,7 @@ class SQLiteDedupeStore:
             self._conn.execute("BEGIN IMMEDIATE")
             record = self._get_required_record(dispatch_idempotency_key)
             if record.state not in ("dispatched", "unknown_effect"):
-                raise DedupeStoreStateError(
-                    f"Cannot transition {record.state} -> unknown_effect."
-                )
+                raise DedupeStoreStateError(f"Cannot transition {record.state} -> unknown_effect.")
             self._update_state(
                 dispatch_idempotency_key=dispatch_idempotency_key,
                 state="unknown_effect",
@@ -290,8 +290,7 @@ class SQLiteDedupeStore:
     def _ensure_schema(self) -> None:
         """Creates dedupe table if it does not exist."""
         cursor = self._conn.cursor()
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS dedupe_store (
               dispatch_idempotency_key TEXT PRIMARY KEY,
               operation_fingerprint TEXT NOT NULL,
@@ -300,6 +299,5 @@ class SQLiteDedupeStore:
               peer_operation_id TEXT NULL,
               external_ack_ref TEXT NULL
             )
-            """
-        )
+            """)
         # isolation_level=None (autocommit) — no explicit commit needed.

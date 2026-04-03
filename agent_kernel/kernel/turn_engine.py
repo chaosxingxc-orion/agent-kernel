@@ -187,7 +187,15 @@ class AdmissionPort(Protocol):
     """Protocol for admission checks in turn execution."""
 
     async def admit(self, action: Action, snapshot: CapabilitySnapshot) -> Any:
-        """Returns whether action is admitted for dispatch under snapshot."""
+        """Returns whether action is admitted for dispatch under snapshot.
+
+        Args:
+            action: Candidate action to evaluate.
+            snapshot: Capability snapshot for policy evaluation.
+
+        Returns:
+            Admission decision object consumed by turn execution.
+        """
 
     async def check(self, action: Action, snapshot: CapabilitySnapshot) -> Any:
         """Returns whether action is admitted for dispatch.
@@ -549,9 +557,7 @@ class TurnEngine:
     async def _phase_snapshot(self, ctx: TurnPhaseContext) -> None:
         """Phase 2: build capability snapshot; noop on build errors."""
         assert ctx.action is not None
-        ctx.turn_identity = _build_turn_identity(
-            input_value=ctx.input_value, action=ctx.action
-        )
+        ctx.turn_identity = _build_turn_identity(input_value=ctx.input_value, action=ctx.action)
         try:
             snapshot_input = _resolve_snapshot_input(
                 input_value=ctx.input_value,
@@ -562,7 +568,7 @@ class TurnEngine:
             ctx.snapshot = self._snapshot_builder.build(snapshot_input)
             assert_snapshot_compatible(ctx.snapshot)
             ctx.emitted_events.append(TurnStateEvent(state="snapshot_built"))
-        except (CapabilitySnapshotBuildError, ValueError):
+        except CapabilitySnapshotBuildError, ValueError:
             ctx.emitted_events.append(TurnStateEvent(state="completed_noop"))
             ti = ctx.turn_identity
             ctx.result = TurnResult(
@@ -577,7 +583,8 @@ class TurnEngine:
 
     async def _phase_admission(self, ctx: TurnPhaseContext) -> None:
         """Phase 3: evaluate admission; block if not admitted."""
-        assert ctx.action is not None and ctx.snapshot is not None
+        assert ctx.action is not None
+        assert ctx.snapshot is not None
         assert ctx.turn_identity is not None
         ti = ctx.turn_identity
         _start_ns = time.monotonic_ns()
@@ -640,8 +647,10 @@ class TurnEngine:
 
     async def _phase_dedupe(self, ctx: TurnPhaseContext) -> None:
         """Phase 5: reserve idempotency slot; block if already taken."""
-        assert ctx.action is not None and ctx.snapshot is not None
-        assert ctx.turn_identity is not None and ctx.dispatch_policy is not None
+        assert ctx.action is not None
+        assert ctx.snapshot is not None
+        assert ctx.turn_identity is not None
+        assert ctx.dispatch_policy is not None
         ti = ctx.turn_identity
         dp = ctx.dispatch_policy
         ctx.envelope = _resolve_idempotency_envelope(
@@ -696,8 +705,10 @@ class TurnEngine:
 
     async def _phase_execute(self, ctx: TurnPhaseContext) -> None:
         """Phase 6: call executor and build terminal result."""
-        assert ctx.action is not None and ctx.snapshot is not None
-        assert ctx.turn_identity is not None and ctx.dispatch_policy is not None
+        assert ctx.action is not None
+        assert ctx.snapshot is not None
+        assert ctx.turn_identity is not None
+        assert ctx.dispatch_policy is not None
         assert ctx.envelope is not None
         ti = ctx.turn_identity
         dp = ctx.dispatch_policy
@@ -966,9 +977,7 @@ def _build_execution_context(
         capability_snapshot_hash=snapshot.snapshot_hash,
         context_binding_ref=snapshot.context_binding_ref,
         grant_ref=grant_ref if isinstance(grant_ref, str) else None,
-        policy_snapshot_ref=(
-            policy_snapshot_ref if isinstance(policy_snapshot_ref, str) else None
-        ),
+        policy_snapshot_ref=(policy_snapshot_ref if isinstance(policy_snapshot_ref, str) else None),
         rule_bundle_hash=rule_bundle_hash,
         declarative_bundle_digest=declarative_bundle_digest,
         timeout_ms=action.timeout_ms,
@@ -1009,7 +1018,7 @@ async def _execute_with_context(
     execute_method = executor.execute
     try:
         signature = inspect.signature(execute_method)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         signature = None
 
     if signature is not None and "execution_context" in signature.parameters:
@@ -1067,7 +1076,6 @@ def _resolve_dedupe_downgrade_scope(host_kind: HostKind) -> str:
     return "compensatable_write"
 
 
-
 def _resolve_snapshot_input(
     input_value: TurnInput,
     action: Action,
@@ -1116,9 +1124,7 @@ def _resolve_snapshot_input(
         )
 
     if require_declared_snapshot_inputs:
-        raise CapabilitySnapshotBuildError(
-            "capability_snapshot_input is required in strict mode."
-        )
+        raise CapabilitySnapshotBuildError("capability_snapshot_input is required in strict mode.")
     return CapabilitySnapshotInput(
         run_id=input_value.run_id,
         based_on_offset=input_value.based_on_offset,
@@ -1203,10 +1209,7 @@ def _resolve_dispatch_host_kind(action: Action) -> HostKind:
     if explicit_host_kind is not None:
         return explicit_host_kind
     # Side-effect actions with declared external idempotency are remote by intent.
-    if (
-        action.effect_class != "read_only"
-        and action.external_idempotency_level is not None
-    ):
+    if action.effect_class != "read_only" and action.external_idempotency_level is not None:
         return "remote_service"
     return "local_cli"
 
@@ -1292,8 +1295,11 @@ def _normalize_host_kind(value: Any) -> HostKind | None:
         return None
     normalized_value = value.strip().lower()
     if normalized_value in (
-        "local_cli", "local_process", "remote_service",
-        "cli_process", "in_process_python",
+        "local_cli",
+        "local_process",
+        "remote_service",
+        "cli_process",
+        "in_process_python",
     ):
         return normalized_value
     return None
@@ -1417,10 +1423,13 @@ def _build_recovery_pending_turn_result(
     """
     external_ack_ref = _read_optional_string(execute_result, "external_ack_ref")
     evidence_ref = _read_optional_string(execute_result, "evidence_ref")
-    local_inference = _read_optional_string(
-        execute_result,
-        "local_inference",
-    ) or "turn_engine:effect_unknown_without_ack"
+    local_inference = (
+        _read_optional_string(
+            execute_result,
+            "local_inference",
+        )
+        or "turn_engine:effect_unknown_without_ack"
+    )
     failure_envelope = FailureEnvelope(
         run_id=input_value.run_id,
         action_id=action.action_id,

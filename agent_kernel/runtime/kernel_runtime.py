@@ -24,15 +24,20 @@ import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Self
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from agent_kernel.adapters.facade.kernel_facade import KernelFacade
-from agent_kernel.kernel.contracts import (
-    EventExportPort,
-    ObservabilityHook,
-    TemporalWorkflowGateway,
-)
+
+if TYPE_CHECKING:
+    from agent_kernel.kernel.contracts import (
+        EventExportPort,
+        ObservabilityHook,
+        TemporalWorkflowGateway,
+    )
+
 from agent_kernel.kernel.minimal_runtime import (
     AsyncExecutorService,
     InMemoryDecisionDeduper,
@@ -147,9 +152,7 @@ class KernelRuntime:
     def _on_worker_done(self, task: asyncio.Task[Any]) -> None:
         """Internal done callback — logs worker exit and dispatches user callbacks."""
         if task.cancelled():
-            _runtime_logger.info(
-                "KernelRuntime worker task cancelled — task=%s", task.get_name()
-            )
+            _runtime_logger.info("KernelRuntime worker task cancelled — task=%s", task.get_name())
         elif task.exception() is not None:
             _runtime_logger.critical(
                 "KernelRuntime worker task FAILED — task=%s error=%r",
@@ -223,9 +226,7 @@ class KernelRuntime:
             recovery=recovery,
             deduper=deduper,
             dedupe_store=dedupe_store,
-            strict_mode=RunActorStrictModeConfig(
-                enabled=config.strict_mode_enabled
-            ),
+            strict_mode=RunActorStrictModeConfig(enabled=config.strict_mode_enabled),
             workflow_id_prefix=config.workflow_id_prefix,
             observability_hook=config.observability_hook,
         )
@@ -296,10 +297,16 @@ class KernelRuntime:
         # runtime's state is left intact.
         clear_run_actor_dependencies(self._deps)
 
-    async def __aenter__(self) -> KernelRuntime:
+    async def __aenter__(self) -> Self:
+        """Enters the async context manager and returns this runtime.
+
+        Returns:
+            Self: This runtime instance.
+        """
         return self
 
-    async def __aexit__(self, *_: Any) -> None:
+    async def __aexit__(self, *_: object) -> None:
+        """Exits the async context manager, stopping the runtime."""
         await self.stop()
 
     # ------------------------------------------------------------------
@@ -308,22 +315,34 @@ class KernelRuntime:
 
     @property
     def facade(self) -> KernelFacade:
-        """The kernel facade — the only allowed platform entrypoint."""
+        """The kernel facade — the only allowed platform entrypoint.
+        Returns:
+            KernelFacade: (description)
+        """
         return self._facade
 
     @property
     def gateway(self) -> TemporalWorkflowGateway:
-        """The Temporal workflow gateway for direct substrate access."""
+        """The Temporal workflow gateway for direct substrate access.
+        Returns:
+            TemporalWorkflowGateway: (description)
+        """
         return self._gateway
 
     @property
     def health(self) -> KernelHealthProbe:
-        """K8s-style liveness/readiness probes for this runtime."""
+        """K8s-style liveness/readiness probes for this runtime.
+        Returns:
+            KernelHealthProbe: (description)
+        """
         return self._health
 
     @property
     def worker_failed(self) -> bool:
-        """True when the background worker task has exited with an error."""
+        """True when the background worker task has exited with an error.
+        Returns:
+            bool: (description)
+        """
         return (
             self._worker_task.done()
             and not self._worker_task.cancelled()
@@ -407,9 +426,7 @@ def _build_services(
             SQLiteKernelRuntimeEventLog,
         )
 
-        base_event_log: Any = SQLiteKernelRuntimeEventLog(
-            config.sqlite_database_path
-        )
+        base_event_log: Any = SQLiteKernelRuntimeEventLog(config.sqlite_database_path)
         dedupe_store: Any = SQLiteDedupeStore(config.sqlite_database_path)
     else:
         from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore

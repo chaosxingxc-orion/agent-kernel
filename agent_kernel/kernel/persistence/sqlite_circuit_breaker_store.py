@@ -5,7 +5,10 @@ from __future__ import annotations
 import sqlite3
 import threading
 import time
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class SQLiteCircuitBreakerStore:
@@ -80,6 +83,9 @@ class SQLiteCircuitBreakerStore:
 
         Returns:
             The new failure count after incrementing.
+
+        Raises:
+            Exception: (description)
         """
         now = time.time()
         with self._lock:

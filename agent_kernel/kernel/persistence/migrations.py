@@ -16,8 +16,11 @@ Usage::
 from __future__ import annotations
 
 import logging
-import sqlite3
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import sqlite3
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +77,7 @@ class SchemaMigrationManager:
         seen_versions: set[int] = set()
         for m in self._migrations:
             if m.version in seen_versions:
-                raise ValueError(
-                    f"Duplicate migration version {m.version!r} detected."
-                )
+                raise ValueError(f"Duplicate migration version {m.version!r} detected.")
             seen_versions.add(m.version)
 
     def apply_all(self) -> int:
@@ -96,21 +97,17 @@ class SchemaMigrationManager:
         return len(pending)
 
     def _ensure_migrations_table(self) -> None:
-        self._connection.execute(
-            """
+        self._connection.execute("""
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 version     INTEGER PRIMARY KEY,
                 description TEXT    NOT NULL,
                 applied_at  TEXT    NOT NULL DEFAULT (datetime('now'))
             )
-            """
-        )
+            """)
         self._connection.commit()
 
     def _applied_versions(self) -> frozenset[int]:
-        cursor = self._connection.execute(
-            "SELECT version FROM schema_migrations"
-        )
+        cursor = self._connection.execute("SELECT version FROM schema_migrations")
         return frozenset(row[0] for row in cursor.fetchall())
 
     def _apply(self, migration: Migration) -> None:
@@ -122,8 +119,7 @@ class SchemaMigrationManager:
         with self._connection:
             self._connection.executescript(migration.sql)
             self._connection.execute(
-                "INSERT INTO schema_migrations (version, description) VALUES"
-                    "(?, ?)",
+                "INSERT INTO schema_migrations (version, description) VALUES(?, ?)",
                 (migration.version, migration.description),
             )
         logger.info("Migration v%d applied successfully.", migration.version)
@@ -136,8 +132,7 @@ class SchemaMigrationManager:
 KERNEL_MIGRATIONS: list[Migration] = [
     Migration(
         version=1,
-        description="Initial schema: runtime_events, turn_intents,"
-            "dedupe_store, recovery_outcomes",
+        description="Initial schema: runtime_events, turn_intents,dedupe_store, recovery_outcomes",
         sql="""
         CREATE TABLE IF NOT EXISTS runtime_events (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -182,8 +177,7 @@ KERNEL_MIGRATIONS: list[Migration] = [
     ),
     Migration(
         version=2,
-        description="Add schema_version column to runtime_events for snapshot"
-            "versioning",
+        description="Add schema_version column to runtime_events for snapshotversioning",
         sql="""
         ALTER TABLE runtime_events ADD COLUMN schema_version TEXT NOT NULL
         DEFAULT '1';

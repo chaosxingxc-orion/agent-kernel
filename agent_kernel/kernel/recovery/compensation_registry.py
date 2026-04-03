@@ -23,11 +23,12 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agent_kernel.kernel.dedupe_store import DedupeStorePort
 
 from agent_kernel.kernel.dedupe_store import IdempotencyEnvelope

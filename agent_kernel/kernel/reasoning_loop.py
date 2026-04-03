@@ -14,14 +14,13 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from agent_kernel.kernel.capability_snapshot import CapabilitySnapshot
-
-from agent_kernel.kernel.contracts import (
-    Action,
-    ContextWindow,
-    InferenceConfig,
-    ModelOutput,
-    RuntimeEvent,
-)
+    from agent_kernel.kernel.contracts import (
+        Action,
+        ContextWindow,
+        InferenceConfig,
+        ModelOutput,
+        RuntimeEvent,
+    )
 
 
 @dataclass(frozen=True, slots=True)

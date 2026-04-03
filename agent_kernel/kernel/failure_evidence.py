@@ -8,9 +8,10 @@ preserving the full raw envelope fields for auditability.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from agent_kernel.kernel.contracts import FailureEnvelope
+if TYPE_CHECKING:
+    from agent_kernel.kernel.contracts import FailureEnvelope
 
 FailureEvidenceSource = Literal[
     "external_ack_ref",

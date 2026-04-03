@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from agent_kernel.kernel.contracts import Action
+    from agent_kernel.kernel.turn_engine import TurnInput
 
 from agent_kernel.kernel.capability_snapshot import (
     CapabilitySnapshotBuildError,
     CapabilitySnapshotInput,
     DeclarativeBundleDigest,
 )
-from agent_kernel.kernel.contracts import Action
-from agent_kernel.kernel.turn_engine import TurnInput
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,10 +78,7 @@ class ActionPayloadCapabilitySnapshotInputResolver:
             self.default_permission_mode,
         )
         declarative_bundle_digest = _resolve_declarative_bundle_digest(payload)
-        if (
-            self.require_declarative_bundle_digest
-            and declarative_bundle_digest is None
-        ):
+        if self.require_declarative_bundle_digest and declarative_bundle_digest is None:
             raise CapabilitySnapshotBuildError(
                 "declarative_bundle_digest is required in strict mode."
             )
@@ -235,15 +234,12 @@ def _resolve_declarative_bundle_digest(
         return None
 
     missing_fields = [
-        field_name
-        for field_name, field_value in digest_fields.items()
-        if field_value is None
+        field_name for field_name, field_value in digest_fields.items() if field_value is None
     ]
     if missing_fields:
         missing_field_names = ", ".join(missing_fields)
         raise CapabilitySnapshotBuildError(
-            "declarative_bundle_digest is missing required fields: "
-            f"{missing_field_names}."
+            f"declarative_bundle_digest is missing required fields: {missing_field_names}."
         )
 
     return DeclarativeBundleDigest(

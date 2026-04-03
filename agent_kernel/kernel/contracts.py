@@ -8,11 +8,13 @@ implementation is introduced.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-from agent_kernel.kernel.capability_snapshot import CapabilitySnapshot
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from agent_kernel.kernel.capability_snapshot import CapabilitySnapshot
 
 RunLifecycleState = Literal[
     "created",
@@ -34,11 +36,11 @@ ExternalIdempotencyLevel = Literal["guaranteed", "best_effort", "unknown"]
 RecoveryMode = Literal["static_compensation", "human_escalation", "abort", "reflect_and_retry"]
 
 InteractionTarget = Literal[
-    "agent_peer",    # another agent kernel: A2A or any peer-agent protocol
-    "it_service",    # traditional IT: REST / gRPC / GraphQL / enterprise system
-    "data_system",   # database, vector store, data lake, streaming platform
-    "tool_executor", # MCP, function call, CLI, sandbox, code execution
-    "human_actor",   # approval gate, feedback loop, human escalation
+    "agent_peer",  # another agent kernel: A2A or any peer-agent protocol
+    "it_service",  # traditional IT: REST / gRPC / GraphQL / enterprise system
+    "data_system",  # database, vector store, data lake, streaming platform
+    "tool_executor",  # MCP, function call, CLI, sandbox, code execution
+    "human_actor",  # approval gate, feedback loop, human escalation
     "event_stream",  # Kafka, Redis Streams, pub/sub, message queue
 ]
 
@@ -1066,15 +1068,30 @@ class IngressAdapter(Protocol):
     """Abstracts ingress translation from platform events into kernel DTOs."""
 
     def from_runner_start(self, input_value: Any) -> StartRunRequest:
-        """Builds start-run request from runner-originated input."""
+        """Builds start-run request from runner-originated input.
+        Args:
+            input_value: (description)
+        Returns:
+            StartRunRequest: (description)
+        """
         ...
 
     def from_session_signal(self, input_value: Any) -> SignalRunRequest:
-        """Builds signal request from session-level input."""
+        """Builds signal request from session-level input.
+        Args:
+            input_value: (description)
+        Returns:
+            SignalRunRequest: (description)
+        """
         ...
 
     def from_callback(self, input_value: Any) -> SignalRunRequest:
-        """Builds signal request from callback input."""
+        """Builds signal request from callback input.
+        Args:
+            input_value: (description)
+        Returns:
+            SignalRunRequest: (description)
+        """
         ...
 
 
@@ -1082,7 +1099,12 @@ class ContextBindingPort(Protocol):
     """Abstracts context binding at kernel boundary."""
 
     def bind_context(self, input_value: Any) -> Any:
-        """Resolves runtime context binding from platform input."""
+        """Resolves runtime context binding from platform input.
+        Args:
+            input_value: (description)
+        Returns:
+            Any: (description)
+        """
         ...
 
 
@@ -1090,11 +1112,21 @@ class CheckpointResumePort(Protocol):
     """Abstracts checkpoint export and resume import at kernel boundary."""
 
     async def export_checkpoint(self, run_id: str) -> Any:
-        """Exports platform-facing checkpoint view for one run."""
+        """Exports platform-facing checkpoint view for one run.
+        Args:
+            run_id: (description)
+        Returns:
+            Any: (description)
+        """
         ...
 
     async def import_resume(self, input_value: Any) -> Any:
-        """Imports platform resume payload into kernel-safe request."""
+        """Imports platform resume payload into kernel-safe request.
+        Args:
+            input_value: (description)
+        Returns:
+            Any: (description)
+        """
         ...
 
 
@@ -1102,19 +1134,47 @@ class CapabilityAdapter(Protocol):
     """Abstracts capability bindings resolution from platform metadata."""
 
     async def resolve_tool_bindings(self, action: Action) -> list[Any]:
-        """Resolves tool bindings for one action."""
+        """Resolves tool bindings for one action.
+
+        Args:
+            action: The action whose tool bindings are being resolved.
+
+        Returns:
+            List of resolved tool binding descriptors.
+        """
         ...
 
     async def resolve_mcp_bindings(self, action: Action) -> list[Any]:
-        """Resolves MCP bindings for one action."""
+        """Resolves MCP bindings for one action.
+
+        Args:
+            action: The action whose MCP bindings are being resolved.
+
+        Returns:
+            List of resolved MCP binding descriptors.
+        """
         ...
 
     async def resolve_skill_bindings(self, action: Action) -> list[str]:
-        """Resolves skill bindings for one action."""
+        """Resolves skill bindings for one action.
+
+        Args:
+            action: The action whose skill bindings are being resolved.
+
+        Returns:
+            List of resolved skill identifiers.
+        """
         ...
 
     async def resolve_declarative_bundle(self, action: Action) -> dict[str, str] | None:
-        """Resolves declarative bundle digest payload for one action."""
+        """Resolves declarative bundle digest payload for one action.
+
+        Args:
+            action: The action whose declarative bundle is being resolved.
+
+        Returns:
+            Key-value digest map, or ``None`` when no bundle is declared.
+        """
         ...
 
 
@@ -2011,17 +2071,21 @@ class ReflectionPolicy:
     max_rounds: int = 3
     reflection_timeout_ms: int = 60_000
     reflectable_failure_kinds: frozenset[str] = field(
-        default_factory=lambda: frozenset({
-            "heartbeat_timeout",
-            "runtime_error",
-            "output_validation_failed",
-        })
+        default_factory=lambda: frozenset(
+            {
+                "heartbeat_timeout",
+                "runtime_error",
+                "output_validation_failed",
+            }
+        )
     )
     non_reflectable_failure_kinds: frozenset[str] = field(
-        default_factory=lambda: frozenset({
-            "resource_exhausted",
-            "permission_denied",
-        })
+        default_factory=lambda: frozenset(
+            {
+                "resource_exhausted",
+                "permission_denied",
+            }
+        )
     )
     escalate_on_exhaustion: bool = True
 

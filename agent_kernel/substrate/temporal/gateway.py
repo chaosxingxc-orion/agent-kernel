@@ -17,9 +17,11 @@ Why this module exists:
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 from agent_kernel.kernel.contracts import (
     QueryRunResponse,
@@ -83,7 +85,12 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         self._config = config or TemporalGatewayConfig()
 
     async def start_workflow(self, request: StartRunRequest) -> dict[str, str]:
-        """Starts one run workflow and returns a facade-safe workflow id."""
+        """Starts one run workflow and returns a facade-safe workflow id.
+        Args:
+            request: (description)
+        Returns:
+            dict[str, str]: (description)
+        """
         run_id = self._build_run_id(request)
         workflow_id = self._workflow_id_for_run(run_id)
         await self._client.start_workflow(
@@ -106,7 +113,11 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         run_id: str,
         signal: SignalRunRequest,
     ) -> None:
-        """Routes one kernel signal into the Temporal workflow."""
+        """Routes one kernel signal into the Temporal workflow.
+        Args:
+            run_id: (description)
+            signal: (description)
+        """
         handle = self._client.get_workflow_handle(
             self._workflow_id_for_run(run_id),
         )
@@ -131,6 +142,10 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         ``cancel(reason=...)``, while others expose ``cancel()``
         only. The gateway keeps reasoned cancel as the preferred
         path and falls back to no-arg cancel for older SDKs.
+
+        Args:
+            run_id: (description)
+            reason: (description)
         """
         handle = self._client.get_workflow_handle(
             self._workflow_id_for_run(run_id),
@@ -141,7 +156,17 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
             await handle.cancel()
 
     async def query_projection(self, run_id: str) -> RunProjection:
-        """Queries projection from workflow and normalizes result shape."""
+        """Queries projection from workflow and normalizes result shape.
+
+        Args:
+            run_id: Target run identifier.
+
+        Returns:
+            Normalized ``RunProjection`` snapshot.
+
+        Raises:
+            ValueError: If the query response shape is unexpected.
+        """
         handle = self._client.get_workflow_handle(
             self._workflow_id_for_run(run_id),
         )
@@ -168,14 +193,16 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
                     projection_like.get("run_id", run_id),
                 ),
                 lifecycle_state=projection_like.get(
-                    "lifecycle_state", "created",
+                    "lifecycle_state",
+                    "created",
                 ),
                 projected_offset=int(
                     projection_like.get("projected_offset", 0),
                 ),
                 waiting_external=bool(
                     projection_like.get(
-                        "waiting_external", False,
+                        "waiting_external",
+                        False,
                     ),
                 ),
                 current_action_id=projection_like.get(
@@ -189,31 +216,32 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
                 ),
                 active_child_runs=list(
                     projection_like.get(
-                        "active_child_runs", [],
+                        "active_child_runs",
+                        [],
                     ),
                 ),
                 ready_for_dispatch=bool(
                     projection_like.get(
-                        "ready_for_dispatch", False,
+                        "ready_for_dispatch",
+                        False,
                     ),
                 ),
             )
-        raise TypeError(
-            "Unsupported projection payload returned by"
-            " Temporal query."
-        )
+        raise TypeError("Unsupported projection payload returned by Temporal query.")
 
     async def start_child_workflow(
         self,
         parent_run_id: str,
         request: SpawnChildRunRequest,
     ) -> dict[str, str]:
-        """Starts one child run workflow linked to parent run id."""
-        child_run_id = (
-            request.input_json.get("child_run_id")
-            if request.input_json
-            else None
-        )
+        """Starts one child run workflow linked to parent run id.
+        Args:
+            parent_run_id: (description)
+            request: (description)
+        Returns:
+            dict[str, str]: (description)
+        """
+        child_run_id = request.input_json.get("child_run_id") if request.input_json else None
         if not isinstance(child_run_id, str) or not child_run_id:
             child_run_id = f"{parent_run_id}:{request.child_kind}"
         workflow_id = self._workflow_id_for_child(parent_run_id, child_run_id)
@@ -242,11 +270,9 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         Returns:
             Resolved run identifier string.
         """
-        if (
-            request.input_json
-            and isinstance(
-                request.input_json.get("run_id"), str,
-            )
+        if request.input_json and isinstance(
+            request.input_json.get("run_id"),
+            str,
         ):
             return request.input_json["run_id"]
         if request.parent_run_id:
@@ -278,7 +304,14 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         )
 
     def stream_run_events(self, run_id: str) -> AsyncIterator[RuntimeEvent]:
-        """Streams runtime events for one run through optional query hook."""
+        """Streams runtime events for one run through optional query hook.
+
+        Args:
+            run_id: Target run identifier.
+
+        Returns:
+            Async iterator of ``RuntimeEvent`` instances.
+        """
         return self._stream_run_events(run_id)
 
     async def _stream_run_events(self, run_id: str) -> AsyncIterator[RuntimeEvent]:
@@ -307,9 +340,7 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         if isinstance(stream_payload, dict):
             stream_payload = stream_payload.get("events")
         if not isinstance(stream_payload, list):
-            raise TypeError(
-                "Unsupported runtime event stream payload returned by Temporal query."
-            )
+            raise TypeError("Unsupported runtime event stream payload returned by Temporal query.")
         return [
             self._coerce_runtime_event(
                 run_id=run_id,
@@ -327,9 +358,7 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         if isinstance(event_payload, RuntimeEvent):
             return event_payload
         if not isinstance(event_payload, dict):
-            raise TypeError(
-                "Unsupported runtime event item returned by Temporal query."
-            )
+            raise TypeError("Unsupported runtime event item returned by Temporal query.")
         payload_json = event_payload.get("payload_json")
         idempotency_key = event_payload.get("idempotency_key")
         payload_ref = event_payload.get("payload_ref")

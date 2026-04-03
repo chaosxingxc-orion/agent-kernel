@@ -7,9 +7,11 @@ Temporal-specific substrate details.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 from agent_kernel.adapters.agent_core.checkpoint_adapter import AgentCoreResumeInput
 from agent_kernel.adapters.agent_core.context_adapter import AgentCoreContextInput
@@ -177,7 +179,10 @@ class KernelFacade:
             include_derived_diagnostic: Includes diagnostic derived events when True.
 
         Yields:
-            Runtime events allowed by facade stream contract.
+            RuntimeEvent: Events allowed by facade stream contract.
+
+        Returns:
+            AsyncGenerator[RuntimeEvent]: Async generator of runtime events.
         """
         async for event in self._workflow_gateway.stream_run_events(run_id):
             if self._is_stream_event_exposed(
@@ -202,6 +207,9 @@ class KernelFacade:
 
         Args:
             request: Cancellation request produced by the platform.
+
+        Raises:
+            Exception: (description)
         """
         await self._workflow_gateway.signal_workflow(
             request.run_id,
@@ -233,18 +241,17 @@ class KernelFacade:
 
         Raises:
             RuntimeError: If checkpoint adapter is not configured.
+
+        Args:
+            request: (description)
         """
         if self._checkpoint_adapter is None:
-            raise RuntimeError(
-                "checkpoint_adapter is required for resume_run."
-            )
-        kernel_resume_request = (
-            await self._checkpoint_adapter.import_resume_request(
-                AgentCoreResumeInput(
-                    run_id=request.run_id,
-                    snapshot_id=request.snapshot_id,
-                ),
-            )
+            raise RuntimeError("checkpoint_adapter is required for resume_run.")
+        kernel_resume_request = await self._checkpoint_adapter.import_resume_request(
+            AgentCoreResumeInput(
+                run_id=request.run_id,
+                snapshot_id=request.snapshot_id,
+            ),
         )
         signal_payload: dict[str, Any] = {
             "snapshot_id": kernel_resume_request.snapshot_id,
@@ -356,10 +363,7 @@ class KernelFacade:
             request.parent_run_id,
             request,
         )
-        child_run_id = str(
-            workflow.get("run_id")
-            or workflow.get("workflow_id", "")
-        )
+        child_run_id = str(workflow.get("run_id") or workflow.get("workflow_id", ""))
         # Minimal closed-loop behavior: notify parent run projection that a new
         # child has been created. The parent workflow converts this signal into
         # a replayable runtime event, so projection can track active children.

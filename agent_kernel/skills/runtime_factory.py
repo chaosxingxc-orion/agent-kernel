@@ -24,7 +24,12 @@ class _HostEchoSkillRuntime(SkillRuntime):
     host_kind: SkillRuntimeHost
 
     async def execute(self, request: SkillRequest) -> SkillResult:
-        """Executes request and returns deterministic success payload."""
+        """Executes request and returns deterministic success payload.
+        Args:
+            request: (description)
+        Returns:
+            SkillResult: (description)
+        """
         return SkillResult(
             skill_id=self.definition.skill_id,
             action_id=request.action_id,
@@ -51,7 +56,15 @@ class DefaultSkillRuntimeFactory(
         definition: SkillDefinition,
         host_kind: SkillRuntimeHost,
     ) -> SkillRuntime:
-        """Creates runtime for one host kind."""
+        """Creates runtime for one host kind.
+        Args:
+            definition: (description)
+            host_kind: (description)
+        Returns:
+            SkillRuntime: (description)
+        Raises:
+            Exception: (description)
+        """
         if host_kind == "cli_process":
             return await self.create_cli_process(definition)
         if host_kind == "in_process_python":
@@ -61,13 +74,28 @@ class DefaultSkillRuntimeFactory(
         raise ValueError(f"Unsupported skill runtime host kind: {host_kind}")
 
     async def create_cli_process(self, definition: SkillDefinition) -> SkillRuntime:
-        """Creates runtime bound to CLI process host."""
+        """Creates runtime bound to CLI process host.
+        Args:
+            definition: (description)
+        Returns:
+            SkillRuntime: (description)
+        """
         return _HostEchoSkillRuntime(definition=definition, host_kind="cli_process")
 
     async def create_in_process_python(self, definition: SkillDefinition) -> SkillRuntime:
-        """Creates runtime bound to in-process Python host."""
+        """Creates runtime bound to in-process Python host.
+        Args:
+            definition: (description)
+        Returns:
+            SkillRuntime: (description)
+        """
         return _HostEchoSkillRuntime(definition=definition, host_kind="in_process_python")
 
     async def create_remote_service(self, definition: SkillDefinition) -> SkillRuntime:
-        """Creates runtime bound to remote-service host."""
+        """Creates runtime bound to remote-service host.
+        Args:
+            definition: (description)
+        Returns:
+            SkillRuntime: (description)
+        """
         return _HostEchoSkillRuntime(definition=definition, host_kind="remote_service")

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from agent_kernel.kernel.contracts import (
-    ExternalIdempotencyLevel,
-    RemoteServiceIdempotencyContract,
-)
+if TYPE_CHECKING:
+    from agent_kernel.kernel.contracts import (
+        ExternalIdempotencyLevel,
+        RemoteServiceIdempotencyContract,
+    )
 
 
 @dataclass(frozen=True, slots=True)
