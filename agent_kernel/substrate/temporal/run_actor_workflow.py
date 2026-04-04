@@ -877,6 +877,12 @@ _SIGNAL_EVENT_TYPE_MAP: dict[str, str] = {
     "timeout": "run.waiting_external",
     "recovery_succeeded": "run.recovery_succeeded",
     "recovery_aborted": "run.recovery_aborted",
+    # Plan / approval / speculation signals — recorded as authoritative facts
+    # so that the event log captures the full lifecycle intent, even when the
+    # execution engine has not yet processed the plan.
+    "plan_submitted": "run.plan_submitted",
+    "approval_submitted": "run.approval_submitted",
+    "speculation_committed": "run.speculation_committed",
 }
 
 

@@ -46,6 +46,10 @@ class ActionTypeDescriptor:
         supports_dedupe: Whether this action type participates in
             ``DedupeStore`` at-most-once tracking.  Set ``False`` for
             fire-and-forget or read-only actions.
+        allowed_effect_classes: Optional explicit whitelist of ``effect_class``
+            values permitted for actions of this type.  When non-empty, callers
+            can use ``validate_effect_class()`` to reject unknown classes before
+            dispatch.  When empty (default), no per-type restriction is applied.
     """
 
     action_type: str
@@ -53,6 +57,7 @@ class ActionTypeDescriptor:
     executor_hint: str = "local_process"
     is_idempotent: bool = True
     supports_dedupe: bool = True
+    allowed_effect_classes: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(slots=True)
@@ -171,6 +176,55 @@ _KERNEL_ACTION_TYPES: list[ActionTypeDescriptor] = [
 
 for _descriptor in _KERNEL_ACTION_TYPES:
     KERNEL_ACTION_TYPE_REGISTRY.register(_descriptor)
+
+# ---------------------------------------------------------------------------
+# Kernel-built-in effect_class vocabulary
+# ---------------------------------------------------------------------------
+
+#: Canonical ``effect_class`` values understood by the kernel's admission and
+#: recovery layers.  Extensions may add custom classes, but using unknown
+#: values without registering them triggers a WARNING from
+#: ``validate_effect_class()``.
+KNOWN_EFFECT_CLASSES: frozenset[str] = frozenset(
+    {
+        "read_only",
+        "compensatable_write",
+        "fire_forget",
+        "irreversible_write",
+    }
+)
+
+
+def validate_effect_class(effect_class: str, strict: bool = False) -> bool:
+    """Check whether *effect_class* is in the canonical ``KNOWN_EFFECT_CLASSES`` set.
+
+    Unknown effect classes are not inherently illegal — teams may extend the
+    vocabulary — but unknown values bypass admission heuristics and circuit
+    breaker routing.  Call with ``strict=True`` in deployments that want to
+    prevent ad-hoc class pollution.
+
+    Args:
+        effect_class: The effect class string to validate (e.g. ``"read_only"``).
+        strict: When ``True`` raises ``ValueError`` for unknown classes.
+            When ``False`` (default) only emits a WARNING log.
+
+    Returns:
+        ``True`` when the effect_class is in ``KNOWN_EFFECT_CLASSES``.
+
+    Raises:
+        ValueError: When ``strict=True`` and the effect_class is unknown.
+    """
+    if effect_class in KNOWN_EFFECT_CLASSES:
+        return True
+    msg = (
+        f"Effect class '{effect_class}' is not in KNOWN_EFFECT_CLASSES "
+        f"({sorted(KNOWN_EFFECT_CLASSES)}). Add it to KNOWN_EFFECT_CLASSES or "
+        "accept reduced admission heuristics for this class."
+    )
+    if strict:
+        raise ValueError(msg)
+    _registry_logger.warning(msg)
+    return False
 
 
 def validate_action_type(action_type: str, strict: bool = False) -> bool:

@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 
 _registry_logger = logging.getLogger(__name__)
 
-
 _CURRENT_EVENT_SCHEMA_VERSION = "1"
 """Current schema version for RuntimeEvent.  Bump when the event DTO fields
 change in a backward-incompatible way."""
@@ -127,8 +126,7 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
     ),
     EventTypeDescriptor(
         event_type="run.started",
-        description="RunActor has accepted the run and entered active"
-            "lifecycle.",
+        description="RunActor has accepted the run and entered activelifecycle.",
         authority="RunActor",
         affects_replay=True,
     ),
@@ -146,16 +144,14 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
     ),
     EventTypeDescriptor(
         event_type="run.child_completed",
-        description="A child run signalled its completion back to this parent"
-            "run.",
+        description="A child run signalled its completion back to this parentrun.",
         authority="RunActor",
         affects_replay=True,
     ),
     # --- Turn / TurnEngine FSM ---
     EventTypeDescriptor(
         event_type="turn.intent_committed",
-        description="TurnEngine committed the action intent; FSM advanced to"
-            "intent_committed.",
+        description="TurnEngine committed the action intent; FSM advanced tointent_committed.",
         authority="TurnEngine",
         affects_replay=True,
     ),
@@ -167,22 +163,19 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
     ),
     EventTypeDescriptor(
         event_type="turn.admission_checked",
-        description="Admission gate evaluated the snapshot and approved"
-            "dispatch.",
+        description="Admission gate evaluated the snapshot and approveddispatch.",
         authority="Admission",
         affects_replay=True,
     ),
     EventTypeDescriptor(
         event_type="turn.dispatch_blocked",
-        description="Admission gate blocked dispatch; action will not be"
-            "executed.",
+        description="Admission gate blocked dispatch; action will not beexecuted.",
         authority="Admission",
         affects_replay=True,
     ),
     EventTypeDescriptor(
         event_type="turn.dispatched",
-        description="DedupeStore recorded dispatch reservation; Executor"
-            "called.",
+        description="DedupeStore recorded dispatch reservation; Executorcalled.",
         authority="Executor",
         affects_replay=True,
     ),
@@ -200,22 +193,19 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
     ),
     EventTypeDescriptor(
         event_type="turn.effect_recorded",
-        description="Executor effect was confirmed and written to"
-            "RuntimeEventLog.",
+        description="Executor effect was confirmed and written toRuntimeEventLog.",
         authority="Executor",
         affects_replay=True,
     ),
     EventTypeDescriptor(
         event_type="turn.completed_noop",
-        description="Turn completed with no external effect (e.g. admission"
-            "blocked, noop action).",
+        description="Turn completed with no external effect (e.g. admissionblocked, noop action).",
         authority="TurnEngine",
         affects_replay=True,
     ),
     EventTypeDescriptor(
         event_type="turn.recovery_pending",
-        description="Recovery is pending for this turn; outcome not yet"
-            "determined.",
+        description="Recovery is pending for this turn; outcome not yetdetermined.",
         authority="Recovery",
         affects_replay=True,
     ),
@@ -241,7 +231,7 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
     EventTypeDescriptor(
         event_type="turn.parallel_joined",
         description="All branches in a parallel group completed and the join"
-            "strategy was evaluated.",
+        "strategy was evaluated.",
         authority="TurnEngine",
         affects_replay=True,
     ),
@@ -269,8 +259,7 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
     ),
     EventTypeDescriptor(
         event_type="recovery.outcome_recorded",
-        description="Recovery authority recorded a final outcome for a failed"
-            "turn.",
+        description="Recovery authority recorded a final outcome for a failedturn.",
         authority="Recovery",
         affects_replay=True,
     ),
@@ -283,8 +272,7 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
     # --- Signals ---
     EventTypeDescriptor(
         event_type="signal.received",
-        description="A signal was received by the RunActor from an external"
-            "caller.",
+        description="A signal was received by the RunActor from an externalcaller.",
         authority="RunActor",
         affects_replay=True,
     ),
@@ -297,15 +285,13 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
     # --- Run lifecycle (substrate-emitted state facts) ---
     EventTypeDescriptor(
         event_type="run.dispatching",
-        description="Run entered dispatching state; an action was admitted and"
-            "dispatched.",
+        description="Run entered dispatching state; an action was admitted anddispatched.",
         authority="RunActor",
         affects_replay=True,
     ),
     EventTypeDescriptor(
         event_type="run.recovering",
-        description="Run entered recovery state; a failed action is being"
-            "handled.",
+        description="Run entered recovery state; a failed action is beinghandled.",
         authority="RunActor",
         affects_replay=True,
         recovery_path_allowed=True,
@@ -334,8 +320,7 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
     ),
     EventTypeDescriptor(
         event_type="run.waiting_external",
-        description="Run is paused waiting for an external event or human"
-            "review.",
+        description="Run is paused waiting for an external event or humanreview.",
         authority="RunActor",
         affects_replay=True,
         recovery_path_allowed=True,
@@ -361,6 +346,35 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
     EventTypeDescriptor(
         event_type="run.resume_requested",
         description="A resume-from-snapshot signal was received.",
+        authority="RunActor",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="run.plan_submitted",
+        description=(
+            "An ExecutionPlan was submitted via KernelFacade.submit_plan(). "
+            "Recorded as an authoritative fact so the event log captures "
+            "the full delegation intent before execution begins."
+        ),
+        authority="RunActor",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="run.approval_submitted",
+        description=(
+            "A human-actor approval decision (approved or denied) was received "
+            "via KernelFacade.submit_approval(). Recorded as authoritative fact."
+        ),
+        authority="RunActor",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="run.speculation_committed",
+        description=(
+            "A winning speculative candidate was committed via "
+            "KernelFacade.commit_speculation(). Triggers cancellation of "
+            "all other speculative child runs."
+        ),
         authority="RunActor",
         affects_replay=True,
     ),
@@ -393,8 +407,7 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
     # --- Observability (non-replay) ---
     EventTypeDescriptor(
         event_type="derived_diagnostic",
-        description="Diagnostic event for observability only; never replayed or"
-            "used in recovery.",
+        description="Diagnostic event for observability only; never replayed orused in recovery.",
         authority="ObservabilityHook",
         affects_replay=False,
     ),
@@ -416,11 +429,7 @@ def recovery_allowed_event_types() -> frozenset[str]:
         Immutable set of event type strings allowed in
         ``_append_recovery_event``.
     """
-    return frozenset(
-        d.event_type
-        for d in KERNEL_EVENT_REGISTRY.all()
-        if d.recovery_path_allowed
-    )
+    return frozenset(d.event_type for d in KERNEL_EVENT_REGISTRY.all() if d.recovery_path_allowed)
 
 
 def validate_event_type(event_type: str, strict: bool = False) -> bool:

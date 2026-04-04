@@ -2300,3 +2300,4 @@ class KernelManifest:
     supported_event_types: frozenset[str]
     substrate_type: str
     capability_snapshot_schema_version: str = "2"
+    substrate_limitations: frozenset[str] = field(default_factory=frozenset)

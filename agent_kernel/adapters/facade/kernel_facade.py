@@ -62,6 +62,32 @@ _GOVERNANCE_FEATURES: frozenset[str] = frozenset(
     }
 )
 
+# Substrate-specific limitations surfaced in KernelManifest so platforms can
+# adapt without trial-and-error.  LocalFSM runs entirely in-process and cannot
+# provide Child Workflow isolation or durable Temporal History.
+_SUBSTRATE_LIMITATIONS: dict[str, frozenset[str]] = {
+    "local_fsm": frozenset(
+        {
+            "no_child_workflow_isolation",
+            "no_temporal_history",
+            "no_cross_process_speculation",
+        }
+    ),
+    "temporal": frozenset(),
+}
+
+
+def _substrate_limitations(substrate_type: str) -> frozenset[str]:
+    """Return the known limitations frozenset for *substrate_type*.
+
+    Args:
+        substrate_type: Substrate identifier (e.g. ``"temporal"``).
+
+    Returns:
+        Frozenset of limitation tokens, empty when no limitations apply.
+    """
+    return _SUBSTRATE_LIMITATIONS.get(substrate_type, frozenset())
+
 
 class KernelFacade:
     """Provides the only allowed platform entrypoint into the kernel.
@@ -77,6 +103,7 @@ class KernelFacade:
         checkpoint_adapter: Any | None = None,
         health_probe: Any | None = None,
         substrate_type: str = _SUBSTRATE_TEMPORAL,
+        kernel_version: str = _KERNEL_VERSION,
     ) -> None:
         """Initializes facade with substrate gateway and optional adapters.
 
@@ -91,12 +118,22 @@ class KernelFacade:
                 static response.
             substrate_type: Substrate identifier reported in ``get_manifest()``.
                 Defaults to ``"temporal"``.
+            kernel_version: Override for the kernel semantic version string
+                reported in ``get_manifest()``.  Defaults to the module-level
+                ``_KERNEL_VERSION`` constant.
         """
         self._workflow_gateway = workflow_gateway
         self._context_adapter = context_adapter
         self._checkpoint_adapter = checkpoint_adapter
         self._health_probe = health_probe
         self._substrate_type = substrate_type
+        self._kernel_version = kernel_version
+        # Per-instance approval dedup gate: tracks (run_id, approval_ref) pairs
+        # that have already been forwarded to the substrate.  Prevents duplicate
+        # approval signals from the same facade instance (e.g. accidental double
+        # submit from a UI).  Note: this is an in-memory gate scoped to one
+        # facade instance — cross-process dedup lives in the event log.
+        self._submitted_approvals: set[tuple[str, str]] = set()
 
     @staticmethod
     def _build_signal_observability(
@@ -454,7 +491,7 @@ class KernelFacade:
             Immutable ``KernelManifest`` describing kernel capabilities.
         """
         return KernelManifest(
-            kernel_version=_KERNEL_VERSION,
+            kernel_version=self._kernel_version,
             protocol_version=_PROTOCOL_VERSION,
             supported_plan_types=KERNEL_PLAN_TYPE_REGISTRY.known_types(),
             supported_action_types=KERNEL_ACTION_TYPE_REGISTRY.known_types(),
@@ -463,6 +500,7 @@ class KernelFacade:
             supported_governance_features=_GOVERNANCE_FEATURES,
             supported_event_types=KERNEL_EVENT_REGISTRY.known_types(),
             substrate_type=self._substrate_type,
+            substrate_limitations=_substrate_limitations(self._substrate_type),
         )
 
     async def submit_plan(
@@ -530,9 +568,17 @@ class KernelFacade:
         Routes the approval through the standard signal pathway so it is
         recorded as a replayable authoritative fact in the event log.
 
+        Duplicate submissions for the same ``(run_id, approval_ref)`` pair are
+        silently dropped by the in-process dedup gate.  This prevents accidental
+        double-submit from the same facade instance (e.g. UI retry).
+
         Args:
             request: Typed approval request from the human review interface.
         """
+        dedup_key = (request.run_id, request.approval_ref)
+        if dedup_key in self._submitted_approvals:
+            return
+        self._submitted_approvals.add(dedup_key)
         await self._workflow_gateway.signal_workflow(
             request.run_id,
             SignalRunRequest(
@@ -598,6 +644,27 @@ class KernelFacade:
         """
         if self._health_probe is not None:
             probe_result = getattr(self._health_probe, "liveness", None)
+            if callable(probe_result):
+                return probe_result()  # type: ignore[no-any-return]
+        return {"status": "ok", "substrate": self._substrate_type}
+
+    def get_health_readiness(self) -> dict[str, Any]:
+        """Returns a readiness health status for this kernel instance.
+
+        Readiness is a stricter gate than liveness: the kernel is ready only
+        when all backing stores (event log, dedupe store) are available and
+        responding within expected latency bounds.
+
+        Delegates to the injected ``KernelHealthProbe.readiness()`` when
+        available.  Falls back to the same minimal static response as
+        ``get_health()`` when no probe is injected — callers should treat
+        the absence of a probe as ``"ready"`` for PoC/test environments.
+
+        Returns:
+            Dict with at minimum ``{"status": "ok" | "degraded" | "unhealthy"}``.
+        """
+        if self._health_probe is not None:
+            probe_result = getattr(self._health_probe, "readiness", None)
             if callable(probe_result):
                 return probe_result()  # type: ignore[no-any-return]
         return {"status": "ok", "substrate": self._substrate_type}
