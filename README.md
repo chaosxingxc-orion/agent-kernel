@@ -2,7 +2,7 @@
 
 > 企业级智能体执行内核 — 六权威生命周期协议 · Temporal 持久执行基底 · 单系统运行时
 
-**6 879 测试通过** | Python 3.14 | Google Python Style Guide
+**6 892 测试通过** | Python 3.14 | Google Python Style Guide
 
 ---
 
@@ -401,7 +401,7 @@ agent_kernel/
 │   └── agent_core/                   # agent-core 适配层
 └── skills/                           # Skills 运行时
 
-python_tests/agent_kernel/            # 镜像 src 结构，6 879 测试
+python_tests/agent_kernel/            # 镜像 src 结构，6 892 测试
 ```
 
 ---
