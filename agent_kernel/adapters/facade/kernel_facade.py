@@ -7,6 +7,8 @@ Temporal-specific substrate details.
 
 from __future__ import annotations
 
+import inspect
+import threading
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -134,6 +136,7 @@ class KernelFacade:
         # submit from a UI).  Note: this is an in-memory gate scoped to one
         # facade instance — cross-process dedup lives in the event log.
         self._submitted_approvals: set[tuple[str, str]] = set()
+        self._approvals_lock = threading.Lock()
 
     @staticmethod
     def _build_signal_observability(
@@ -576,9 +579,10 @@ class KernelFacade:
             request: Typed approval request from the human review interface.
         """
         dedup_key = (request.run_id, request.approval_ref)
-        if dedup_key in self._submitted_approvals:
-            return
-        self._submitted_approvals.add(dedup_key)
+        with self._approvals_lock:
+            if dedup_key in self._submitted_approvals:
+                return
+            self._submitted_approvals.add(dedup_key)
         await self._workflow_gateway.signal_workflow(
             request.run_id,
             SignalRunRequest(
@@ -645,6 +649,11 @@ class KernelFacade:
         if self._health_probe is not None:
             probe_result = getattr(self._health_probe, "liveness", None)
             if callable(probe_result):
+                if inspect.iscoroutinefunction(probe_result):
+                    raise TypeError(
+                        "KernelHealthProbe.liveness must be synchronous; got an async method. "
+                        "Wrap it in a sync adapter before injecting."
+                    )
                 return probe_result()  # type: ignore[no-any-return]
         return {"status": "ok", "substrate": self._substrate_type}
 
@@ -666,6 +675,11 @@ class KernelFacade:
         if self._health_probe is not None:
             probe_result = getattr(self._health_probe, "readiness", None)
             if callable(probe_result):
+                if inspect.iscoroutinefunction(probe_result):
+                    raise TypeError(
+                        "KernelHealthProbe.readiness must be synchronous; got an async method. "
+                        "Wrap it in a sync adapter before injecting."
+                    )
                 return probe_result()  # type: ignore[no-any-return]
         return {"status": "ok", "substrate": self._substrate_type}
 

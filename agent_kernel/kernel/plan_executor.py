@@ -132,6 +132,26 @@ class PlanExecutor:
         self._branch_monitor = branch_monitor
         self._observability_hook = observability_hook
         self._dedupe_store = dedupe_store
+        # Per-execution speculative task registry.  Populated during
+        # _execute_speculative and cleared after candidates settle.
+        # A stack is used so that nested SpeculativePlan executions do not
+        # overwrite the outer layer's task dict (D-H4).
+        self._active_speculative_tasks: dict[str, asyncio.Task[PlanResult]] = {}
+        self._speculative_task_stack: list[dict[str, asyncio.Task[PlanResult]]] = []
+
+    async def commit_speculation(self, winner_candidate_id: str) -> None:
+        """Cancels all speculative tasks except the winner.
+
+        Called when a ``speculation_committed`` signal identifies the winning
+        candidate.  Non-winner asyncio Tasks are cancelled so their side-effects
+        are not applied.  Already-done tasks are left untouched.
+
+        Args:
+            winner_candidate_id: ``candidate_id`` of the candidate to keep.
+        """
+        for cid, task in list(self._active_speculative_tasks.items()):
+            if cid != winner_candidate_id and not task.done():
+                task.cancel()
 
     async def execute_plan(self, plan: ExecutionPlan, run_id: str) -> PlanResult:
         """Dispatches plan execution to the correct strategy.
@@ -527,19 +547,32 @@ class PlanExecutor:
                 failed=0,
             )
 
-        async def _run_candidate(candidate: Any) -> PlanResult:
-            return await self.execute_plan(candidate.plan, run_id)
-
-        coros = [_run_candidate(c) for c in plan.candidates]
-
-        if plan.speculation_timeout_ms is not None:
-            timeout_s = plan.speculation_timeout_ms / 1000.0
-            raw_results: list[PlanResult | BaseException] = await asyncio.gather(
-                *[asyncio.wait_for(c, timeout=timeout_s) for c in coros],
-                return_exceptions=True,
+        # Create per-candidate Tasks so commit_speculation() can cancel
+        # non-winners by candidate_id before their side-effects are applied.
+        tasks: dict[str, asyncio.Task[PlanResult]] = {
+            c.candidate_id: asyncio.create_task(
+                self.execute_plan(c.plan, run_id), name=f"speculative:{c.candidate_id}"
             )
-        else:
-            raw_results = await asyncio.gather(*coros, return_exceptions=True)
+            for c in plan.candidates
+        }
+        self._speculative_task_stack.append(tasks)
+        self._active_speculative_tasks = tasks
+
+        try:
+            task_list = list(tasks.values())
+            if plan.speculation_timeout_ms is not None:
+                timeout_s = plan.speculation_timeout_ms / 1000.0
+                raw_results: list[PlanResult | BaseException] = await asyncio.gather(
+                    *[asyncio.wait_for(t, timeout=timeout_s) for t in task_list],
+                    return_exceptions=True,
+                )
+            else:
+                raw_results = await asyncio.gather(*task_list, return_exceptions=True)
+        finally:
+            self._speculative_task_stack.pop()
+            self._active_speculative_tasks = (
+                self._speculative_task_stack[-1] if self._speculative_task_stack else {}
+            )
 
         total_actions = 0
         succeeded = 0

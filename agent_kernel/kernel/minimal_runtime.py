@@ -15,10 +15,16 @@ contract semantics and strict boundaries, but they are not production storage.
 
 from __future__ import annotations
 
+import asyncio
 import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
+
+# Maximum number of run_ids retained in InMemoryKernelRuntimeEventLog before
+# oldest entries are evicted.  Prevents OOM in long-running PoC/test scenarios.
+# Production: use a persistent store — this cap is intentionally conservative.
+_MAX_RETAINED_RUNS = 5000
 
 if TYPE_CHECKING:
     from agent_kernel.kernel.capability_snapshot import CapabilitySnapshot
@@ -101,6 +107,12 @@ class InMemoryKernelRuntimeEventLog(KernelRuntimeEventLog):
 
         self._next_offset_by_run[commit.run_id] = next_offset
         self._commit_sequence += 1
+        # Evict oldest run_ids when cap is exceeded to prevent OOM.
+        # Production: use a persistent store instead of this in-memory cap.
+        if len(self._events_by_run) > _MAX_RETAINED_RUNS:
+            oldest = next(iter(self._events_by_run))
+            del self._events_by_run[oldest]
+            self._next_offset_by_run.pop(oldest, None)
         return f"commit-ref-{self._commit_sequence}"
 
     async def load(self, run_id: str, after_offset: int = 0) -> list[RuntimeEvent]:
@@ -136,6 +148,13 @@ class InMemoryDecisionProjectionService(DecisionProjectionService):
         self._event_log = event_log
         self._projection_by_run: dict[str, RunProjection] = {}
         self._reject_derived_diagnostic_authority_input = reject_derived_diagnostic_authority_input
+        self._run_locks: dict[str, asyncio.Lock] = {}
+
+    def _get_lock(self, run_id: str) -> asyncio.Lock:
+        """Returns (creating on demand) the per-run asyncio.Lock."""
+        if run_id not in self._run_locks:
+            self._run_locks[run_id] = asyncio.Lock()
+        return self._run_locks[run_id]
 
     async def catch_up(self, run_id: str, through_offset: int) -> RunProjection:
         """Catches up projection state through the requested offset.
@@ -147,22 +166,25 @@ class InMemoryDecisionProjectionService(DecisionProjectionService):
         Returns:
             Updated projection at or past ``through_offset``.
         """
-        projection = self._projection_by_run.get(run_id, _default_projection(run_id))
-        unseen_events = await self._event_log.load(run_id, after_offset=projection.projected_offset)
-        for event in unseen_events:
-            if event.commit_offset > through_offset:
-                break
-            should_replay = _validate_projection_authority_input(
-                event=event,
-                reject_derived_diagnostic_authority_input=(
-                    self._reject_derived_diagnostic_authority_input
-                ),
+        async with self._get_lock(run_id):
+            projection = self._projection_by_run.get(run_id, _default_projection(run_id))
+            unseen_events = await self._event_log.load(
+                run_id, after_offset=projection.projected_offset
             )
-            if not should_replay:
-                continue
-            projection = _apply_projection_event(projection, event)
-        self._projection_by_run[run_id] = projection
-        return projection
+            for event in unseen_events:
+                if event.commit_offset > through_offset:
+                    break
+                should_replay = _validate_projection_authority_input(
+                    event=event,
+                    reject_derived_diagnostic_authority_input=(
+                        self._reject_derived_diagnostic_authority_input
+                    ),
+                )
+                if not should_replay:
+                    continue
+                projection = _apply_projection_event(projection, event)
+            self._projection_by_run[run_id] = projection
+            return projection
 
     async def readiness(self, run_id: str, required_offset: int) -> bool:
         """Returns whether projection has reached required offset.
@@ -186,20 +208,23 @@ class InMemoryDecisionProjectionService(DecisionProjectionService):
         Returns:
             Current authoritative projection for the run.
         """
-        projection = self._projection_by_run.get(run_id, _default_projection(run_id))
-        unseen_events = await self._event_log.load(run_id, after_offset=projection.projected_offset)
-        for event in unseen_events:
-            should_replay = _validate_projection_authority_input(
-                event=event,
-                reject_derived_diagnostic_authority_input=(
-                    self._reject_derived_diagnostic_authority_input
-                ),
+        async with self._get_lock(run_id):
+            projection = self._projection_by_run.get(run_id, _default_projection(run_id))
+            unseen_events = await self._event_log.load(
+                run_id, after_offset=projection.projected_offset
             )
-            if not should_replay:
-                continue
-            projection = _apply_projection_event(projection, event)
-        self._projection_by_run[run_id] = projection
-        return projection
+            for event in unseen_events:
+                should_replay = _validate_projection_authority_input(
+                    event=event,
+                    reject_derived_diagnostic_authority_input=(
+                        self._reject_derived_diagnostic_authority_input
+                    ),
+                )
+                if not should_replay:
+                    continue
+                projection = _apply_projection_event(projection, event)
+            self._projection_by_run[run_id] = projection
+            return projection
 
 
 class StaticDispatchAdmissionService(DispatchAdmissionService):

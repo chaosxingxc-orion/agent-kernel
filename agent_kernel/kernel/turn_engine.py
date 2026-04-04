@@ -15,10 +15,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import logging
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, Protocol
+
+_logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from agent_kernel.kernel.reasoning_loop import ReasoningLoop
@@ -1055,6 +1058,12 @@ def _reserve_with_degradation(
             peer_operation_id=envelope.peer_operation_id,
             policy_snapshot_ref=envelope.policy_snapshot_ref,
             rule_bundle_hash=envelope.rule_bundle_hash,
+        )
+        _logger.warning(
+            "dedupe_store unavailable run=%s action=%s effect_class=%s — degrading",
+            action.run_id,
+            action.action_id,
+            action.effect_class,
         )
         emitted_events.append(
             TurnStateEvent(

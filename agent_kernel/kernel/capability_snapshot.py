@@ -147,6 +147,14 @@ class CapabilitySnapshotBuilder:
 
         Raises:
             CapabilitySnapshotBuildError: If required fields are missing.
+
+        Note:
+            The caller must not mutate ``input_value`` after passing it here.
+            If the same ``CapabilitySnapshotInput`` instance is reused across
+            multiple ``build()`` calls with intervening mutations to its list
+            fields, the resulting hashes will differ even though the object
+            reference appears identical — use ``dataclasses.replace()`` to
+            produce a new instance before mutating.
         """
         self._validate_input(input_value)
 
@@ -177,10 +185,7 @@ class CapabilitySnapshotBuilder:
         snapshot_hash = _build_stable_sha256(canonical_payload)
 
         snapshot_ref = (
-            "snapshot:"
-            f"{input_value.run_id}:"
-            f"{input_value.based_on_offset}:"
-            f"{snapshot_hash[:12]}"
+            f"snapshot:{input_value.run_id}:{input_value.based_on_offset}:{snapshot_hash[:12]}"
         )
         return CapabilitySnapshot(
             snapshot_ref=snapshot_ref,

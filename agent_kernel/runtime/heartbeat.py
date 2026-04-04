@@ -361,9 +361,12 @@ class RunHeartbeatMonitor:
                     ),
                 )
             except Exception as exc:
-                # Signal delivery is best-effort; log but never crash watchdog
+                # Signal delivery failed — remove from _timed_out so the next
+                # watchdog sweep retries delivery (D-M5).
+                with self._lock:
+                    self._timed_out.discard(run_id)
                 _logger.warning(
-                    "Failed to deliver heartbeat_timeout signal to run_id=%s:%s",
+                    "Failed to deliver heartbeat_timeout signal to run_id=%s:%s — will retry",
                     run_id,
                     exc,
                 )

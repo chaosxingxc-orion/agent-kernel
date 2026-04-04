@@ -17,12 +17,16 @@ Why a Temporal workflow?
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import logging
 import threading
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+
+_logger = logging.getLogger(__name__)
 
 from agent_kernel.kernel.capability_snapshot import CapabilitySnapshotBuilder
 from agent_kernel.kernel.capability_snapshot_resolver import (
@@ -132,6 +136,7 @@ class RunActorDependencyBundle:
     output_parser: Any | None = None  # OutputParser Protocol
     reflection_policy: Any | None = None  # ReflectionPolicy
     reflection_builder: Any | None = None  # ReflectionContextBuilder
+    plan_executor: Any | None = None  # PlanExecutor — avoids circular import
 
 
 _RUN_ACTOR_CONFIG: ContextVar[RunActorDependencyBundle | None] = ContextVar(
@@ -261,6 +266,7 @@ class RunActorWorkflow:
             reasoning_loop=_reasoning_loop,
             observability_hook=dependencies.observability_hook,
         )
+        self._plan_executor: Any | None = dependencies.plan_executor
         self._run_id: str | None = None
         self._session_id: str | None = None
         self._parent_run_id: str | None = None
@@ -362,7 +368,6 @@ class RunActorWorkflow:
             signal_token = f"{input_value.signal_type}:{input_value.caused_by}"
             if signal_token in self._seen_signal_tokens:
                 return
-            self._seen_signal_tokens.add(signal_token)
 
         self._signal_sequence += 1
         projection = await self._projection.get(self._run_id)
@@ -399,9 +404,22 @@ class RunActorWorkflow:
         )
 
         await self._event_log.append_action_commit(signal_commit)
+        # Only mark the signal as seen after the append succeeds; if append
+        # fails, the next retry of the same caused_by must be processed.
+        if input_value.caused_by:
+            self._seen_signal_tokens.add(signal_token)  # type: ignore[possibly-undefined]
         await self.process_action_commit(signal_commit)
         # process_action_commit() refreshes _last_projection via catch_up().
         # Avoid awaiting here so query state remains driven by sync-safe cache.
+
+        # Dispatch speculation_committed to PlanExecutor when wired.
+        if input_value.signal_type == "speculation_committed":
+            winner_id = (input_value.signal_payload or {}).get("winner_candidate_id")
+            if winner_id and self._plan_executor is not None:
+                _commit_task = asyncio.create_task(
+                    self._plan_executor.commit_speculation(winner_id)
+                )
+                del _commit_task  # reference kept by event loop; local var avoids RUF006
 
         # History safety: count rounds and continue_as_new when threshold hit.
         self._history_event_count += 1
@@ -423,6 +441,10 @@ class RunActorWorkflow:
         if self._history_event_count < self._strict_mode.history_event_threshold:
             return False
         if self._last_projection is None:
+            return False
+        # Do not continue_as_new while buffered signals are pending; they would
+        # be lost because the new instance starts with an empty _pending_signals.
+        if self._pending_signals:
             return False
         return self._last_projection.lifecycle_state not in ("completed", "aborted")
 
@@ -513,13 +535,13 @@ class RunActorWorkflow:
                 ),
                 commit.action,
             )
-            _assert_single_dispatch_attempt_in_turn(turn_result)
             next_offset = await self._append_turn_outcome_commit(
                 run_id=commit.run_id,
                 offset=commit.events[-1].commit_offset + 1,
                 turn_result=turn_result,
                 caused_by=commit.action.action_id,
             )
+            _assert_single_dispatch_attempt_in_turn(turn_result)
             if turn_result.outcome_kind == "dispatched":
                 # Notify circuit breaker of successful dispatch so it can
                 # reset the failure counter for this effect class.
@@ -645,16 +667,26 @@ class RunActorWorkflow:
                     written_at=_utc_now_iso(),
                 )
             )
-        await self._event_log.append_action_commit(
-            ActionCommit(
-                run_id=run_id,
-                commit_id=f"turn:{turn_result.outcome_kind}:{offset}",
-                created_at=_utc_now_iso(),
-                caused_by=caused_by,
-                action=None,
-                events=[event],
+        try:
+            await self._event_log.append_action_commit(
+                ActionCommit(
+                    run_id=run_id,
+                    commit_id=f"turn:{turn_result.outcome_kind}:{offset}",
+                    created_at=_utc_now_iso(),
+                    caused_by=caused_by,
+                    action=None,
+                    events=[event],
+                )
             )
-        )
+        except Exception:
+            _logger.error(
+                "Failed to append turn outcome commit run=%s offset=%d outcome=%s — "
+                "event log is now inconsistent with executed side-effects",
+                run_id,
+                offset,
+                turn_result.outcome_kind,
+            )
+            raise
         return offset + 1
 
     async def _append_recovery_event(
@@ -674,49 +706,63 @@ class RunActorWorkflow:
         """
         event_type = _recovery_event_type(recovery_decision.mode)
         _assert_recovery_event_type_allowed(event_type)
-        await self._event_log.append_action_commit(
-            ActionCommit(
-                run_id=run_id,
-                commit_id=f"recovery:{event_type}:{offset}",
-                created_at=_utc_now_iso(),
-                caused_by=caused_by,
-                action=None,
-                events=[
-                    RuntimeEvent(
-                        run_id=run_id,
-                        event_id=f"evt-recovery-plan-{offset}",
-                        commit_offset=offset,
-                        event_type="recovery.plan_selected",
-                        event_class="derived",
-                        event_authority="derived_diagnostic",
-                        ordering_key=run_id,
-                        wake_policy="projection_only",
-                        payload_json={
-                            "planned_mode": recovery_decision.mode,
-                            "reason": recovery_decision.reason,
-                            "compensation_action_id": (recovery_decision.compensation_action_id),
-                            "escalation_channel_ref": (recovery_decision.escalation_channel_ref),
-                        },
-                        created_at=_utc_now_iso(),
-                    ),
-                    RuntimeEvent(
-                        run_id=run_id,
-                        event_id=f"evt-recovery-{offset}",
-                        commit_offset=offset + 1,
-                        event_type=event_type,
-                        event_class="fact",
-                        event_authority="authoritative_fact",
-                        ordering_key=run_id,
-                        wake_policy="wake_actor",
-                        payload_json={
-                            "mode": recovery_decision.mode,
-                            "reason": recovery_decision.reason,
-                        },
-                        created_at=_utc_now_iso(),
-                    ),
-                ],
+        try:
+            await self._event_log.append_action_commit(
+                ActionCommit(
+                    run_id=run_id,
+                    commit_id=f"recovery:{event_type}:{offset}",
+                    created_at=_utc_now_iso(),
+                    caused_by=caused_by,
+                    action=None,
+                    events=[
+                        RuntimeEvent(
+                            run_id=run_id,
+                            event_id=f"evt-recovery-plan-{offset}",
+                            commit_offset=offset,
+                            event_type="recovery.plan_selected",
+                            event_class="derived",
+                            event_authority="derived_diagnostic",
+                            ordering_key=run_id,
+                            wake_policy="projection_only",
+                            payload_json={
+                                "planned_mode": recovery_decision.mode,
+                                "reason": recovery_decision.reason,
+                                "compensation_action_id": (
+                                    recovery_decision.compensation_action_id
+                                ),
+                                "escalation_channel_ref": (
+                                    recovery_decision.escalation_channel_ref
+                                ),
+                            },
+                            created_at=_utc_now_iso(),
+                        ),
+                        RuntimeEvent(
+                            run_id=run_id,
+                            event_id=f"evt-recovery-{offset}",
+                            commit_offset=offset + 1,
+                            event_type=event_type,
+                            event_class="fact",
+                            event_authority="authoritative_fact",
+                            ordering_key=run_id,
+                            wake_policy="wake_actor",
+                            payload_json={
+                                "mode": recovery_decision.mode,
+                                "reason": recovery_decision.reason,
+                            },
+                            created_at=_utc_now_iso(),
+                        ),
+                    ],
+                )
             )
-        )
+        except Exception:
+            _logger.error(
+                "Failed to append recovery event run=%s offset=%d mode=%s — "
+                "recovery outcome is not durable",
+                run_id,
+                offset,
+                recovery_decision.mode,
+            )
+            raise
         if self._recovery_outcomes is not None:
             await self._recovery_outcomes.write_outcome(
                 RecoveryOutcome(

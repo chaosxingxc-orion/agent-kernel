@@ -65,10 +65,7 @@ class TemporalKernelWorker:
             worker_module = import_module("temporalio.worker")
             worker_cls = worker_module.Worker
         except Exception as exc:  # pragma: no cover
-            raise RuntimeError(
-                "Temporal SDK is required."
-                " Install dependency: temporalio"
-            ) from exc
+            raise RuntimeError("Temporal SDK is required. Install dependency: temporalio") from exc
 
         configure_run_actor_dependencies(self._dependencies)
         try:
@@ -80,7 +77,15 @@ class TemporalKernelWorker:
             if self._config.workflow_runner is not None:
                 worker_kwargs["workflow_runner"] = self._config.workflow_runner
             worker = worker_cls(self._client, **worker_kwargs)
-            await worker.run()
+            try:
+                await worker.run()
+            finally:
+                # Drain in-flight workflow/activity tasks before exit so that
+                # Turn state is not written half-way on rolling deploys (D-M7).
+                # worker.shutdown() is a no-op when worker.run() exits normally.
+                shutdown = getattr(worker, "shutdown", None)
+                if callable(shutdown):
+                    await shutdown()
         finally:
             # Always clear process-local workflow dependency override so
             # subsequent worker/test runs do not accidentally reuse it.
