@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import graphlib
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
@@ -370,6 +371,195 @@ class PlanExecutor:
             successes=successes,
             failures=failures,
             join_satisfied=join_satisfied,
+        )
+
+    async def _execute_dag(self, plan: DependencyGraph, run_id: str) -> PlanResult:
+        """Executes a DependencyGraph using topological ordering.
+
+        Nodes with no unmet dependencies execute concurrently within each
+        topological layer via ``asyncio.TaskGroup``. Layers are processed
+        sequentially so that dependency ordering is respected.
+
+        Args:
+            plan: DAG plan with nodes and dependency edges.
+            run_id: Kernel run identifier.
+
+        Returns:
+            PlanResult with ``plan_kind="dependency_graph"``.
+
+        Raises:
+            UnsupportedPlanTypeError: When the graph contains a cycle.
+        """
+        if not plan.nodes:
+            return PlanResult(
+                plan_kind="dependency_graph",
+                total_actions=0,
+                succeeded=0,
+                failed=0,
+            )
+
+        dep_map: dict[str, set[str]] = {node.node_id: set(node.depends_on) for node in plan.nodes}
+        node_by_id = {node.node_id: node for node in plan.nodes}
+
+        ts: graphlib.TopologicalSorter[str] = graphlib.TopologicalSorter(dep_map)
+        try:
+            ts.prepare()
+        except graphlib.CycleError as exc:
+            raise UnsupportedPlanTypeError(plan) from exc
+
+        succeeded = 0
+        failed = 0
+
+        while ts.is_active():
+            ready = list(ts.get_ready())
+            layer_results: list[TurnResult | BaseException] = []
+
+            async def _run_node(
+                node_id: str,
+                _results: list[TurnResult | BaseException] = layer_results,
+            ) -> None:
+                try:
+                    result = await self._turn_runner(node_by_id[node_id].action)
+                    _results.append(result)
+                except Exception as exc:
+                    _results.append(exc)
+
+            async with asyncio.TaskGroup() as tg:
+                for nid in ready:
+                    tg.create_task(_run_node(nid))
+
+            for raw in layer_results:
+                if isinstance(raw, BaseException):
+                    failed += 1
+                elif raw.outcome_kind in ("dispatched", "noop"):
+                    succeeded += 1
+                else:
+                    failed += 1
+
+            for nid in ready:
+                ts.done(nid)
+
+        return PlanResult(
+            plan_kind="dependency_graph",
+            total_actions=len(plan.nodes),
+            succeeded=succeeded,
+            failed=failed,
+        )
+
+    async def _execute_conditional(self, plan: ConditionalPlan, run_id: str) -> PlanResult:
+        """Executes a ConditionalPlan by evaluating the gating action first.
+
+        The gating action is run via ``turn_runner``. Its ``outcome_kind`` is
+        matched against each branch's ``trigger_outcomes`` (left to right). The
+        first matching branch's sub-plan is executed recursively. When no branch
+        matches and ``default_plan`` is set, the default is executed. When no
+        branch matches and there is no default, only the gating action is counted.
+
+        Args:
+            plan: Conditional plan with gating action, branches, and optional default.
+            run_id: Kernel run identifier.
+
+        Returns:
+            PlanResult with ``plan_kind="conditional"``.
+        """
+        try:
+            gate_result = await self._turn_runner(plan.gating_action)
+            gate_succeeded = gate_result.outcome_kind in ("dispatched", "noop")
+            outcome_kind = gate_result.outcome_kind
+        except Exception:
+            gate_succeeded = False
+            outcome_kind = "exception"
+
+        gate_success_count = 1 if gate_succeeded else 0
+        gate_fail_count = 0 if gate_succeeded else 1
+
+        matched_plan: Any = None
+        for branch in plan.branches:
+            if outcome_kind in branch.trigger_outcomes:
+                matched_plan = branch.plan
+                break
+
+        if matched_plan is None and plan.default_plan is not None:
+            matched_plan = plan.default_plan
+
+        if matched_plan is None:
+            return PlanResult(
+                plan_kind="conditional",
+                total_actions=1,
+                succeeded=gate_success_count,
+                failed=gate_fail_count,
+            )
+
+        sub_result = await self.execute_plan(matched_plan, run_id)
+        return PlanResult(
+            plan_kind="conditional",
+            total_actions=1 + sub_result.total_actions,
+            succeeded=gate_success_count + sub_result.succeeded,
+            failed=gate_fail_count + sub_result.failed,
+        )
+
+    async def _execute_speculative(self, plan: SpeculativePlan, run_id: str) -> PlanResult:
+        """Executes all speculative candidates concurrently via asyncio.
+
+        All candidate plans launch simultaneously. An optional
+        ``speculation_timeout_ms`` caps the total wait time. Partial results
+        from timed-out candidates are counted as failures. The "commit winner"
+        step is handled externally via the ``commit_speculation`` facade signal;
+        this method provides the local asyncio-based execution path.
+
+        Known limitation: candidates run in-process without cross-process
+        isolation. Full Child Workflow isolation requires Temporal integration
+        beyond the current PoC scope.
+
+        Args:
+            plan: Speculative plan with candidate sub-plans and optional timeout.
+            run_id: Kernel run identifier.
+
+        Returns:
+            PlanResult with ``plan_kind="speculative"`` aggregating all
+            candidates' success and failure counts.
+        """
+        if not plan.candidates:
+            return PlanResult(
+                plan_kind="speculative",
+                total_actions=0,
+                succeeded=0,
+                failed=0,
+            )
+
+        async def _run_candidate(candidate: Any) -> PlanResult:
+            return await self.execute_plan(candidate.plan, run_id)
+
+        coros = [_run_candidate(c) for c in plan.candidates]
+
+        if plan.speculation_timeout_ms is not None:
+            timeout_s = plan.speculation_timeout_ms / 1000.0
+            raw_results: list[PlanResult | BaseException] = await asyncio.gather(
+                *[asyncio.wait_for(c, timeout=timeout_s) for c in coros],
+                return_exceptions=True,
+            )
+        else:
+            raw_results = await asyncio.gather(*coros, return_exceptions=True)
+
+        total_actions = 0
+        succeeded = 0
+        failed = 0
+
+        for raw in raw_results:
+            if isinstance(raw, BaseException):
+                failed += 1
+                total_actions += 1
+            else:
+                result: PlanResult = raw
+                total_actions += result.total_actions
+                succeeded += result.succeeded
+                failed += result.failed
+
+        return PlanResult(
+            plan_kind="speculative",
+            total_actions=total_actions,
+            succeeded=succeeded,
+            failed=failed,
         )
 
 
