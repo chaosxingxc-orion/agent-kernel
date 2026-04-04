@@ -2,7 +2,7 @@
 
 > 企业级智能体执行内核 — 六权威生命周期协议 · Temporal 持久执行基底 · 单系统运行时
 
-**6 814 测试通过** | Python 3.14 | Google Python Style Guide
+**6 879 测试通过** | Python 3.14 | Google Python Style Guide
 
 ---
 
@@ -233,6 +233,7 @@ gate = PlannedRecoveryGateService(compensation_registry=registry)
 **纵向进化**（注册点）：
 - `KERNEL_EVENT_REGISTRY` — 注册自定义事件类型
 - `KERNEL_RECOVERY_MODE_REGISTRY` — 注册自定义恢复模式
+- `KERNEL_PLAN_TYPE_REGISTRY` — 注册自定义执行计划类型
 - `CompensationRegistry` — 注册 `effect_class → async callable` 补偿动作
 - `ObservabilityHook` — 注册 FSM 转换监听器
 
@@ -258,6 +259,56 @@ gate = PlannedRecoveryGateService(compensation_registry=registry)
 - **心跳看门狗**：`RunHeartbeatMonitor.watchdog_once()` 检测无心跳 run，注入 heartbeat_timeout 信号
 - **Worker 失败传播**：done_callback 自动触发，不无声吞掉 Worker 崩溃
 - **Temporal 集群 HA**：Activity retry policy + task queue re-dispatch
+
+---
+
+## 执行委托：五类计划原语（v0.2）
+
+内核支持五种执行委托数据结构，平台通过 `KernelFacade.submit_plan()` 提交：
+
+| 计划类型 | 类 | 描述 | Temporal 模式 |
+|---------|-----|------|--------------|
+| `sequential` | `SequentialPlan` | 顺序执行步骤列表 | 单 workflow 内串行 |
+| `parallel` | `ParallelPlan` | 并发执行无依赖动作 | `asyncio.TaskGroup` |
+| `conditional` | `ConditionalPlan` | 门控动作后按结果路由分支 | 单 workflow 内条件分支 |
+| `dependency_graph` | `DependencyGraph` | 带拓扑约束的 DAG（graphlib） | `asyncio.TaskGroup` 拓扑序 |
+| `speculative` | `SpeculativePlan` | 多候选并行投机执行 | Child Workflow 隔离 |
+
+### KernelFacade 平台接口
+
+```python
+# 能力发现（同步，无网络调用）
+manifest = facade.get_manifest()
+# manifest.supported_plan_types     → {'sequential', 'parallel', ...}
+# manifest.supported_action_types   → {'tool_call', 'mcp_call', 'noop', ...}
+# manifest.supported_governance_features → {'approval_gate', 'speculation_mode', ...}
+# manifest.substrate_type           → 'temporal' | 'local_fsm'
+
+# 提交执行委托
+response = await facade.submit_plan("run-id", SequentialPlan(steps=(...)))
+# response.accepted, response.plan_type, response.run_id
+
+# 审批门
+await facade.submit_approval(ApprovalRequest(
+    run_id="run-id", approval_ref="appr-001",
+    approved=True, reviewer_id="user-alice",
+))
+
+# 投机提交：选定获胜候选
+await facade.commit_speculation("run-id", winner_candidate_id="cand-2")
+
+# 健康检查
+health = facade.get_health()  # → {"status": "ok", "substrate": "temporal"}
+```
+
+### Temporal History 安全（continue_as_new）
+
+`RunActorWorkflow` 内置 History 事件计数器。当处理信号数超过阈值（默认 10 000 事件）且 run 尚未终止时，自动触发 `temporal_workflow.continue_as_new(RunInput(...))` 重置 History，防止超出 Temporal 50 000 事件上限。
+
+```python
+# 自定义阈值（注入 RunActorWorkflow 时配置）
+RunActorStrictModeConfig(enabled=True, history_event_threshold=5_000)
+```
 
 ---
 
@@ -300,6 +351,7 @@ agent_kernel/
 │   ├── capability_snapshot.py        # SHA256 快照构建器 v2
 │   ├── capability_snapshot_resolver.py
 │   ├── event_registry.py             # 25+ 内核事件类型目录
+│   ├── plan_type_registry.py         # 五类执行计划原语注册表
 │   ├── dedupe_store.py               # at-most-once 状态机
 │   ├── failure_evidence.py           # FailureEnvelope 证据优先链
 │   ├── event_export.py               # 进化层：TurnTrace / RunTrace / InMemoryRunTraceStore
@@ -349,7 +401,7 @@ agent_kernel/
 │   └── agent_core/                   # agent-core 适配层
 └── skills/                           # Skills 运行时
 
-python_tests/agent_kernel/            # 镜像 src 结构，6 814 测试
+python_tests/agent_kernel/            # 镜像 src 结构，6 879 测试
 ```
 
 ---

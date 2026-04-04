@@ -1865,7 +1865,119 @@ class ParallelPlan:
     groups: tuple[ParallelGroup, ...]
 
 
-ExecutionPlan = SequentialPlan | ParallelPlan
+@dataclass(frozen=True, slots=True)
+class ConditionalBranch:
+    """One branch within a ConditionalPlan.
+
+    Attributes:
+        trigger_outcomes: Turn outcome kinds that activate this branch.
+            e.g. ``("dispatched",)`` or ``("blocked", "recovery_pending")``.
+        plan: Sub-plan to execute when this branch is selected.
+    """
+
+    trigger_outcomes: tuple[str, ...]
+    plan: Any  # ExecutionPlan — forward ref resolved at runtime
+
+
+@dataclass(frozen=True, slots=True)
+class ConditionalPlan:
+    """Routes execution to a sub-plan based on a gating action's outcome.
+
+    PlanExecutor evaluates ``gating_action`` first via TurnEngine. The first
+    ``ConditionalBranch`` whose ``trigger_outcomes`` contains the observed
+    outcome kind is selected. ``default_plan`` is used when no branch matches.
+
+    Side-effect governance invariant: the gating action itself goes through
+    the full TurnEngine → DispatchAdmissionService chain before branching.
+
+    Attributes:
+        gating_action: Action whose turn outcome determines the branch.
+        branches: Ordered candidate branches, evaluated left to right.
+        default_plan: Fallback plan executed when no branch matches.
+            ``None`` means the plan resolves as ``completed_noop``.
+    """
+
+    gating_action: Action
+    branches: tuple[ConditionalBranch, ...]
+    default_plan: Any | None = None  # ExecutionPlan | None
+
+
+@dataclass(frozen=True, slots=True)
+class DependencyNode:
+    """One node within a DependencyGraph.
+
+    Attributes:
+        node_id: Stable unique identifier within the graph. Used as sort key
+            for Temporal replay determinism — must be consistent across runs.
+        action: Action to execute for this node.
+        depends_on: Ids of nodes that must complete before this node is
+            scheduled. Empty tuple means no prerequisites.
+    """
+
+    node_id: str
+    action: Action
+    depends_on: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class DependencyGraph:
+    """Directed acyclic graph of Actions with explicit node-level dependencies.
+
+    PlanExecutor computes a topological sort via ``graphlib.TopologicalSorter``
+    and executes nodes level by level using ``asyncio.TaskGroup``. Nodes within
+    the same topological level execute concurrently, sorted by ``node_id``
+    to guarantee Temporal determinism.
+
+    Recovery granularity: when a node fails, only its downstream dependents are
+    blocked. Unrelated branches continue executing.
+
+    Attributes:
+        nodes: All nodes in the graph. ``node_id`` values must be unique.
+    """
+
+    nodes: tuple[DependencyNode, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SpeculativeCandidate:
+    """One candidate within a SpeculativePlan.
+
+    Attributes:
+        candidate_id: Unique identifier for this candidate. The platform layer
+            references this id when calling ``commit_speculation``.
+        plan: Plan to execute as a speculative Child Workflow.
+    """
+
+    candidate_id: str
+    plan: Any  # ExecutionPlan — forward ref resolved at runtime
+
+
+@dataclass(frozen=True, slots=True)
+class SpeculativePlan:
+    """Multiple candidate plans executed speculatively via Child Workflow pattern.
+
+    Each candidate is launched as an independent Child Workflow so that each
+    has its own Temporal History — avoiding the History bloat problem that
+    arises from parallel Task execution inside one Workflow.
+
+    The kernel gates all ``compensatable_write`` and ``irreversible_write``
+    side-effects in speculative child runs until the platform sends a
+    ``commit_speculation`` signal naming the winning candidate. Losing
+    candidates are cancelled and their child workflows transition to
+    ``speculative_aborted``.
+
+    Attributes:
+        candidates: Candidate plans to run in parallel.
+        speculation_timeout_ms: Optional wall-clock timeout. On expiry all
+            candidates are cancelled and the plan resolves as
+            ``recovery_pending``.
+    """
+
+    candidates: tuple[SpeculativeCandidate, ...]
+    speculation_timeout_ms: int | None = None
+
+
+ExecutionPlan = SequentialPlan | ParallelPlan | ConditionalPlan | DependencyGraph | SpeculativePlan
 
 
 @dataclass(frozen=True, slots=True)
@@ -2101,3 +2213,90 @@ class ReflectionPolicy:
         if failure_kind in self.non_reflectable_failure_kinds:
             return False
         return failure_kind in self.reflectable_failure_kinds
+
+
+# ---------------------------------------------------------------------------
+# Facade DTOs — platform-facing request/response contracts
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalRequest:
+    """Approval decision submitted by a human actor via KernelFacade.
+
+    Attributes:
+        run_id: Run awaiting the approval decision.
+        approval_ref: Unique reference for this approval decision.  Used as
+            idempotency key so duplicate submissions are safe.
+        approved: ``True`` to allow the gated action; ``False`` to deny it.
+        reviewer_id: Identifier of the human reviewer.
+        reason: Optional human-readable reason for the decision.
+        caused_by: Optional provenance marker for observability.
+    """
+
+    run_id: str
+    approval_ref: str
+    approved: bool
+    reviewer_id: str
+    reason: str | None = None
+    caused_by: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PlanSubmissionResponse:
+    """Response returned by KernelFacade.submit_plan.
+
+    Attributes:
+        run_id: Run identifier that received the plan.
+        plan_type: Discriminator string of the submitted plan type.
+        accepted: Whether the kernel accepted the plan for execution.
+        rejection_reason: Human-readable reason when ``accepted`` is ``False``.
+    """
+
+    run_id: str
+    plan_type: str
+    accepted: bool
+    rejection_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class KernelManifest:
+    """Capability declaration for platform-layer feature discovery.
+
+    Aggregates all kernel registries into a single frozen snapshot that
+    platform integrators query at startup to detect supported features.
+    Pattern inspired by LSP ServerCapabilities initialization handshake —
+    the server declares capabilities once; clients adapt accordingly.
+
+    Attributes:
+        kernel_version: Semantic version of the kernel implementation.
+        protocol_version: Interface protocol version.  Increment on any
+            breaking change to the KernelFacade contract.
+        supported_plan_types: ExecutionPlan type discriminators supported by
+            this kernel instance (from PlanTypeRegistry).
+        supported_action_types: ``action_type`` strings from
+            KERNEL_ACTION_TYPE_REGISTRY.
+        supported_interaction_targets: ``InteractionTarget`` literal values
+            this kernel can dispatch to.
+        supported_recovery_modes: Recovery mode strings from
+            KERNEL_RECOVERY_MODE_REGISTRY.
+        supported_governance_features: Named governance capabilities.
+            e.g. ``{"approval_gate", "dedupe", "speculation_mode"}``.
+        supported_event_types: ``event_type`` strings from
+            KERNEL_EVENT_REGISTRY.
+        substrate_type: Execution substrate identifier.
+            e.g. ``"temporal"`` or ``"local_fsm"``.
+        capability_snapshot_schema_version: CapabilitySnapshot schema version
+            required by this kernel (``"2"`` for model/memory/session bindings).
+    """
+
+    kernel_version: str
+    protocol_version: str
+    supported_plan_types: frozenset[str]
+    supported_action_types: frozenset[str]
+    supported_interaction_targets: frozenset[str]
+    supported_recovery_modes: frozenset[str]
+    supported_governance_features: frozenset[str]
+    supported_event_types: frozenset[str]
+    substrate_type: str
+    capability_snapshot_schema_version: str = "2"

@@ -2,7 +2,9 @@
 
 > 基于 [ARCHITECTURE.md](ARCHITECTURE.md) 中 ○ 标注模块，按依赖顺序分阶段拆解。
 >
-> **当前基线**：0.1 · 六权威协议 ✓ · 6 235 测试通过 · 串行单动作执行
+> **当前基线**：0.2 · 六权威协议 ✓ · 6 879 测试通过 · 串行/并行/条件/DAG/投机 Plan 合约完成
+>
+> **0.2 新增**（2026-04-04）：ConditionalPlan / DependencyGraph / SpeculativePlan / PlanTypeRegistry / KernelManifest / KernelFacade 5 新接口 / RunActorWorkflow continue_as_new
 
 ---
 

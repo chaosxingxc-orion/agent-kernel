@@ -55,14 +55,17 @@ KernelFacade → TemporalGateway → RunActorWorkflow → TurnEngine
 
 | File | Role |
 |------|------|
-| `kernel/contracts.py` | All DTOs and Protocol contracts. Read this first. |
+| `kernel/contracts.py` | All DTOs and Protocol contracts. Read this first. Includes ConditionalPlan, DependencyGraph, SpeculativePlan, KernelManifest. |
 | `kernel/turn_engine.py` | FSM canonical path. FSM diagram is at the top. |
 | `kernel/minimal_runtime.py` | In-memory implementations of all protocols (PoC/tests only). |
 | `kernel/capability_snapshot.py` | Deterministic SHA256 snapshot builder. |
 | `kernel/capability_snapshot_resolver.py` | Approval-gate constraint enforcement. |
 | `kernel/recovery/planner.py` | Heuristic failure→recovery routing. |
 | `kernel/event_registry.py` | Central catalog of 25+ kernel event types. |
-| `substrate/temporal/run_actor_workflow.py` | Temporal workflow with `RunActorDependencyBundle` injection. |
+| `kernel/plan_type_registry.py` | Registry of ExecutionPlan types; aggregated into KernelManifest. |
+| `kernel/action_type_registry.py` | Registry of action_type discriminators. |
+| `adapters/facade/kernel_facade.py` | **Only** allowed platform entrypoint. get_manifest / submit_plan / submit_approval / commit_speculation / get_health. |
+| `substrate/temporal/run_actor_workflow.py` | Temporal workflow with continue_as_new safety (threshold=10,000 rounds). |
 | `substrate/temporal/worker.py` | Worker bootstrap; graceful SIGTERM/SIGINT shutdown. |
 | `runtime/health.py` | K8s-style liveness/readiness probes. |
 | `runtime/heartbeat.py` | Per-run timeout watchdog; injects signals via gateway (non-authority). |

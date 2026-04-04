@@ -15,8 +15,13 @@ if TYPE_CHECKING:
 
 from agent_kernel.adapters.agent_core.checkpoint_adapter import AgentCoreResumeInput
 from agent_kernel.adapters.agent_core.context_adapter import AgentCoreContextInput
+from agent_kernel.kernel.action_type_registry import KERNEL_ACTION_TYPE_REGISTRY
 from agent_kernel.kernel.contracts import (
+    ApprovalRequest,
     CancelRunRequest,
+    ExecutionPlan,
+    KernelManifest,
+    PlanSubmissionResponse,
     QueryRunDashboardResponse,
     QueryRunRequest,
     QueryRunResponse,
@@ -28,6 +33,33 @@ from agent_kernel.kernel.contracts import (
     StartRunRequest,
     StartRunResponse,
     TemporalWorkflowGateway,
+)
+from agent_kernel.kernel.event_registry import KERNEL_EVENT_REGISTRY
+from agent_kernel.kernel.plan_type_registry import KERNEL_PLAN_TYPE_REGISTRY
+from agent_kernel.kernel.recovery.mode_registry import KERNEL_RECOVERY_MODE_REGISTRY
+
+_KERNEL_VERSION = "0.2.0"
+_PROTOCOL_VERSION = "1.0.0"
+_SUBSTRATE_TEMPORAL = "temporal"
+_INTERACTION_TARGETS: frozenset[str] = frozenset(
+    {
+        "agent_peer",
+        "it_service",
+        "data_system",
+        "tool_executor",
+        "human_actor",
+        "event_stream",
+    }
+)
+_GOVERNANCE_FEATURES: frozenset[str] = frozenset(
+    {
+        "approval_gate",
+        "at_most_once_dedupe",
+        "speculation_mode",
+        "replay_fidelity",
+        "recovery_gate",
+        "capability_snapshot_sha256",
+    }
 )
 
 
@@ -43,6 +75,8 @@ class KernelFacade:
         workflow_gateway: TemporalWorkflowGateway,
         context_adapter: Any | None = None,
         checkpoint_adapter: Any | None = None,
+        health_probe: Any | None = None,
+        substrate_type: str = _SUBSTRATE_TEMPORAL,
     ) -> None:
         """Initializes facade with substrate gateway and optional adapters.
 
@@ -51,10 +85,18 @@ class KernelFacade:
             context_adapter: Optional context adapter for session binding.
             checkpoint_adapter: Optional checkpoint adapter for resume
                 operations.
+            health_probe: Optional ``KernelHealthProbe`` instance.  When
+                provided, ``get_health()`` delegates to its ``liveness()``
+                method.  When ``None``, ``get_health()`` returns a minimal
+                static response.
+            substrate_type: Substrate identifier reported in ``get_manifest()``.
+                Defaults to ``"temporal"``.
         """
         self._workflow_gateway = workflow_gateway
         self._context_adapter = context_adapter
         self._checkpoint_adapter = checkpoint_adapter
+        self._health_probe = health_probe
+        self._substrate_type = substrate_type
 
     @staticmethod
     def _build_signal_observability(
@@ -399,6 +441,166 @@ class KernelFacade:
         if isinstance(lifecycle_state, str) and lifecycle_state != "":
             return lifecycle_state
         return "created"
+
+    def get_manifest(self) -> KernelManifest:
+        """Returns a frozen capability declaration for this kernel instance.
+
+        Aggregates ``KERNEL_ACTION_TYPE_REGISTRY``, ``KERNEL_EVENT_REGISTRY``,
+        ``KERNEL_RECOVERY_MODE_REGISTRY``, and ``KERNEL_PLAN_TYPE_REGISTRY``
+        into a single ``KernelManifest`` snapshot.  Platform integrators call
+        this once at startup to detect which features the kernel supports.
+
+        Returns:
+            Immutable ``KernelManifest`` describing kernel capabilities.
+        """
+        return KernelManifest(
+            kernel_version=_KERNEL_VERSION,
+            protocol_version=_PROTOCOL_VERSION,
+            supported_plan_types=KERNEL_PLAN_TYPE_REGISTRY.known_types(),
+            supported_action_types=KERNEL_ACTION_TYPE_REGISTRY.known_types(),
+            supported_interaction_targets=_INTERACTION_TARGETS,
+            supported_recovery_modes=frozenset(KERNEL_RECOVERY_MODE_REGISTRY.known_actions()),
+            supported_governance_features=_GOVERNANCE_FEATURES,
+            supported_event_types=KERNEL_EVENT_REGISTRY.known_types(),
+            substrate_type=self._substrate_type,
+        )
+
+    async def submit_plan(
+        self,
+        run_id: str,
+        plan: ExecutionPlan,
+    ) -> PlanSubmissionResponse:
+        """Submits a typed ExecutionPlan to an active run.
+
+        Validates the plan type against ``KERNEL_PLAN_TYPE_REGISTRY`` before
+        signalling the workflow.  Unknown plan types are rejected immediately
+        without reaching the substrate, giving platforms early feedback.
+
+        Args:
+            run_id: Target run identifier.
+            plan: An ``ExecutionPlan`` instance (any registered subtype).
+
+        Returns:
+            ``PlanSubmissionResponse`` indicating acceptance or rejection.
+        """
+        # Normalise class name → registry key (e.g. ConditionalPlan → conditional)
+        _type_map = {
+            "sequentialplan": "sequential",
+            "parallelplan": "parallel",
+            "conditionalplan": "conditional",
+            "dependencygraph": "dependency_graph",
+            "speculativeplan": "speculative",
+        }
+        plan_type_key = _type_map.get(type(plan).__name__.lower(), type(plan).__name__)
+        descriptor = KERNEL_PLAN_TYPE_REGISTRY.get(plan_type_key)
+        if descriptor is None:
+            return PlanSubmissionResponse(
+                run_id=run_id,
+                plan_type=plan_type_key,
+                accepted=False,
+                rejection_reason=(
+                    f"Plan type '{plan_type_key}' is not registered in KERNEL_PLAN_TYPE_REGISTRY."
+                ),
+            )
+        await self._workflow_gateway.signal_workflow(
+            run_id,
+            SignalRunRequest(
+                run_id=run_id,
+                signal_type="plan_submitted",
+                signal_payload={
+                    "plan_type": plan_type_key,
+                    **self._build_signal_observability(
+                        operation="submit_plan",
+                        run_id=run_id,
+                        caused_by=None,
+                    ),
+                },
+                caused_by="kernel_facade.submit_plan",
+            ),
+        )
+        return PlanSubmissionResponse(
+            run_id=run_id,
+            plan_type=plan_type_key,
+            accepted=True,
+        )
+
+    async def submit_approval(self, request: ApprovalRequest) -> None:
+        """Submits a human actor approval decision for a gated action.
+
+        Routes the approval through the standard signal pathway so it is
+        recorded as a replayable authoritative fact in the event log.
+
+        Args:
+            request: Typed approval request from the human review interface.
+        """
+        await self._workflow_gateway.signal_workflow(
+            request.run_id,
+            SignalRunRequest(
+                run_id=request.run_id,
+                signal_type="approval_submitted",
+                signal_payload={
+                    "approval_ref": request.approval_ref,
+                    "approved": request.approved,
+                    "reviewer_id": request.reviewer_id,
+                    "reason": request.reason,
+                    **self._build_signal_observability(
+                        operation="submit_approval",
+                        run_id=request.run_id,
+                        caused_by=request.caused_by,
+                    ),
+                },
+                caused_by=request.caused_by or f"approval:{request.approval_ref}",
+            ),
+        )
+
+    async def commit_speculation(
+        self,
+        run_id: str,
+        winner_candidate_id: str,
+    ) -> None:
+        """Signals which speculative candidate won and should be committed.
+
+        The kernel uses this signal to promote the winning Child Workflow from
+        ``speculative`` to ``committed`` mode and cancel all other candidates.
+
+        Args:
+            run_id: The run executing the ``SpeculativePlan``.
+            winner_candidate_id: ``candidate_id`` of the winning
+                ``SpeculativeCandidate``.
+        """
+        await self._workflow_gateway.signal_workflow(
+            run_id,
+            SignalRunRequest(
+                run_id=run_id,
+                signal_type="speculation_committed",
+                signal_payload={
+                    "winner_candidate_id": winner_candidate_id,
+                    **self._build_signal_observability(
+                        operation="commit_speculation",
+                        run_id=run_id,
+                        caused_by=None,
+                    ),
+                },
+                caused_by="kernel_facade.commit_speculation",
+            ),
+        )
+
+    def get_health(self) -> dict[str, Any]:
+        """Returns a liveness health status for this kernel instance.
+
+        Delegates to the injected ``KernelHealthProbe`` when available.
+        Returns a minimal static ``{"status": "ok"}`` payload otherwise,
+        which is safe for environments without a configured health probe
+        (e.g. tests, minimal local setups).
+
+        Returns:
+            Dict with at minimum ``{"status": "ok" | "degraded" | "unhealthy"}``.
+        """
+        if self._health_probe is not None:
+            probe_result = getattr(self._health_probe, "liveness", None)
+            if callable(probe_result):
+                return probe_result()  # type: ignore[no-any-return]
+        return {"status": "ok", "substrate": self._substrate_type}
 
     @staticmethod
     def _is_expected_cancel_race_error(error: Exception) -> bool:

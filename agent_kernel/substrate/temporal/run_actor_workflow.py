@@ -100,9 +100,15 @@ class RunActorStrictModeConfig:
         enabled: Enables strict snapshot guardrails that require both
             ``capability_snapshot_input`` and
             ``declarative_bundle_digest`` in action payloads.
+        history_event_threshold: Number of signal-handling rounds after which
+            the workflow calls ``continue_as_new`` to reset Temporal History.
+            Prevents the 50 000-event default History limit from being hit
+            during long-running agent runs.  Only effective inside a live
+            Temporal workflow context; no-op in tests and LocalFSM substrate.
     """
 
     enabled: bool = True
+    history_event_threshold: int = 10_000
 
 
 @dataclass(slots=True)
@@ -257,6 +263,7 @@ class RunActorWorkflow:
         )
         self._run_id: str | None = None
         self._session_id: str | None = None
+        self._parent_run_id: str | None = None
         # Temporal Python SDK query handlers should be synchronous. Keep an
         # in-memory projection snapshot that signal/run paths refresh, so query
         # can stay sync and still return up-to-date kernel state.
@@ -264,6 +271,9 @@ class RunActorWorkflow:
         self._pending_signals: list[ActorSignal] = []
         self._signal_sequence: int = 0
         self._seen_signal_tokens: set[str] = set()
+        # History safety: count signal-handling rounds and continue_as_new when
+        # the threshold is reached to prevent Temporal's 50 000-event limit.
+        self._history_event_count: int = 0
 
     async def run(self, input_value: RunInput) -> dict[str, Any]:
         """Starts the workflow loop for one run.
@@ -276,6 +286,7 @@ class RunActorWorkflow:
         """
         self._run_id = input_value.run_id
         self._session_id = input_value.session_id
+        self._parent_run_id = input_value.parent_run_id
         self._last_projection = await self._projection.get(input_value.run_id)
         if self._pending_signals:
             pending_signals = list(self._pending_signals)
@@ -391,6 +402,47 @@ class RunActorWorkflow:
         await self.process_action_commit(signal_commit)
         # process_action_commit() refreshes _last_projection via catch_up().
         # Avoid awaiting here so query state remains driven by sync-safe cache.
+
+        # History safety: count rounds and continue_as_new when threshold hit.
+        self._history_event_count += 1
+        if self._should_continue_as_new():
+            self._trigger_continue_as_new()
+
+    def _should_continue_as_new(self) -> bool:
+        """Returns True when the workflow should reset its Temporal History.
+
+        Only triggers inside a live Temporal workflow context. No-op in tests
+        and LocalFSM substrate. Does not trigger for terminal lifecycle states
+        since those runs will complete naturally without further signals.
+
+        Returns:
+            ``True`` when ``continue_as_new`` should be called.
+        """
+        if not _is_temporal_workflow_context() or temporal_workflow is None:
+            return False
+        if self._history_event_count < self._strict_mode.history_event_threshold:
+            return False
+        if self._last_projection is None:
+            return False
+        return self._last_projection.lifecycle_state not in ("completed", "aborted")
+
+    def _trigger_continue_as_new(self) -> None:
+        """Calls Temporal continue_as_new to reset History for this run.
+
+        Preserves ``run_id``, ``session_id``, and ``parent_run_id`` so the
+        new workflow instance resumes seamlessly from external event log state.
+        All authoritative state lives in the external KernelRuntimeEventLog
+        and DecisionProjectionService, so no additional state needs carrying.
+        """
+        if temporal_workflow is None or self._run_id is None:
+            return  # pragma: no cover — guarded by _should_continue_as_new
+        temporal_workflow.continue_as_new(
+            RunInput(
+                run_id=self._run_id,
+                session_id=self._session_id,
+                parent_run_id=self._parent_run_id,
+            )
+        )
 
     def query(self) -> RunProjection:
         """Returns the current authoritative projection for the run.

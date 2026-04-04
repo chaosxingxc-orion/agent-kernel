@@ -1,8 +1,9 @@
-"""PlanExecutor for sequential and parallel execution of ExecutionPlans.
+"""PlanExecutor for sequential, parallel, conditional, dag, and speculative execution.
 
-Implements Phase 3 (Parallel Execution) of the agent-kernel architecture.
-This module orchestrates SequentialPlan and ParallelPlan execution using
-asyncio concurrency primitives.
+Implements Phase 3 (Parallel Execution) and extended plan type support for the
+agent-kernel architecture. This module orchestrates SequentialPlan, ParallelPlan,
+ConditionalPlan, DependencyGraph, and SpeculativePlan execution using asyncio
+concurrency primitives.
 
 Design boundaries:
   - PlanExecutor does NOT manage event logs or deduplication — those are
@@ -27,6 +28,8 @@ from agent_kernel.kernel.contracts import (
     Action,
     BranchFailure,
     BranchResult,
+    ConditionalPlan,
+    DependencyGraph,
     ExecutionPlan,
     FailureEnvelope,
     ObservabilityHook,
@@ -34,8 +37,29 @@ from agent_kernel.kernel.contracts import (
     ParallelJoinResult,
     ParallelPlan,
     SequentialPlan,
+    SpeculativePlan,
 )
 from agent_kernel.kernel.turn_engine import TurnResult
+
+
+class UnsupportedPlanTypeError(Exception):
+    """Raised when execute_plan receives an unrecognised plan type.
+
+    Attributes:
+        plan: The unsupported plan object that triggered the error.
+    """
+
+    def __init__(self, plan: Any) -> None:
+        """Initialises the error with a human-readable message.
+
+        Args:
+            plan: The unsupported plan object.
+        """
+        super().__init__(
+            f"Unsupported plan type: {type(plan).__name__!r}. "
+            "Register a handler in PlanExecutor.execute_plan()."
+        )
+        self.plan = plan
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +75,7 @@ class PlanResult:
             Empty list for sequential plans.
     """
 
-    plan_kind: Literal["sequential", "parallel"]
+    plan_kind: Literal["sequential", "parallel", "conditional", "dependency_graph", "speculative"]
     total_actions: int
     succeeded: int
     failed: int
@@ -112,15 +136,27 @@ class PlanExecutor:
         """Dispatches plan execution to the correct strategy.
 
         Args:
-            plan: Either a SequentialPlan or ParallelPlan.
+            plan: A SequentialPlan, ParallelPlan, ConditionalPlan,
+                DependencyGraph, or SpeculativePlan.
             run_id: Kernel run identifier for contextual logging.
 
         Returns:
             PlanResult summarising overall success/failure counts.
+
+        Raises:
+            UnsupportedPlanTypeError: When ``plan`` is not a recognised plan type.
         """
         if isinstance(plan, SequentialPlan):
             return await self._execute_sequential(plan, run_id)
-        return await self._execute_parallel(plan, run_id)
+        if isinstance(plan, ParallelPlan):
+            return await self._execute_parallel(plan, run_id)
+        if isinstance(plan, ConditionalPlan):
+            return await self._execute_conditional(plan, run_id)
+        if isinstance(plan, DependencyGraph):
+            return await self._execute_dag(plan, run_id)
+        if isinstance(plan, SpeculativePlan):
+            return await self._execute_speculative(plan, run_id)
+        raise UnsupportedPlanTypeError(plan)
 
     async def _execute_sequential(
         self,

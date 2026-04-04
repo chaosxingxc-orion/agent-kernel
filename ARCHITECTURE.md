@@ -58,6 +58,10 @@
 ║  │                                                                     │    ║
 ║  │  SequentialPlan ✓  │  ParallelPlan ✓  │  PlanExecutor ✓            │    ║
 ║  │  （串行执行）          （并行派发+聚合）    （计划解释执行器）              │    ║
+║  │                                                                     │    ║
+║  │  ConditionalPlan ✓ │  DependencyGraph ✓  │  SpeculativePlan ✓      │    ║
+║  │  （条件路由）          （节点依赖 DAG）       （投机执行池）               │    ║
+║  │  PlanTypeRegistry ✓  （能力声明注册表）                               │    ║
 ║  └──────────────────────────┬──────────────────────────────────────────┘    ║
 ║                             │                                                ║
 ╚══════════════════════════════╦═══════════════════════════════════════════════╝
@@ -517,7 +521,55 @@ Registry Extension Points ✓：
 
 ---
 
-## 十二、已实现 vs 待实现全览
+## 十二、执行委托数据结构（ExecutionPlan 体系）
+
+### 设计原则
+
+内核接受"工作委托"（Plan 级别），不只做单步执行。**结构感知在计划调度层（PlanExecutor），治理不变量在原子步骤层（TurnEngine）**，搜索策略永远在平台层之外。
+
+### 判断一个结构是否需要成为内核原语的标准
+
+> 如果该结构影响 ①哪些副作用被提交、②如何处理失败与恢复、③去重粒度 —— 则它必须是内核原语。
+
+### Plan 类型总览
+
+| Plan 类型 | 状态 | Temporal 兼容 | 说明 |
+|---|---|---|---|
+| `SequentialPlan` | ✓ 已实现 | ✅ | 线性顺序执行 |
+| `ParallelPlan` | ✓ 已实现 | ✅ | 并行组 + join_strategy |
+| `ConditionalPlan` | ✓ 合约完成 | ✅ | 条件路由，基于 gating_action 结果分支 |
+| `DependencyGraph` | ✓ 合约完成 | ✅（需规范化排序） | 节点依赖 DAG，graphlib 执行 |
+| `SpeculativePlan` | ✓ 合约完成 | ⚠️ Child Workflow 模式 | 投机执行池，外部信号选 winner |
+
+### Temporal 安全策略
+
+- **`continue_as_new`**：`RunActorWorkflow` 追踪 `_history_event_count`，达到 `history_event_threshold`（默认 10,000 轮）时调用 `continue_as_new(RunInput)`，重置 History，保留 `run_id / session_id / parent_run_id`。
+- **`SpeculativePlan` 必须用 Child Workflow**：每个候选独立 History，避免主 Workflow History 爆炸（K 候选 × N 步 × 4 events/step 的乘法开销）。
+- **`DependencyGraph` 确定性**：节点必须按 `node_id` 字典序构建拓扑图，同层节点按字典序 `create_task`。
+
+### KernelFacade 接口体系（v0.2）
+
+```
+KernelFacade
+├── 能力发现
+│   ├── get_manifest() → KernelManifest        # 聚合三大注册表 + PlanTypeRegistry
+│   └── get_health() → dict                    # 透出 KernelHealthProbe.liveness()
+├── 生命周期（已有）
+│   ├── start_run / cancel_run / resume_run / spawn_child_run
+│   └── signal_run（保留，用于平台私有信号）
+├── 计划提交
+│   └── submit_plan(run_id, plan: ExecutionPlan) → PlanSubmissionResponse
+├── 治理交互（新增）
+│   ├── submit_approval(ApprovalRequest)        # human_actor 审批入口
+│   └── commit_speculation(run_id, winner_id)   # 投机执行 winner 选择
+└── 可观测性（已有）
+    ├── stream_run_events / query_run / query_run_dashboard
+    └── escalate_recovery
+```
+
+---
+
+## 十三、已实现 vs 待实现全览
 
 | 模块 | 状态 | 所在文件 |
 |------|------|---------|
@@ -554,3 +606,18 @@ Registry Extension Points ✓：
 | ReflectionPolicy | ✓ | `kernel/recovery/` |
 | ReflectionContextBuilder | ✓ | `kernel/cognitive/reflection_builder.py` |
 | 技能驱动完整链路 | ✓ | `skills/` + Child Workflow 集成 |
+| **ConditionalPlan（条件路由）** | **✓** | `kernel/contracts.py` |
+| **DependencyGraph（节点依赖 DAG）** | **✓** | `kernel/contracts.py` |
+| **SpeculativePlan（投机执行池）** | **✓** | `kernel/contracts.py` |
+| **PlanTypeRegistry（计划类型注册表）** | **✓** | `kernel/plan_type_registry.py` |
+| **KernelManifest（能力声明 DTO）** | **✓** | `kernel/contracts.py` |
+| **ApprovalRequest / PlanSubmissionResponse** | **✓** | `kernel/contracts.py` |
+| **KernelFacade.get_manifest()** | **✓** | `adapters/facade/kernel_facade.py` |
+| **KernelFacade.submit_plan()** | **✓** | `adapters/facade/kernel_facade.py` |
+| **KernelFacade.submit_approval()** | **✓** | `adapters/facade/kernel_facade.py` |
+| **KernelFacade.commit_speculation()** | **✓** | `adapters/facade/kernel_facade.py` |
+| **KernelFacade.get_health()** | **✓** | `adapters/facade/kernel_facade.py` |
+| **RunActorWorkflow continue_as_new** | **✓** | `substrate/temporal/run_actor_workflow.py` |
+| PlanExecutor ConditionalPlan 执行路径 | ○ | 待实现（python-statemachine） |
+| PlanExecutor DependencyGraph 执行路径 | ○ | 待实现（graphlib + asyncio.TaskGroup） |
+| SpeculativePlan Child Workflow 执行路径 | ○ | 待实现（spawn_child_run 驱动） |
