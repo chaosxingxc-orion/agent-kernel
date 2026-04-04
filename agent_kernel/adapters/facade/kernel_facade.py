@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from agent_kernel.kernel.task_manager.contracts import TaskDescriptor, TaskHealthStatus
+    from agent_kernel.kernel.task_manager.registry import TaskRegistry
+
 from agent_kernel.adapters.agent_core.checkpoint_adapter import AgentCoreResumeInput
 from agent_kernel.adapters.agent_core.context_adapter import AgentCoreContextInput
 from agent_kernel.kernel.action_type_registry import KERNEL_ACTION_TYPE_REGISTRY
@@ -106,6 +109,7 @@ class KernelFacade:
         health_probe: Any | None = None,
         substrate_type: str = _SUBSTRATE_TEMPORAL,
         kernel_version: str = _KERNEL_VERSION,
+        task_registry: TaskRegistry | None = None,
     ) -> None:
         """Initializes facade with substrate gateway and optional adapters.
 
@@ -123,6 +127,9 @@ class KernelFacade:
             kernel_version: Override for the kernel semantic version string
                 reported in ``get_manifest()``.  Defaults to the module-level
                 ``_KERNEL_VERSION`` constant.
+            task_registry: Optional ``TaskRegistry`` for task-level lifecycle
+                management.  When provided, enables ``register_task()``,
+                ``get_task_status()``, and ``list_session_tasks()``.
         """
         self._workflow_gateway = workflow_gateway
         self._context_adapter = context_adapter
@@ -130,6 +137,7 @@ class KernelFacade:
         self._health_probe = health_probe
         self._substrate_type = substrate_type
         self._kernel_version = kernel_version
+        self._task_registry = task_registry
         # Per-instance approval dedup gate: tracks (run_id, approval_ref) pairs
         # that have already been forwarded to the substrate.  Prevents duplicate
         # approval signals from the same facade instance (e.g. accidental double
@@ -682,6 +690,67 @@ class KernelFacade:
                     )
                 return probe_result()  # type: ignore[no-any-return]
         return {"status": "ok", "substrate": self._substrate_type}
+
+    def register_task(self, descriptor: TaskDescriptor) -> None:
+        """Registers a new task descriptor in the task registry.
+
+        Convenience wrapper that delegates to the injected ``TaskRegistry``.
+        Callers must supply a ``task_registry`` at construction time.
+
+        Args:
+            descriptor: Task descriptor to register.  ``task_id`` must be
+                unique within the registry.
+
+        Raises:
+            RuntimeError: If no ``task_registry`` was provided at construction.
+            ValueError: If ``task_id`` is already registered.
+        """
+        if self._task_registry is None:
+            raise RuntimeError(
+                "register_task() requires a task_registry injected at KernelFacade construction."
+            )
+        self._task_registry.register(descriptor)
+
+    def get_task_status(self, task_id: str) -> TaskHealthStatus | None:
+        """Returns the current health snapshot for a task.
+
+        Delegates to the injected ``TaskRegistry.get_health()``.
+
+        Args:
+            task_id: Task identifier to look up.
+
+        Returns:
+            ``TaskHealthStatus`` snapshot, or ``None`` if not found.
+
+        Raises:
+            RuntimeError: If no ``task_registry`` was provided at construction.
+        """
+        if self._task_registry is None:
+            raise RuntimeError(
+                "get_task_status() requires a task_registry injected at KernelFacade construction."
+            )
+        return self._task_registry.get_health(task_id)
+
+    def list_session_tasks(self, session_id: str) -> list[TaskDescriptor]:
+        """Returns all task descriptors registered for a session.
+
+        Delegates to the injected ``TaskRegistry.list_session_tasks()``.
+
+        Args:
+            session_id: Session identifier to query.
+
+        Returns:
+            List of ``TaskDescriptor`` objects in registration order.
+
+        Raises:
+            RuntimeError: If no ``task_registry`` was provided at construction.
+        """
+        if self._task_registry is None:
+            raise RuntimeError(
+                "list_session_tasks() requires a task_registry injected at "
+                "KernelFacade construction."
+            )
+        return self._task_registry.list_session_tasks(session_id)
 
     @staticmethod
     def _is_expected_cancel_race_error(error: Exception) -> bool:

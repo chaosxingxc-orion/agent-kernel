@@ -88,9 +88,7 @@ def test_resolver_falls_back_to_defaults_when_payload_missing() -> None:
 
 def test_resolver_strict_mode_requires_declared_snapshot_payload() -> None:
     """Strict mode should fail when declared snapshot payload is absent."""
-    resolver = ActionPayloadCapabilitySnapshotInputResolver(
-        require_declared_snapshot_input=True
-    )
+    resolver = ActionPayloadCapabilitySnapshotInputResolver(require_declared_snapshot_input=True)
     action = Action(
         action_id="action-strict-missing-payload",
         run_id="run-1",
@@ -108,9 +106,7 @@ def test_resolver_strict_mode_requires_declared_snapshot_payload() -> None:
 
 def test_resolver_strict_mode_requires_declarative_bundle_digest() -> None:
     """Strict mode should fail when declared bundle digest is absent."""
-    resolver = ActionPayloadCapabilitySnapshotInputResolver(
-        require_declarative_bundle_digest=True
-    )
+    resolver = ActionPayloadCapabilitySnapshotInputResolver(require_declarative_bundle_digest=True)
     action = Action(
         action_id="action-strict-missing-digest",
         run_id="run-1",

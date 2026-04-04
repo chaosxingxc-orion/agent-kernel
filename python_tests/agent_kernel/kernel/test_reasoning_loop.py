@@ -379,9 +379,7 @@ class TestPrebuiltContext:
         snapshot = _make_snapshot()
         prebuilt = ContextWindow(
             system_instructions="prebuilt",
-            tool_definitions=(
-                MagicMock(name="my_tool"),
-            ),
+            tool_definitions=(MagicMock(name="my_tool"),),
         )
         asyncio.run(
             loop.run_once(

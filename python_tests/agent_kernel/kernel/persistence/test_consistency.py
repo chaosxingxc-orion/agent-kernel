@@ -529,9 +529,7 @@ class TestAverifyEventDedupeConsistency:
         # Key 1: clean.
         env1 = _make_envelope(run_id, "k1")
         dedupe.reserve(env1)
-        ev1 = _make_event(
-            run_id, idempotency_key=env1.dispatch_idempotency_key, commit_offset=1
-        )
+        ev1 = _make_event(run_id, idempotency_key=env1.dispatch_idempotency_key, commit_offset=1)
         await log.append_action_commit(_make_commit(run_id, [ev1], commit_id="c1"))
         # Key 2: orphaned.
         env2 = _make_envelope(run_id, "k2")

@@ -80,13 +80,12 @@ def test_start_run_binds_context_when_context_adapter_is_configured() -> None:
         )
     )
 
-    start_request = (
-        gateway.start_workflow.await_args.args[0]
-    )
+    start_request = gateway.start_workflow.await_args.args[0]
     assert start_request.context_ref == "ctx-binding-1"
     context_adapter.bind_context.assert_called_once()
     context_adapter.bind_run_context.assert_called_once_with(
-        response.run_id, "ctx-binding-1",
+        response.run_id,
+        "ctx-binding-1",
     )
 
 
@@ -106,9 +105,7 @@ def test_query_run_exports_projection_without_temporal_leakage() -> None:
     )
     facade = KernelFacade(gateway)
 
-    response = asyncio.run(
-        facade.query_run(QueryRunRequest(run_id="run-1"))
-    )
+    response = asyncio.run(facade.query_run(QueryRunRequest(run_id="run-1")))
 
     assert response.run_id == "run-1"
     assert response.lifecycle_state == "waiting_external"
@@ -136,9 +133,7 @@ def test_query_run_updates_checkpoint_adapter_when_configured() -> None:
         checkpoint_adapter=checkpoint_adapter,
     )
 
-    response = asyncio.run(
-        facade.query_run(QueryRunRequest(run_id="run-9"))
-    )
+    response = asyncio.run(facade.query_run(QueryRunRequest(run_id="run-9")))
 
     checkpoint_adapter.bind_projection.assert_called_once_with(
         projection,
@@ -163,9 +158,7 @@ def test_query_run_dashboard_returns_dashboard_friendly_projection_view() -> Non
     )
     facade = KernelFacade(gateway)
 
-    response = asyncio.run(
-        facade.query_run_dashboard("run-11")
-    )
+    response = asyncio.run(facade.query_run_dashboard("run-11"))
 
     assert response.run_id == "run-11"
     assert response.lifecycle_state == "recovering"
@@ -191,9 +184,7 @@ def test_query_run_dashboard_uses_state_fallback_correlation_hint() -> None:
     )
     facade = KernelFacade(gateway)
 
-    response = asyncio.run(
-        facade.query_run_dashboard("run-12")
-    )
+    response = asyncio.run(facade.query_run_dashboard("run-12"))
 
     assert response.correlation_hint == "state:ready:run-12"
     assert response.active_child_runs_count == 0
@@ -229,10 +220,7 @@ def test_spawn_child_run_routes_through_gateway_and_returns_child_view() -> None
         "correlation_id": "spawn_child:run-parent",
         "event_ref": "facade:spawn_child:run-parent",
     }
-    assert (
-        signal_call[1].caused_by
-        == "kernel_facade.spawn_child_run"
-    )
+    assert signal_call[1].caused_by == "kernel_facade.spawn_child_run"
     assert response.child_run_id == "child-run-1"
     assert response.lifecycle_state == "created"
 
@@ -427,15 +415,18 @@ def test_cancel_run_signals_cancel_intent_before_workflow_cancel() -> None:
         caused_by="ops-console",
     )
     gateway.signal_workflow.assert_awaited_once_with(
-        "run-7", expected_signal,
+        "run-7",
+        expected_signal,
     )
     gateway.cancel_workflow.assert_awaited_once_with(
-        "run-7", "operator_requested",
+        "run-7",
+        "operator_requested",
     )
     assert gateway.mock_calls == [
         call.signal_workflow("run-7", expected_signal),
         call.cancel_workflow(
-            "run-7", "operator_requested",
+            "run-7",
+            "operator_requested",
         ),
     ]
 
@@ -467,14 +458,9 @@ def test_resume_run_routes_checkpoint_resume_into_workflow_signal() -> None:
 
     checkpoint_adapter.import_resume_request.assert_awaited_once()
     gateway.signal_workflow.assert_awaited_once()
-    signal_request = (
-        gateway.signal_workflow.await_args.args[1]
-    )
+    signal_request = gateway.signal_workflow.await_args.args[1]
     assert signal_request.run_id == "run-1"
-    assert (
-        signal_request.signal_type
-        == "resume_from_snapshot"
-    )
+    assert signal_request.signal_type == "resume_from_snapshot"
     assert signal_request.signal_payload == {
         "snapshot_id": "snapshot:run-1:8",
         "snapshot_offset": 8,
@@ -499,18 +485,10 @@ def test_cancel_run_uses_deterministic_correlation_when_caused_by_missing() -> N
         )
     )
 
-    signal_request = (
-        gateway.signal_workflow.await_args.args[1]
-    )
+    signal_request = gateway.signal_workflow.await_args.args[1]
     assert signal_request.signal_payload is not None
-    assert (
-        signal_request.signal_payload["correlation_id"]
-        == "cancel:run-8"
-    )
-    assert (
-        signal_request.signal_payload["event_ref"]
-        == "facade:cancel:run-8"
-    )
+    assert signal_request.signal_payload["correlation_id"] == "cancel:run-8"
+    assert signal_request.signal_payload["event_ref"] == "facade:cancel:run-8"
 
 
 def test_cancel_run_tolerates_expected_completion_race() -> None:
@@ -556,18 +534,10 @@ def test_resume_run_uses_deterministic_correlation_when_caused_by_missing() -> N
         )
     )
 
-    signal_request = (
-        gateway.signal_workflow.await_args.args[1]
-    )
+    signal_request = gateway.signal_workflow.await_args.args[1]
     assert signal_request.signal_payload is not None
-    assert (
-        signal_request.signal_payload["correlation_id"]
-        == "resume:run-2"
-    )
-    assert (
-        signal_request.signal_payload["event_ref"]
-        == "facade:resume:run-2"
-    )
+    assert signal_request.signal_payload["correlation_id"] == "resume:run-2"
+    assert signal_request.signal_payload["event_ref"] == "facade:resume:run-2"
 
 
 def test_resume_run_requires_checkpoint_adapter() -> None:
@@ -580,11 +550,7 @@ def test_resume_run_requires_checkpoint_adapter() -> None:
         RuntimeError,
         match=r"checkpoint_adapter is required for resume_run",
     ):
-        asyncio.run(
-            facade.resume_run(
-                ResumeRunRequest(run_id="run-1")
-            )
-        )
+        asyncio.run(facade.resume_run(ResumeRunRequest(run_id="run-1")))
 
 
 def test_escalate_recovery_signals_workflow_with_observability_payload() -> None:
@@ -607,12 +573,11 @@ def test_escalate_recovery_signals_workflow_with_observability_payload() -> None
         signal_payload={
             "reason": "manual operator triage required",
             "correlation_id": "recovery-gate",
-            "event_ref": (
-                "facade:recovery_escalation:run-10"
-            ),
+            "event_ref": ("facade:recovery_escalation:run-10"),
         },
         caused_by="recovery-gate",
     )
     gateway.signal_workflow.assert_awaited_once_with(
-        "run-10", expected_signal,
+        "run-10",
+        expected_signal,
     )

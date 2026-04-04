@@ -114,16 +114,8 @@ def test_event_log_appends_and_loads_events_in_offset_order() -> None:
     """Event log should persist commits and expose stable offset ordering."""
     event_log = InMemoryKernelRuntimeEventLog()
 
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-1", "c1", "run.created")
-        )
-    )
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-1", "c2", "run.ready")
-        )
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-1", "c1", "run.created")))
+    asyncio.run(event_log.append_action_commit(_build_commit("run-1", "c2", "run.ready")))
 
     events = asyncio.run(event_log.load("run-1"))
     assert [event.commit_offset for event in events] == [1, 2]
@@ -141,34 +133,18 @@ def test_projection_catch_up_and_readiness_follow_runtime_offsets() -> None:
     """Projection service should honor catch-up offsets and readiness."""
     event_log = InMemoryKernelRuntimeEventLog()
     projection = InMemoryDecisionProjectionService(event_log)
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-2", "c1", "run.created")
-        )
-    )
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-2", "c2", "run.ready")
-        )
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-2", "c1", "run.created")))
+    asyncio.run(event_log.append_action_commit(_build_commit("run-2", "c2", "run.ready")))
 
-    through_created = asyncio.run(
-        projection.catch_up("run-2", through_offset=1)
-    )
+    through_created = asyncio.run(projection.catch_up("run-2", through_offset=1))
     assert through_created.lifecycle_state == "created"
     assert through_created.projected_offset == 1
 
-    through_ready = asyncio.run(
-        projection.catch_up("run-2", through_offset=2)
-    )
+    through_ready = asyncio.run(projection.catch_up("run-2", through_offset=2))
     assert through_ready.lifecycle_state == "ready"
     assert through_ready.ready_for_dispatch
-    assert asyncio.run(
-        projection.readiness("run-2", required_offset=2)
-    )
-    assert not asyncio.run(
-        projection.readiness("run-2", required_offset=3)
-    )
+    assert asyncio.run(projection.readiness("run-2", required_offset=2))
+    assert not asyncio.run(projection.readiness("run-2", required_offset=3))
 
 
 def test_admission_enforces_dispatch_readiness() -> None:
@@ -183,26 +159,14 @@ def test_admission_enforces_dispatch_readiness() -> None:
         effect_class="read_only",
     )
 
-    non_ready_projection = asyncio.run(
-        projection_service.get("run-3")
-    )
-    denied = asyncio.run(
-        admission.check(action, non_ready_projection)
-    )
+    non_ready_projection = asyncio.run(projection_service.get("run-3"))
+    denied = asyncio.run(admission.check(action, non_ready_projection))
     assert not denied.admitted
     assert denied.reason_code == "dependency_not_ready"
 
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-3", "c1", "run.ready")
-        )
-    )
-    ready_projection = asyncio.run(
-        projection_service.get("run-3")
-    )
-    admitted = asyncio.run(
-        admission.check(action, ready_projection)
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-3", "c1", "run.ready")))
+    ready_projection = asyncio.run(projection_service.get("run-3"))
+    admitted = asyncio.run(admission.check(action, ready_projection))
     assert admitted.admitted
     assert admitted.reason_code == "ok"
     assert admitted.grant_ref == "grant:action-1"
@@ -213,14 +177,8 @@ def test_admission_denies_requires_human_review_policy_tag() -> None:
     event_log = InMemoryKernelRuntimeEventLog()
     projection_service = InMemoryDecisionProjectionService(event_log)
     admission = StaticDispatchAdmissionService()
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-3b", "c1", "run.ready")
-        )
-    )
-    ready_projection = asyncio.run(
-        projection_service.get("run-3b")
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-3b", "c1", "run.ready")))
+    ready_projection = asyncio.run(projection_service.get("run-3b"))
 
     action = Action(
         action_id="action-1b",
@@ -230,9 +188,7 @@ def test_admission_denies_requires_human_review_policy_tag() -> None:
         policy_tags=["requires_human_review"],
     )
 
-    denied = asyncio.run(
-        admission.check(action, ready_projection)
-    )
+    denied = asyncio.run(admission.check(action, ready_projection))
     assert not denied.admitted
     assert denied.reason_code == "policy_denied"
 
@@ -242,14 +198,8 @@ def test_admission_denies_timeout_over_five_minutes() -> None:
     event_log = InMemoryKernelRuntimeEventLog()
     projection_service = InMemoryDecisionProjectionService(event_log)
     admission = StaticDispatchAdmissionService()
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-3c", "c1", "run.ready")
-        )
-    )
-    ready_projection = asyncio.run(
-        projection_service.get("run-3c")
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-3c", "c1", "run.ready")))
+    ready_projection = asyncio.run(projection_service.get("run-3c"))
 
     action = Action(
         action_id="action-1c",
@@ -259,9 +209,7 @@ def test_admission_denies_timeout_over_five_minutes() -> None:
         timeout_ms=300001,
     )
 
-    denied = asyncio.run(
-        admission.check(action, ready_projection)
-    )
+    denied = asyncio.run(admission.check(action, ready_projection))
     assert not denied.admitted
     assert denied.reason_code == "policy_denied"
 
@@ -271,14 +219,8 @@ def test_admission_denies_when_estimated_cost_exceeds_max_cost_tag() -> None:
     event_log = InMemoryKernelRuntimeEventLog()
     projection_service = InMemoryDecisionProjectionService(event_log)
     admission = StaticDispatchAdmissionService()
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-3d", "c1", "run.ready")
-        )
-    )
-    ready_projection = asyncio.run(
-        projection_service.get("run-3d")
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-3d", "c1", "run.ready")))
+    ready_projection = asyncio.run(projection_service.get("run-3d"))
 
     action = Action(
         action_id="action-1d",
@@ -289,9 +231,7 @@ def test_admission_denies_when_estimated_cost_exceeds_max_cost_tag() -> None:
         input_json={"estimated_cost": 11},
     )
 
-    denied = asyncio.run(
-        admission.check(action, ready_projection)
-    )
+    denied = asyncio.run(admission.check(action, ready_projection))
     assert not denied.admitted
     assert denied.reason_code == "quota_exceeded"
 
@@ -301,14 +241,8 @@ def test_admission_allows_when_estimated_cost_within_max_cost_tag() -> None:
     event_log = InMemoryKernelRuntimeEventLog()
     projection_service = InMemoryDecisionProjectionService(event_log)
     admission = StaticDispatchAdmissionService()
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-3e", "c1", "run.ready")
-        )
-    )
-    ready_projection = asyncio.run(
-        projection_service.get("run-3e")
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-3e", "c1", "run.ready")))
+    ready_projection = asyncio.run(projection_service.get("run-3e"))
 
     action = Action(
         action_id="action-1e",
@@ -319,9 +253,7 @@ def test_admission_allows_when_estimated_cost_within_max_cost_tag() -> None:
         input_json={"estimated_cost": 10},
     )
 
-    admitted = asyncio.run(
-        admission.check(action, ready_projection)
-    )
+    admitted = asyncio.run(admission.check(action, ready_projection))
     assert admitted.admitted
     assert admitted.reason_code == "ok"
     assert admitted.grant_ref == "grant:action-1e"
@@ -332,9 +264,7 @@ def test_admission_ignores_invalid_quota_inputs_and_keeps_existing_decision() ->
     event_log = InMemoryKernelRuntimeEventLog()
     projection_service = InMemoryDecisionProjectionService(event_log)
     admission = StaticDispatchAdmissionService()
-    non_ready_projection = asyncio.run(
-        projection_service.get("run-3f")
-    )
+    non_ready_projection = asyncio.run(projection_service.get("run-3f"))
 
     action = Action(
         action_id="action-1f",
@@ -345,9 +275,7 @@ def test_admission_ignores_invalid_quota_inputs_and_keeps_existing_decision() ->
         input_json={"estimated_cost": "unknown"},
     )
 
-    denied = asyncio.run(
-        admission.check(action, non_ready_projection)
-    )
+    denied = asyncio.run(admission.check(action, non_ready_projection))
     assert not denied.admitted
     assert denied.reason_code == "dependency_not_ready"
 
@@ -357,14 +285,8 @@ def test_admission_denies_remote_service_guaranteed_when_contract_missing() -> N
     event_log = InMemoryKernelRuntimeEventLog()
     projection_service = InMemoryDecisionProjectionService(event_log)
     admission = StaticDispatchAdmissionService()
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-3g", "c1", "run.ready")
-        )
-    )
-    ready_projection = asyncio.run(
-        projection_service.get("run-3g")
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-3g", "c1", "run.ready")))
+    ready_projection = asyncio.run(projection_service.get("run-3g"))
 
     action = Action(
         action_id="action-1g",
@@ -375,9 +297,7 @@ def test_admission_denies_remote_service_guaranteed_when_contract_missing() -> N
         input_json={"host_kind": "remote_service"},
     )
 
-    denied = asyncio.run(
-        admission.check(action, ready_projection)
-    )
+    denied = asyncio.run(admission.check(action, ready_projection))
     assert not denied.admitted
     assert denied.reason_code == "idempotency_contract_insufficient"
 
@@ -387,14 +307,8 @@ def test_admission_denies_remote_service_guaranteed_when_contract_is_insufficien
     event_log = InMemoryKernelRuntimeEventLog()
     projection_service = InMemoryDecisionProjectionService(event_log)
     admission = StaticDispatchAdmissionService()
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-3h", "c1", "run.ready")
-        )
-    )
-    ready_projection = asyncio.run(
-        projection_service.get("run-3h")
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-3h", "c1", "run.ready")))
+    ready_projection = asyncio.run(projection_service.get("run-3h"))
 
     action = Action(
         action_id="action-1h",
@@ -413,9 +327,7 @@ def test_admission_denies_remote_service_guaranteed_when_contract_is_insufficien
         },
     )
 
-    denied = asyncio.run(
-        admission.check(action, ready_projection)
-    )
+    denied = asyncio.run(admission.check(action, ready_projection))
     assert not denied.admitted
     assert denied.reason_code == "idempotency_contract_insufficient"
 
@@ -425,14 +337,8 @@ def test_admission_allows_remote_service_guaranteed_when_contract_is_verified() 
     event_log = InMemoryKernelRuntimeEventLog()
     projection_service = InMemoryDecisionProjectionService(event_log)
     admission = StaticDispatchAdmissionService()
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-3i", "c1", "run.ready")
-        )
-    )
-    ready_projection = asyncio.run(
-        projection_service.get("run-3i")
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-3i", "c1", "run.ready")))
+    ready_projection = asyncio.run(projection_service.get("run-3i"))
 
     action = Action(
         action_id="action-1i",
@@ -451,9 +357,7 @@ def test_admission_allows_remote_service_guaranteed_when_contract_is_verified() 
         },
     )
 
-    admitted = asyncio.run(
-        admission.check(action, ready_projection)
-    )
+    admitted = asyncio.run(admission.check(action, ready_projection))
     assert admitted.admitted
     assert admitted.reason_code == "ok"
     assert admitted.grant_ref == "grant:action-1i"
@@ -464,14 +368,8 @@ def test_admission_keeps_explicit_local_hosts_unaffected_by_remote_guard() -> No
     event_log = InMemoryKernelRuntimeEventLog()
     projection_service = InMemoryDecisionProjectionService(event_log)
     admission = StaticDispatchAdmissionService()
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-3j", "c1", "run.ready")
-        )
-    )
-    ready_projection = asyncio.run(
-        projection_service.get("run-3j")
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-3j", "c1", "run.ready")))
+    ready_projection = asyncio.run(projection_service.get("run-3j"))
 
     local_process_action = Action(
         action_id="action-1j",
@@ -481,9 +379,7 @@ def test_admission_keeps_explicit_local_hosts_unaffected_by_remote_guard() -> No
         external_idempotency_level="guaranteed",
         policy_tags=["host:local_process"],
     )
-    local_process_admitted = asyncio.run(
-        admission.check(local_process_action, ready_projection)
-    )
+    local_process_admitted = asyncio.run(admission.check(local_process_action, ready_projection))
 
     local_cli_action = Action(
         action_id="action-1k",
@@ -493,9 +389,7 @@ def test_admission_keeps_explicit_local_hosts_unaffected_by_remote_guard() -> No
         external_idempotency_level="guaranteed",
         policy_tags=["host:local_cli"],
     )
-    local_cli_admitted = asyncio.run(
-        admission.check(local_cli_action, ready_projection)
-    )
+    local_cli_admitted = asyncio.run(admission.check(local_cli_action, ready_projection))
 
     assert local_process_admitted.admitted
     assert local_process_admitted.reason_code == "ok"
@@ -508,9 +402,7 @@ def test_admission_keeps_explicit_local_hosts_unaffected_by_remote_guard() -> No
 def test_executor_recovery_and_deduper_minimal_behaviors() -> None:
     """Executor, recovery, and deduper should satisfy minimal contract."""
     executor = AsyncExecutorService()
-    recovery = StaticRecoveryGateService(
-        StaticRecoveryPolicy(mode="human_escalation")
-    )
+    recovery = StaticRecoveryGateService(StaticRecoveryPolicy(mode="human_escalation"))
     deduper = InMemoryDecisionDeduper()
 
     action = Action(
@@ -519,9 +411,7 @@ def test_executor_recovery_and_deduper_minimal_behaviors() -> None:
         action_type="inspect",
         effect_class="read_only",
     )
-    execute_result = asyncio.run(
-        executor.execute(action, grant_ref="grant-2")
-    )
+    execute_result = asyncio.run(executor.execute(action, grant_ref="grant-2"))
     assert execute_result["action_id"] == "action-2"
     assert execute_result["grant_ref"] == "grant-2"
 
@@ -659,14 +549,8 @@ def test_run_actor_workflow_integrates_with_minimal_runtime_services() -> None:
         deduper=deduper,
     )
 
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-5", "c1", "run.ready")
-        )
-    )
-    run_result = asyncio.run(
-        workflow.run(RunInput(run_id="run-5"))
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-5", "c1", "run.ready")))
+    run_result = asyncio.run(workflow.run(RunInput(run_id="run-5")))
     assert run_result["run_id"] == "run-5"
 
     asyncio.run(
@@ -700,11 +584,7 @@ def test_run_actor_workflow_accepts_legacy_executor_result_without_fact_events()
         deduper=deduper,
     )
 
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-5b", "c1", "run.ready")
-        )
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-5b", "c1", "run.ready")))
     asyncio.run(workflow.run(RunInput(run_id="run-5b")))
 
     action_commit = ActionCommit(
@@ -763,9 +643,7 @@ def test_resume_signal_moves_projection_into_recovering_state() -> None:
     )
 
     asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-6", "c1", "run.waiting_external")
-        )
+        event_log.append_action_commit(_build_commit("run-6", "c1", "run.waiting_external"))
     )
     asyncio.run(workflow.run(RunInput(run_id="run-6")))
     asyncio.run(
@@ -923,7 +801,9 @@ def test_cancel_requested_keeps_aborted_after_recovery_succeeded_event() -> None
     asyncio.run(
         event_log.append_action_commit(
             _build_commit(
-                "run-8c", "c2", "run.recovery_succeeded",
+                "run-8c",
+                "c2",
+                "run.recovery_succeeded",
             )
         )
     )
@@ -950,11 +830,7 @@ def test_cancel_requested_keeps_aborted_after_signal_callback_event() -> None:
             )
         )
     )
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-8d", "c2", "signal.callback")
-        )
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-8d", "c2", "signal.callback")))
 
     projection_state = asyncio.run(projection.get("run-8d"))
     assert projection_state.lifecycle_state == "aborted"
@@ -988,11 +864,7 @@ def test_cancel_requested_keeps_aborted_after_recovery_aborted_and_callback_even
             )
         )
     )
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-8e", "c3", "signal.callback")
-        )
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-8e", "c3", "signal.callback")))
 
     projection_state = asyncio.run(projection.get("run-8e"))
     assert projection_state.lifecycle_state == "aborted"
@@ -1163,11 +1035,7 @@ def test_recovering_event_moves_projection_into_recovering_state() -> None:
     event_log = InMemoryKernelRuntimeEventLog()
     projection = InMemoryDecisionProjectionService(event_log)
 
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-9", "c1", "run.recovering")
-        )
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-9", "c1", "run.recovering")))
     state = asyncio.run(projection.get("run-9"))
 
     assert state.run_id == "run-9"
@@ -1212,11 +1080,7 @@ def test_reconcile_failed_event_moves_projection_to_waiting_external() -> None:
     event_log = InMemoryKernelRuntimeEventLog()
     projection = InMemoryDecisionProjectionService(event_log)
 
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-10b", "c1", "run.ready")
-        )
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-10b", "c1", "run.ready")))
     asyncio.run(
         event_log.append_action_commit(
             _build_commit(
@@ -1241,15 +1105,9 @@ def test_non_failed_reconcile_event_only_advances_projection_offset() -> None:
     event_log = InMemoryKernelRuntimeEventLog()
     projection = InMemoryDecisionProjectionService(event_log)
 
+    asyncio.run(event_log.append_action_commit(_build_commit("run-10c", "c1", "run.ready")))
     asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-10c", "c1", "run.ready")
-        )
-    )
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-10c", "c2", "reconcile.succeeded")
-        )
+        event_log.append_action_commit(_build_commit("run-10c", "c2", "reconcile.succeeded"))
     )
 
     state = asyncio.run(projection.get("run-10c"))
@@ -1403,9 +1261,7 @@ def test_workflow_child_signals_update_parent_projection_child_runs() -> None:
         deduper=deduper,
     )
 
-    asyncio.run(
-        workflow.run(RunInput(run_id="run-parent-2"))
-    )
+    asyncio.run(workflow.run(RunInput(run_id="run-parent-2")))
     asyncio.run(
         workflow.signal(
             ActorSignal(
@@ -1461,11 +1317,7 @@ def test_workflow_failure_emits_recovery_event_and_updates_projection_reason() -
         deduper=deduper,
     )
 
-    asyncio.run(
-        event_log.append_action_commit(
-            _build_commit("run-11", "c1", "run.ready")
-        )
-    )
+    asyncio.run(event_log.append_action_commit(_build_commit("run-11", "c1", "run.ready")))
     asyncio.run(workflow.run(RunInput(run_id="run-11")))
 
     failing_commit = ActionCommit(
@@ -1499,9 +1351,7 @@ def test_workflow_failure_emits_recovery_event_and_updates_projection_reason() -
     asyncio.run(event_log.append_action_commit(failing_commit))
 
     with pytest.raises(RuntimeError, match="executor boom"):
-        asyncio.run(
-            workflow.process_action_commit(failing_commit)
-        )
+        asyncio.run(workflow.process_action_commit(failing_commit))
 
     state = asyncio.run(projection.get("run-11"))
     assert state.lifecycle_state == "waiting_external"

@@ -50,9 +50,7 @@ class TestEchoScriptRuntime:
     @pytest.mark.asyncio
     async def test_echo_empty_parameters(self) -> None:
         runtime = EchoScriptRuntime()
-        result = await runtime.execute_script(
-            _make_input(host_kind="echo", parameters={})
-        )
+        result = await runtime.execute_script(_make_input(host_kind="echo", parameters={}))
         assert result.exit_code == 0
         assert result.output_json == {}
         assert json.loads(result.stdout) == {}
@@ -61,9 +59,7 @@ class TestEchoScriptRuntime:
     async def test_echo_parameters_reflected_in_output_json(self) -> None:
         runtime = EchoScriptRuntime()
         params = {"key": "value", "count": 3}
-        result = await runtime.execute_script(
-            _make_input(host_kind="echo", parameters=params)
-        )
+        result = await runtime.execute_script(_make_input(host_kind="echo", parameters=params))
         assert result.output_json == params
         assert json.loads(result.stdout) == params
 
@@ -76,9 +72,7 @@ class TestEchoScriptRuntime:
     @pytest.mark.asyncio
     async def test_echo_script_id_preserved(self) -> None:
         runtime = EchoScriptRuntime()
-        result = await runtime.execute_script(
-            _make_input(script_id="my-script", host_kind="echo")
-        )
+        result = await runtime.execute_script(_make_input(script_id="my-script", host_kind="echo"))
         assert result.script_id == "my-script"
 
     @pytest.mark.asyncio
@@ -90,9 +84,7 @@ class TestEchoScriptRuntime:
     async def test_echo_nested_parameters(self) -> None:
         runtime = EchoScriptRuntime()
         params = {"nested": {"a": 1, "b": [1, 2, 3]}}
-        result = await runtime.execute_script(
-            _make_input(host_kind="echo", parameters=params)
-        )
+        result = await runtime.execute_script(_make_input(host_kind="echo", parameters=params))
         assert result.output_json == params
 
 
@@ -107,9 +99,7 @@ class TestInProcessPythonScriptRuntime:
     @pytest.mark.asyncio
     async def test_print_stdout_captured(self) -> None:
         runtime = InProcessPythonScriptRuntime()
-        result = await runtime.execute_script(
-            _make_input(script_content="print('hello')")
-        )
+        result = await runtime.execute_script(_make_input(script_content="print('hello')"))
         assert result.exit_code == 0
         assert result.stdout == "hello\n"
 
@@ -162,9 +152,7 @@ class TestInProcessPythonScriptRuntime:
         """
         runtime = InProcessPythonScriptRuntime(default_timeout_ms=50)
         script = "import time; time.sleep(10)"
-        result = await runtime.execute_script(
-            _make_input(script_content=script, timeout_ms=50)
-        )
+        result = await runtime.execute_script(_make_input(script_content=script, timeout_ms=50))
         assert result.exit_code == -1
         assert "TimeoutError" in result.stderr
         assert result.output_json is None
@@ -228,7 +216,7 @@ class TestLocalProcessScriptRuntime:
         result = await runtime.execute_script(
             _make_input(
                 # Platform-neutral sleep: Python -c works cross-platform
-                script_content="python -c \"import time; time.sleep(60)\"",
+                script_content='python -c "import time; time.sleep(60)"',
                 host_kind="local_process",
                 timeout_ms=100,
             )

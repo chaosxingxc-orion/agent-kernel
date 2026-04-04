@@ -135,9 +135,7 @@ class TestSQLiteEventLogConcurrency:
             try:
                 for seq in range(appends_per_thread):
                     loop.run_until_complete(
-                        log.append_action_commit(
-                            _make_commit(run_id, thread_id * 100 + seq)
-                        )
+                        log.append_action_commit(_make_commit(run_id, thread_id * 100 + seq))
                     )
             except Exception as exc:
                 errors.append(exc)

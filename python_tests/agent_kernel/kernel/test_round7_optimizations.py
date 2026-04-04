@@ -28,9 +28,7 @@ class TestMetricsHookAdmissionDispatch:
 
         hook = MetricsObservabilityHook()
         # Should not raise even without OTel.
-        hook.on_admission_evaluated(
-            run_id="r1", action_id="a1", admitted=True, latency_ms=5
-        )
+        hook.on_admission_evaluated(run_id="r1", action_id="a1", admitted=True, latency_ms=5)
 
     def test_on_dispatch_attempted_no_op_without_otel(self) -> None:
         from agent_kernel.runtime.observability_hooks import MetricsObservabilityHook
@@ -53,17 +51,13 @@ class TestMetricsHookAdmissionDispatch:
         from agent_kernel.runtime.observability_hooks import MetricsObservabilityHook
 
         hook = MetricsObservabilityHook()
-        hook.on_admission_evaluated(
-            run_id="r1", action_id="a1", admitted=False, latency_ms=3
-        )
+        hook.on_admission_evaluated(run_id="r1", action_id="a1", admitted=False, latency_ms=3)
 
     def test_logging_hook_on_admission_evaluated_unchanged(self) -> None:
         from agent_kernel.runtime.observability_hooks import LoggingObservabilityHook
 
         hook = LoggingObservabilityHook(use_json=True, logger_name="test_r7a")
-        hook.on_admission_evaluated(
-            run_id="r1", action_id="a1", admitted=True, latency_ms=2
-        )
+        hook.on_admission_evaluated(run_id="r1", action_id="a1", admitted=True, latency_ms=2)
         hook.on_dispatch_attempted(
             run_id="r1", action_id="a1", dedupe_outcome="accepted", latency_ms=8
         )

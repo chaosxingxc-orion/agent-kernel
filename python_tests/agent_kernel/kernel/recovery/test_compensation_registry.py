@@ -59,7 +59,6 @@ def _make_recovery_input(
 
 
 class TestCompensationRegistry:
-
     def test_empty_registry_has_no_handlers(self) -> None:
         registry = CompensationRegistry()
         assert registry.lookup("compensatable_write") is None
@@ -171,7 +170,6 @@ class TestCompensationRegistry:
 
 
 class TestPlannedRecoveryGateServiceWithRegistry:
-
     def test_no_registry_passes_through_compensation_decision(self) -> None:
         """Without a registry the gate never validates compensation handlers."""
         gate = PlannedRecoveryGateService()

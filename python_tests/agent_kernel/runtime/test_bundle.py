@@ -121,9 +121,7 @@ class _Session:
 
 def test_bundle_defaults_to_in_memory_event_log_backend() -> None:
     """Bundle should keep in-memory event log backend by default."""
-    bundle = AgentKernelRuntimeBundle.build_minimal_complete(
-        temporal_client=_FakeTemporalClient()
-    )
+    bundle = AgentKernelRuntimeBundle.build_minimal_complete(temporal_client=_FakeTemporalClient())
 
     assert isinstance(bundle.event_log, InMemoryKernelRuntimeEventLog)
     assert isinstance(bundle.dedupe_store, InMemoryDedupeStore)
@@ -221,9 +219,7 @@ def test_bundle_builds_complete_set_and_routes_start_and_signal() -> None:
         context_ref=None,
     )
 
-    response = asyncio.run(
-        bundle.facade.start_run(start_request)
-    )
+    response = asyncio.run(bundle.facade.start_run(start_request))
     assert response.run_id == "session-bundle-1:research"
     assert response.temporal_workflow_id == "run:session-bundle-1:research"
     asyncio.run(
@@ -242,9 +238,7 @@ def test_bundle_builds_complete_set_and_routes_start_and_signal() -> None:
         )
     )
 
-    asyncio.run(
-        bundle.facade.signal_run(signal_request)
-    )
+    asyncio.run(bundle.facade.signal_run(signal_request))
 
     handle = client.get_workflow_handle("run:session-bundle-1:research")
     assert len(handle.signal_calls) == 1
@@ -296,9 +290,7 @@ def test_bundle_honors_custom_temporal_prefix_and_task_queue_on_start() -> None:
         session=_Session("session-bundle-2"),
         context_ref=None,
     )
-    response = asyncio.run(
-        bundle.facade.start_run(start_request)
-    )
+    response = asyncio.run(bundle.facade.start_run(start_request))
 
     assert response.run_id == "session-bundle-2:research"
     assert response.temporal_workflow_id == "custom-prefix:session-bundle-2:research"
@@ -337,9 +329,7 @@ def test_bundle_allows_disabling_strict_mode_for_run_actor_dependencies() -> Non
 
 def test_bundle_creates_temporal_worker_with_bundle_dependencies() -> None:
     """Bundle should produce Temporal worker wired with bundle dependency bundle."""
-    bundle = AgentKernelRuntimeBundle.build_minimal_complete(
-        temporal_client=_FakeTemporalClient()
-    )
+    bundle = AgentKernelRuntimeBundle.build_minimal_complete(temporal_client=_FakeTemporalClient())
     client = object()
     worker = bundle.create_temporal_worker(
         client=client,

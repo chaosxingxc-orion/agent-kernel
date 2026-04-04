@@ -166,9 +166,7 @@ class TestTurnEngineRegisterPhase:
 
         _TestEngine._TURN_PHASES = TurnEngine._TURN_PHASES
         with pytest.raises(TypeError):
-            _TestEngine.register_phase(
-                "_phase_x", after="_phase_snapshot", before="_phase_execute"
-            )
+            _TestEngine.register_phase("_phase_x", after="_phase_snapshot", before="_phase_execute")
 
 
 # ---------------------------------------------------------------------------
@@ -231,9 +229,7 @@ class TestNewObservabilityHooks:
         # Should not raise even without OTel installed.
         hook.on_dedupe_hit(run_id="r", action_id="a", outcome="accepted")
         hook.on_reflection_round(run_id="r", action_id="a", round_num=0, corrected=False)
-        hook.on_circuit_breaker_trip(
-            run_id="r", effect_class="fx", failure_count=1, tripped=False
-        )
+        hook.on_circuit_breaker_trip(run_id="r", effect_class="fx", failure_count=1, tripped=False)
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +284,7 @@ class TestGateDedupeStoreAutoInject:
         class _StaticPlanner:
             def build_plan_from_input(self, input_value):
                 from agent_kernel.kernel.recovery.planner import RecoveryPlan
+
                 return RecoveryPlan(
                     run_id=input_value.run_id,
                     action="schedule_compensation",
@@ -350,9 +347,7 @@ class TestTurnTraceDedupOutcome:
     def test_turn_trace_dedupe_outcome_degraded(self) -> None:
         from agent_kernel.kernel.event_export import _infer_dedupe_outcome
 
-        assert (
-            _infer_dedupe_outcome(["turn.dispatched", "turn.dedupe_degraded"]) == "degraded"
-        )
+        assert _infer_dedupe_outcome(["turn.dispatched", "turn.dedupe_degraded"]) == "degraded"
 
     def test_turn_trace_dedupe_outcome_duplicate(self) -> None:
         from agent_kernel.kernel.event_export import _infer_dedupe_outcome
@@ -397,6 +392,7 @@ class TestCircuitBreakerTripHook:
         class _AbortPlanner:
             def build_plan_from_input(self, input_value):
                 from agent_kernel.kernel.recovery.planner import RecoveryPlan
+
                 return RecoveryPlan(
                     run_id=input_value.run_id,
                     action="abort_run",

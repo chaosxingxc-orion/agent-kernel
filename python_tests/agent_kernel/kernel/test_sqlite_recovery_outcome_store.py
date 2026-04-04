@@ -95,4 +95,3 @@ def test_sqlite_recovery_outcome_store_latest_for_run_uses_newest_written_at(tmp
         assert latest.outcome_state == "executed"
     finally:
         store.close()
-

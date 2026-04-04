@@ -228,9 +228,7 @@ class TestBackwardCompatibility:
     def test_explicit_action_dispatches_without_reasoning_loop(self) -> None:
         """Passing an explicit Action without a loop should dispatch normally."""
         engine = _make_turn_engine(reasoning_loop=None)
-        result = asyncio.run(
-            engine.run_turn(_make_turn_input(), action=_make_action())
-        )
+        result = asyncio.run(engine.run_turn(_make_turn_input(), action=_make_action()))
         assert result.outcome_kind == "dispatched"
         assert result.state == "dispatch_acknowledged"
 
@@ -251,9 +249,7 @@ class TestBackwardCompatibility:
             output_parser=ToolCallOutputParser(),
         )
         engine = _make_turn_engine(reasoning_loop=loop)
-        result = asyncio.run(
-            engine.run_turn(_make_turn_input(), action=_make_action())
-        )
+        result = asyncio.run(engine.run_turn(_make_turn_input(), action=_make_action()))
         # The loop context port should NOT be called when an action is supplied.
         assert called == []
         assert result.outcome_kind == "dispatched"
@@ -261,8 +257,6 @@ class TestBackwardCompatibility:
     def test_reasoning_state_not_in_events_when_action_provided(self) -> None:
         """'reasoning' state should NOT appear when an explicit action is provided."""
         engine = _make_turn_engine(reasoning_loop=None)
-        result = asyncio.run(
-            engine.run_turn(_make_turn_input(), action=_make_action())
-        )
+        result = asyncio.run(engine.run_turn(_make_turn_input(), action=_make_action()))
         states = [e.state for e in result.emitted_events]
         assert "reasoning" not in states

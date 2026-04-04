@@ -180,8 +180,7 @@ class BranchMonitor:
         """
         state = self._branches[action_id]
         return (
-            state.budget_consumed_ratio >= _DEAD_LOOP_RATIO_THRESHOLD
-            and not state.output_produced
+            state.budget_consumed_ratio >= _DEAD_LOOP_RATIO_THRESHOLD and not state.output_produced
         )
 
     def build_script_failure_evidence(
@@ -212,8 +211,7 @@ class BranchMonitor:
         """
         state = self._branches[action_id]
         suspected_dead_loop = (
-            state.budget_consumed_ratio >= _DEAD_LOOP_RATIO_THRESHOLD
-            and not state.output_produced
+            state.budget_consumed_ratio >= _DEAD_LOOP_RATIO_THRESHOLD and not state.output_produced
         )
 
         failure_kind: Literal[

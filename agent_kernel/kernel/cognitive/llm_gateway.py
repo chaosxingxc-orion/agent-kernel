@@ -93,7 +93,7 @@ def _parse_retry_after(response: Any) -> float | None:
         return None
     try:
         return float(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -439,20 +439,18 @@ class OpenAILLMGateway(BaseLLMGateway):
 
         raw_text = message.content or ""
         finish_reason_raw = choice.finish_reason or "stop"
-        finish_reason: Any = finish_reason_raw if finish_reason_raw in (
-            "stop", "tool_calls", "length"
-        ) else "stop"
+        finish_reason: Any = (
+            finish_reason_raw if finish_reason_raw in ("stop", "tool_calls", "length") else "stop"
+        )
 
         tool_calls: list[dict[str, Any]] = []
         if message.tool_calls:
             for tc in message.tool_calls:
                 try:
                     arguments = json.loads(tc.function.arguments)
-                except (json.JSONDecodeError, TypeError):
+                except json.JSONDecodeError, TypeError:
                     arguments = {}
-                tool_calls.append(
-                    {"id": tc.id, "name": tc.function.name, "arguments": arguments}
-                )
+                tool_calls.append({"id": tc.id, "name": tc.function.name, "arguments": arguments})
 
         usage: dict[str, int] = {}
         token_usage: TokenUsage | None = None

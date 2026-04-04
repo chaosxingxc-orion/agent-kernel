@@ -201,7 +201,9 @@ def make_turn_result(
     )
 
 
-def build_workflow(turn_engine: Any | None = None) -> tuple[
+def build_workflow(
+    turn_engine: Any | None = None,
+) -> tuple[
     RunActorWorkflow,
     AsyncMock,
     AsyncMock,
@@ -262,9 +264,7 @@ def test_workflow_uses_explicit_offsets_for_catch_up_and_readiness() -> None:
     projection.readiness.return_value = True
     deduper.seen.return_value = False
 
-    asyncio.run(
-        workflow.process_action_commit(make_commit(7))
-    )
+    asyncio.run(workflow.process_action_commit(make_commit(7)))
 
     projection.catch_up.assert_awaited_once_with("run-1", 7)
     projection.readiness.assert_awaited_once_with("run-1", 7)
@@ -291,9 +291,7 @@ def test_workflow_marks_decision_fingerprint_before_execute() -> None:
     )
     deduper.seen.return_value = False
 
-    asyncio.run(
-        workflow.process_action_commit(make_commit(9))
-    )
+    asyncio.run(workflow.process_action_commit(make_commit(9)))
 
     deduper.mark.assert_awaited_once()
     executor.execute.assert_awaited_once()
@@ -336,9 +334,7 @@ def test_workflow_persists_dispatched_turn_outcome_without_derived_executor_even
         "acknowledged": True,
     }
 
-    asyncio.run(
-        workflow.process_action_commit(make_commit(22))
-    )
+    asyncio.run(workflow.process_action_commit(make_commit(22)))
 
     event_log.append_action_commit.assert_awaited_once()
     appended_turn_commit = event_log.append_action_commit.await_args.args[0]
@@ -348,8 +344,7 @@ def test_workflow_persists_dispatched_turn_outcome_without_derived_executor_even
     assert appended_turn_commit.events[0].payload_json["outcome_kind"] == "dispatched"
     assert appended_turn_commit.events[0].payload_json["host_kind"] == "local_cli"
     assert (
-        appended_turn_commit.events[0].payload_json["emitted_states"][-1]
-        == "dispatch_acknowledged"
+        appended_turn_commit.events[0].payload_json["emitted_states"][-1] == "dispatch_acknowledged"
     )
     assert "remote_policy_decision" not in appended_turn_commit.events[0].payload_json
     assert "derived_events" not in appended_turn_commit.events[0].payload_json
@@ -447,9 +442,7 @@ def test_workflow_strict_mode_noops_when_declarative_digest_missing() -> None:
     deduper.seen.return_value = False
 
     asyncio.run(
-        workflow.process_action_commit(
-            make_commit(25, include_declarative_bundle_digest=False)
-        )
+        workflow.process_action_commit(make_commit(25, include_declarative_bundle_digest=False))
     )
 
     event_log.append_action_commit.assert_awaited_once()
@@ -493,9 +486,7 @@ def test_workflow_allows_missing_declarative_digest_when_strict_mode_disabled() 
     executor.execute.return_value = {"acknowledged": True}
 
     asyncio.run(
-        workflow.process_action_commit(
-            make_commit(25, include_declarative_bundle_digest=False)
-        )
+        workflow.process_action_commit(make_commit(25, include_declarative_bundle_digest=False))
     )
 
     event_log.append_action_commit.assert_awaited_once()
@@ -567,13 +558,11 @@ def test_workflow_canonical_path_combines_remote_policy_and_strict_digest(
     if include_declarative_bundle_digest:
         assert payload["host_kind"] == "remote_service"
         assert payload["remote_policy_decision"] is not None
-        assert (
-            payload["remote_policy_decision"]["effective_idempotency_level"]
-            == ("guaranteed" if include_verified_remote_contract else "best_effort")
+        assert payload["remote_policy_decision"]["effective_idempotency_level"] == (
+            "guaranteed" if include_verified_remote_contract else "best_effort"
         )
-        assert (
-            payload["remote_policy_decision"]["default_retry_policy"]
-            == ("bounded_retry" if include_verified_remote_contract else "no_auto_retry")
+        assert payload["remote_policy_decision"]["default_retry_policy"] == (
+            "bounded_retry" if include_verified_remote_contract else "no_auto_retry"
         )
         assert payload["remote_policy_decision"]["auto_retry_enabled"] == (
             include_verified_remote_contract
@@ -667,9 +656,7 @@ def test_workflow_skips_duplicate_decision_fingerprint() -> None:
     projection.readiness.return_value = True
     deduper.seen.return_value = True
 
-    asyncio.run(
-        workflow.process_action_commit(make_commit(9))
-    )
+    asyncio.run(workflow.process_action_commit(make_commit(9)))
 
     executor.execute.assert_not_awaited()
 
@@ -697,9 +684,7 @@ def test_workflow_routes_execution_failures_to_recovery_gate() -> None:
     deduper.seen.return_value = False
 
     with pytest.raises(RuntimeError, match="tool timeout"):
-        asyncio.run(
-            workflow.process_action_commit(make_commit(12))
-        )
+        asyncio.run(workflow.process_action_commit(make_commit(12)))
 
     recovery.decide.assert_awaited_once()
 
@@ -732,28 +717,13 @@ def test_workflow_appends_abort_recovery_event_after_failure() -> None:
     )
 
     with pytest.raises(RuntimeError, match="tool timeout"):
-        asyncio.run(
-            workflow.process_action_commit(make_commit(12))
-        )
+        asyncio.run(workflow.process_action_commit(make_commit(12)))
 
-    appended_recovery_commit = (
-        event_log.append_action_commit.await_args.args[0]
-    )
+    appended_recovery_commit = event_log.append_action_commit.await_args.args[0]
     assert appended_recovery_commit.run_id == "run-1"
-    assert (
-        appended_recovery_commit.events[-1].event_type
-        == "run.recovery_aborted"
-    )
-    assert (
-        appended_recovery_commit.events[-1].payload_json["mode"]
-        == "abort"
-    )
-    assert (
-        appended_recovery_commit.events[-1].payload_json[
-            "reason"
-        ]
-        == "fatal"
-    )
+    assert appended_recovery_commit.events[-1].event_type == "run.recovery_aborted"
+    assert appended_recovery_commit.events[-1].payload_json["mode"] == "abort"
+    assert appended_recovery_commit.events[-1].payload_json["reason"] == "fatal"
 
 
 def test_workflow_appends_human_escalation_event_after_failure() -> None:
@@ -784,29 +754,12 @@ def test_workflow_appends_human_escalation_event_after_failure() -> None:
     )
 
     with pytest.raises(RuntimeError, match="tool timeout"):
-        asyncio.run(
-            workflow.process_action_commit(make_commit(14))
-        )
+        asyncio.run(workflow.process_action_commit(make_commit(14)))
 
-    appended_recovery_commit = (
-        event_log.append_action_commit.await_args.args[0]
-    )
-    assert (
-        appended_recovery_commit.events[-1].event_type
-        == "run.waiting_external"
-    )
-    assert (
-        appended_recovery_commit.events[-1].payload_json[
-            "mode"
-        ]
-        == "human_escalation"
-    )
-    assert (
-        appended_recovery_commit.events[-1].payload_json[
-            "reason"
-        ]
-        == "needs_operator"
-    )
+    appended_recovery_commit = event_log.append_action_commit.await_args.args[0]
+    assert appended_recovery_commit.events[-1].event_type == "run.waiting_external"
+    assert appended_recovery_commit.events[-1].payload_json["mode"] == "human_escalation"
+    assert appended_recovery_commit.events[-1].payload_json["reason"] == "needs_operator"
 
 
 def test_workflow_writes_recovery_outcome_after_failure_recovery_decision() -> None:
@@ -962,9 +915,7 @@ def test_run_returns_aborted_when_projection_state_is_aborted() -> None:
         ready_for_dispatch=False,
     )
 
-    result = asyncio.run(
-        workflow.run(RunInput(run_id="run-1"))
-    )
+    result = asyncio.run(workflow.run(RunInput(run_id="run-1")))
 
     assert result == {
         "run_id": "run-1",
@@ -987,9 +938,7 @@ def test_run_with_parent_run_id_signals_parent_when_temporal_context_is_active()
     projection.get.return_value = make_projection(2)
     parent_handle = AsyncMock()
     temporal_workflow_stub = Mock()
-    temporal_workflow_stub.get_external_workflow_handle.return_value = (
-        parent_handle
-    )
+    temporal_workflow_stub.get_external_workflow_handle.return_value = parent_handle
 
     with (
         patch.object(
@@ -1016,9 +965,7 @@ def test_run_with_parent_run_id_signals_parent_when_temporal_context_is_active()
         "run_id": "child-run-1",
         "final_state": "completed",
     }
-    temporal_workflow_stub.get_external_workflow_handle.assert_called_once_with(
-        "run:parent-run-1"
-    )
+    temporal_workflow_stub.get_external_workflow_handle.assert_called_once_with("run:parent-run-1")
     parent_handle.signal.assert_awaited_once_with(
         "signal",
         {
@@ -1058,9 +1005,7 @@ def test_run_without_parent_run_id_does_not_signal_parent_workflow() -> None:
             temporal_workflow_stub,
         ),
     ):
-        result = asyncio.run(
-            workflow.run(RunInput(run_id="run-no-parent"))
-        )
+        result = asyncio.run(workflow.run(RunInput(run_id="run-no-parent")))
 
     assert result == {
         "run_id": "run-no-parent",
@@ -1141,19 +1086,12 @@ def test_signal_appends_commit_and_triggers_one_authoritative_round() -> None:
     )
 
     event_log.append_action_commit.assert_awaited_once()
-    appended_commit = (
-        event_log.append_action_commit.await_args.args[0]
-    )
+    appended_commit = event_log.append_action_commit.await_args.args[0]
     assert appended_commit.run_id == "run-1"
     assert appended_commit.action is None
     assert appended_commit.caused_by == "callback-1"
-    assert (
-        appended_commit.events[0].event_type
-        == "signal.external_callback"
-    )
-    assert (
-        appended_commit.events[0].wake_policy == "wake_actor"
-    )
+    assert appended_commit.events[0].event_type == "signal.external_callback"
+    assert appended_commit.events[0].wake_policy == "wake_actor"
     projection.catch_up.assert_awaited_once_with("run-1", 7)
     projection.readiness.assert_awaited_once_with("run-1", 7)
     deduper.mark.assert_awaited_once()
@@ -1429,13 +1367,8 @@ def test_resume_signal_is_encoded_as_resume_event_type() -> None:
         )
     )
 
-    appended_commit = (
-        event_log.append_action_commit.await_args.args[0]
-    )
-    assert (
-        appended_commit.events[0].event_type
-        == "run.resume_requested"
-    )
+    appended_commit = event_log.append_action_commit.await_args.args[0]
+    assert appended_commit.events[0].event_type == "run.resume_requested"
 
 
 def test_cancel_signal_is_encoded_as_cancel_requested_event_type() -> None:
@@ -1468,13 +1401,8 @@ def test_cancel_signal_is_encoded_as_cancel_requested_event_type() -> None:
         )
     )
 
-    appended_commit = (
-        event_log.append_action_commit.await_args.args[0]
-    )
-    assert (
-        appended_commit.events[0].event_type
-        == "run.cancel_requested"
-    )
+    appended_commit = event_log.append_action_commit.await_args.args[0]
+    assert appended_commit.events[0].event_type == "run.cancel_requested"
 
 
 def test_timeout_signal_is_encoded_as_waiting_external_with_timeout_reason() -> None:
@@ -1576,13 +1504,8 @@ def test_recovery_succeeded_signal_is_encoded_as_ready_transition_event() -> Non
         )
     )
 
-    appended_commit = (
-        event_log.append_action_commit.await_args.args[0]
-    )
-    assert (
-        appended_commit.events[0].event_type
-        == "run.recovery_succeeded"
-    )
+    appended_commit = event_log.append_action_commit.await_args.args[0]
+    assert appended_commit.events[0].event_type == "run.recovery_succeeded"
 
 
 def test_recovery_aborted_signal_is_encoded_as_abort_transition_event() -> None:
@@ -1613,13 +1536,8 @@ def test_recovery_aborted_signal_is_encoded_as_abort_transition_event() -> None:
         )
     )
 
-    appended_commit = (
-        event_log.append_action_commit.await_args.args[0]
-    )
-    assert (
-        appended_commit.events[0].event_type
-        == "run.recovery_aborted"
-    )
+    appended_commit = event_log.append_action_commit.await_args.args[0]
+    assert appended_commit.events[0].event_type == "run.recovery_aborted"
 
 
 def test_cancel_terminal_invariant_blocks_recovery_succeeded_and_callback_signals() -> None:
@@ -1639,11 +1557,7 @@ def test_cancel_terminal_invariant_blocks_recovery_succeeded_and_callback_signal
         deduper=deduper,
     )
 
-    asyncio.run(
-        workflow.run(
-            RunInput(run_id="run-cancel-terminal-1")
-        )
-    )
+    asyncio.run(workflow.run(RunInput(run_id="run-cancel-terminal-1")))
     asyncio.run(
         workflow.signal(
             ActorSignal(
@@ -1701,11 +1615,7 @@ def test_cancel_terminal_invariant_blocks_recovery_aborted_and_callback_signals(
         deduper=deduper,
     )
 
-    asyncio.run(
-        workflow.run(
-            RunInput(run_id="run-cancel-terminal-2")
-        )
-    )
+    asyncio.run(workflow.run(RunInput(run_id="run-cancel-terminal-2")))
     asyncio.run(
         workflow.signal(
             ActorSignal(

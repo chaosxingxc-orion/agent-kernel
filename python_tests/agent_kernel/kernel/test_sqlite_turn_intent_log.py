@@ -121,4 +121,3 @@ def test_sqlite_turn_intent_log_latest_by_written_at(tmp_path) -> None:
         assert latest.intent_commit_ref == "intent:action-2:11"
     finally:
         store.close()
-

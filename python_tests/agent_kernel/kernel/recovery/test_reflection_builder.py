@@ -51,9 +51,7 @@ def _make_base_context(
                 input_schema={"type": "object"},
             ),
         ),
-        skill_definitions=(
-            SkillSummary(skill_id="skill-1", description="A skill"),
-        ),
+        skill_definitions=(SkillSummary(skill_id="skill-1", description="A skill"),),
         history=({"role": "user", "content": "hello"},),
         current_state={"turn": 2},
         memory_ref="mem-ref-1",

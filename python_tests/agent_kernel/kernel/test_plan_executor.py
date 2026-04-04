@@ -122,9 +122,7 @@ class TestSequentialPlan:
     async def test_sequential_all_succeed(self) -> None:
         """All 3 steps succeed — PlanResult has 3 succeeded, 0 failed."""
         actions = [_make_action(f"a{i}") for i in range(3)]
-        runner = _RecordingRunner(
-            results=[_success_turn_result(a.action_id) for a in actions]
-        )
+        runner = _RecordingRunner(results=[_success_turn_result(a.action_id) for a in actions])
         executor = PlanExecutor(runner)
 
         plan = SequentialPlan(steps=tuple(actions))
@@ -141,9 +139,7 @@ class TestSequentialPlan:
     async def test_sequential_calls_in_order(self) -> None:
         """Steps are invoked in declaration order."""
         actions = [_make_action(f"a{i}") for i in range(3)]
-        runner = _RecordingRunner(
-            results=[_success_turn_result(a.action_id) for a in actions]
-        )
+        runner = _RecordingRunner(results=[_success_turn_result(a.action_id) for a in actions])
         executor = PlanExecutor(runner)
 
         await executor.execute_plan(SequentialPlan(steps=tuple(actions)), run_id="run-1")
@@ -163,9 +159,7 @@ class TestSequentialPlan:
         )
         executor = PlanExecutor(runner)
 
-        result = await executor.execute_plan(
-            SequentialPlan(steps=tuple(actions)), run_id="run-1"
-        )
+        result = await executor.execute_plan(SequentialPlan(steps=tuple(actions)), run_id="run-1")
 
         assert result.succeeded == 2
         assert result.failed == 1
@@ -178,9 +172,7 @@ class TestSequentialPlan:
         runner = _RecordingRunner(results=[_noop_turn_result("a0")])
         executor = PlanExecutor(runner)
 
-        result = await executor.execute_plan(
-            SequentialPlan(steps=(action,)), run_id="run-1"
-        )
+        result = await executor.execute_plan(SequentialPlan(steps=(action,)), run_id="run-1")
 
         assert result.succeeded == 1
         assert result.failed == 0
@@ -194,9 +186,7 @@ class TestSequentialPlan:
             raise RuntimeError("boom")
 
         executor = PlanExecutor(raising_runner)
-        result = await executor.execute_plan(
-            SequentialPlan(steps=(action,)), run_id="run-1"
-        )
+        result = await executor.execute_plan(SequentialPlan(steps=(action,)), run_id="run-1")
 
         assert result.failed == 1
         assert result.succeeded == 0
@@ -552,9 +542,7 @@ class TestBranchMonitorIntegration:
             join_strategy="all",
             group_idempotency_key="grp-no-monitor",
         )
-        result = await executor.execute_plan(
-            ParallelPlan(groups=(group,)), run_id="run-1"
-        )
+        result = await executor.execute_plan(ParallelPlan(groups=(group,)), run_id="run-1")
         assert result.all_succeeded is True
 
 

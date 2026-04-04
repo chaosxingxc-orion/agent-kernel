@@ -57,7 +57,6 @@ def _make_script_input() -> ScriptActivityInput:
 
 
 class TestExecuteInferenceOnGateway:
-
     def test_raises_when_no_inference_callable_registered(self) -> None:
         gw = TemporalSDKActivityGateway(_bindings_no_cognitive())
         with pytest.raises(RuntimeError, match="inference_activity"):
@@ -121,7 +120,6 @@ class TestExecuteInferenceOnGateway:
 
 
 class TestExecuteSkillScriptOnGateway:
-
     def test_raises_when_no_script_callable_registered(self) -> None:
         gw = TemporalSDKActivityGateway(_bindings_no_cognitive())
         with pytest.raises(RuntimeError, match="script_activity"):

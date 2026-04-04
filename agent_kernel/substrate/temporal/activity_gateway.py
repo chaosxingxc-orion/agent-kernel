@@ -36,10 +36,12 @@ AdmissionActivityCallable = Callable[
     AdmissionResult | Awaitable[AdmissionResult],
 ]
 ToolActivityCallable = Callable[
-    [ToolActivityInput], Any | Awaitable[Any],
+    [ToolActivityInput],
+    Any | Awaitable[Any],
 ]
 MCPActivityCallable = Callable[
-    [MCPActivityInput], Any | Awaitable[Any],
+    [MCPActivityInput],
+    Any | Awaitable[Any],
 ]
 VerificationActivityCallable = Callable[
     [VerificationActivityInput],
@@ -51,10 +53,12 @@ ReconciliationActivityCallable = Callable[
 ]
 MCPHandlerKey = tuple[str, str]
 InferenceActivityCallable = Callable[
-    [InferenceActivityInput], ModelOutput | Awaitable[ModelOutput],
+    [InferenceActivityInput],
+    ModelOutput | Awaitable[ModelOutput],
 ]
 ScriptActivityCallable = Callable[
-    [ScriptActivityInput], ScriptResult | Awaitable[ScriptResult],
+    [ScriptActivityInput],
+    ScriptResult | Awaitable[ScriptResult],
 ]
 
 
@@ -116,12 +120,8 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         self,
         bindings: TemporalActivityBindings,
         *,
-        tool_handlers: (
-            Mapping[str, ToolActivityCallable] | None
-        ) = None,
-        mcp_handlers: (
-            Mapping[MCPHandlerKey, MCPActivityCallable] | None
-        ) = None,
+        tool_handlers: (Mapping[str, ToolActivityCallable] | None) = None,
+        mcp_handlers: (Mapping[MCPHandlerKey, MCPActivityCallable] | None) = None,
     ) -> None:
         """Initializes the gateway with bindings and explicit handlers.
 
@@ -131,12 +131,8 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
             mcp_handlers: Optional explicit MCP handler map.
         """
         self._bindings = bindings
-        self._tool_handlers: dict[str, ToolActivityCallable] = (
-            dict(tool_handlers or {})
-        )
-        self._mcp_handlers: dict[
-            MCPHandlerKey, MCPActivityCallable
-        ] = dict(mcp_handlers or {})
+        self._tool_handlers: dict[str, ToolActivityCallable] = dict(tool_handlers or {})
+        self._mcp_handlers: dict[MCPHandlerKey, MCPActivityCallable] = dict(mcp_handlers or {})
 
     def register_tool_handler(
         self,
@@ -230,7 +226,8 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
             Admission decision result from the activity.
         """
         return await self._invoke(
-            self._bindings.admission_activity, request,
+            self._bindings.admission_activity,
+            request,
         )
 
     async def execute_tool(
@@ -264,7 +261,8 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         """
         return await self._invoke(
             self.get_mcp_handler(
-                request.server_name, request.operation,
+                request.server_name,
+                request.operation,
             ),
             request,
         )
@@ -282,7 +280,8 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
             Verification result from the activity.
         """
         return await self._invoke(
-            self._bindings.verification_activity, request,
+            self._bindings.verification_activity,
+            request,
         )
 
     async def execute_reconciliation(
@@ -298,7 +297,8 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
             Reconciliation result from the activity.
         """
         return await self._invoke(
-            self._bindings.reconciliation_activity, request,
+            self._bindings.reconciliation_activity,
+            request,
         )
 
     async def execute_inference(
@@ -318,8 +318,7 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         """
         if self._bindings.inference_activity is None:
             raise RuntimeError(
-                "No inference_activity callable registered in"
-                " TemporalActivityBindings."
+                "No inference_activity callable registered in TemporalActivityBindings."
             )
         return await self._invoke(self._bindings.inference_activity, request)
 
@@ -340,8 +339,7 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         """
         if self._bindings.script_activity is None:
             raise RuntimeError(
-                "No script_activity callable registered in"
-                " TemporalActivityBindings."
+                "No script_activity callable registered in TemporalActivityBindings."
             )
         return await self._invoke(self._bindings.script_activity, request)
 

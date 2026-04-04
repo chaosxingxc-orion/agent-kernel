@@ -493,9 +493,7 @@ class TestReflectionIdempotencyKey:
                 received_keys.append(idempotency_key)
                 return ModelOutput(
                     raw_text="",
-                    tool_calls=[
-                        {"id": "cap-1", "name": "corrected_tool", "arguments": {}}
-                    ],
+                    tool_calls=[{"id": "cap-1", "name": "corrected_tool", "arguments": {}}],
                     finish_reason="tool_calls",
                     usage={},
                 )
@@ -520,8 +518,7 @@ class TestReflectionIdempotencyKey:
         assert len(received_keys) == 1
         key = received_keys[0]
         expected = (
-            f"{recovery_input.run_id}:{recovery_input.projection.projected_offset}"
-            f":reflection:1"
+            f"{recovery_input.run_id}:{recovery_input.projection.projected_offset}:reflection:1"
         )
         assert key == expected, f"Expected deterministic key {expected!r}, got {key!r}"
 
@@ -541,9 +538,7 @@ class TestReflectionIdempotencyKey:
                 received_keys.append(idempotency_key)
                 return ModelOutput(
                     raw_text="",
-                    tool_calls=[
-                        {"id": "cap-x", "name": "corrected_tool", "arguments": {}}
-                    ],
+                    tool_calls=[{"id": "cap-x", "name": "corrected_tool", "arguments": {}}],
                     finish_reason="tool_calls",
                     usage={},
                 )

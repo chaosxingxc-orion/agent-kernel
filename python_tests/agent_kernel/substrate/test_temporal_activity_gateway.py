@@ -174,12 +174,8 @@ def test_activity_gateway_raises_for_unregistered_tool_handler() -> None:
             ),
             tool_activity=lambda _payload: None,
             mcp_activity=lambda _payload: None,
-            verification_activity=lambda payload: (
-                {"verified": payload.verification_kind}
-            ),
-            reconciliation_activity=lambda payload: (
-                {"expected": payload.expected_state}
-            ),
+            verification_activity=lambda payload: ({"verified": payload.verification_kind}),
+            reconciliation_activity=lambda payload: ({"expected": payload.expected_state}),
         )
     )
 
@@ -209,12 +205,8 @@ def test_activity_gateway_raises_for_unregistered_mcp_handler() -> None:
             ),
             tool_activity=lambda _payload: None,
             mcp_activity=lambda _payload: None,
-            verification_activity=lambda payload: (
-                {"verified": payload.verification_kind}
-            ),
-            reconciliation_activity=lambda payload: (
-                {"expected": payload.expected_state}
-            ),
+            verification_activity=lambda payload: ({"verified": payload.verification_kind}),
+            reconciliation_activity=lambda payload: ({"expected": payload.expected_state}),
         )
     )
 
@@ -233,4 +225,3 @@ def test_activity_gateway_raises_for_unregistered_mcp_handler() -> None:
                 )
             )
         )
-

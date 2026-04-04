@@ -66,9 +66,7 @@ class TestToolCallOutputParser:
     def test_parse_action_run_id_populated(self) -> None:
         """parse() should set action.run_id from the run_id parameter."""
         parser = ToolCallOutputParser()
-        output = _make_output(
-            tool_calls=[{"id": "tc-1", "name": "fetch", "arguments": {}}]
-        )
+        output = _make_output(tool_calls=[{"id": "tc-1", "name": "fetch", "arguments": {}}])
 
         result = parser.parse(output, "run-99")
 
@@ -77,9 +75,7 @@ class TestToolCallOutputParser:
     def test_parse_action_type_from_tool_name(self) -> None:
         """action_type should equal the tool_call name."""
         parser = ToolCallOutputParser()
-        output = _make_output(
-            tool_calls=[{"id": "tc-1", "name": "write_file", "arguments": {}}]
-        )
+        output = _make_output(tool_calls=[{"id": "tc-1", "name": "write_file", "arguments": {}}])
 
         result = parser.parse(output, "run-1")
 
@@ -88,9 +84,7 @@ class TestToolCallOutputParser:
     def test_parse_action_id_prefixed_with_act(self) -> None:
         """action_id should be prefixed with 'act-' for named tool calls."""
         parser = ToolCallOutputParser()
-        output = _make_output(
-            tool_calls=[{"id": "tc-xyz", "name": "tool", "arguments": {}}]
-        )
+        output = _make_output(tool_calls=[{"id": "tc-xyz", "name": "tool", "arguments": {}}])
 
         result = parser.parse(output, "run-1")
 
@@ -99,9 +93,7 @@ class TestToolCallOutputParser:
     def test_parse_action_id_generated_when_no_id(self) -> None:
         """action_id should be auto-generated when tool_call has no id."""
         parser = ToolCallOutputParser()
-        output = _make_output(
-            tool_calls=[{"name": "tool", "arguments": {}}]
-        )
+        output = _make_output(tool_calls=[{"name": "tool", "arguments": {}}])
 
         result = parser.parse(output, "run-1")
 
@@ -110,9 +102,7 @@ class TestToolCallOutputParser:
     def test_parse_default_effect_class_is_read_only(self) -> None:
         """effect_class should default to 'read_only' for unknown tools."""
         parser = ToolCallOutputParser()
-        output = _make_output(
-            tool_calls=[{"id": "tc-1", "name": "unknown_tool", "arguments": {}}]
-        )
+        output = _make_output(tool_calls=[{"id": "tc-1", "name": "unknown_tool", "arguments": {}}])
 
         result = parser.parse(output, "run-1")
 
@@ -120,9 +110,7 @@ class TestToolCallOutputParser:
 
     def test_parse_effect_class_from_map(self) -> None:
         """effect_class should be resolved from tool_effect_class_map."""
-        parser = ToolCallOutputParser(
-            tool_effect_class_map={"write_file": "compensatable_write"}
-        )
+        parser = ToolCallOutputParser(tool_effect_class_map={"write_file": "compensatable_write"})
         output = _make_output(
             tool_calls=[{"id": "tc-1", "name": "write_file", "arguments": {"path": "/tmp/x"}}]
         )
@@ -135,9 +123,7 @@ class TestToolCallOutputParser:
         """input_json should be populated from tool_call arguments."""
         parser = ToolCallOutputParser()
         args = {"query": "hello", "limit": 10}
-        output = _make_output(
-            tool_calls=[{"id": "tc-1", "name": "search", "arguments": args}]
-        )
+        output = _make_output(tool_calls=[{"id": "tc-1", "name": "search", "arguments": args}])
 
         result = parser.parse(output, "run-1")
 
@@ -146,9 +132,7 @@ class TestToolCallOutputParser:
     def test_parse_input_json_none_when_arguments_not_dict(self) -> None:
         """input_json should be None when arguments is not a dict."""
         parser = ToolCallOutputParser()
-        output = _make_output(
-            tool_calls=[{"id": "tc-1", "name": "tool", "arguments": "bad"}]
-        )
+        output = _make_output(tool_calls=[{"id": "tc-1", "name": "tool", "arguments": "bad"}])
 
         result = parser.parse(output, "run-1")
 
@@ -173,9 +157,7 @@ class TestToolCallOutputParser:
     def test_parse_plan_returns_sequential_plan(self) -> None:
         """parse_plan() should return a SequentialPlan."""
         parser = ToolCallOutputParser()
-        output = _make_output(
-            tool_calls=[{"id": "tc-1", "name": "search", "arguments": {}}]
-        )
+        output = _make_output(tool_calls=[{"id": "tc-1", "name": "search", "arguments": {}}])
 
         result = parser.parse_plan(output, "run-1")
 
@@ -204,9 +186,7 @@ class TestJSONModeOutputParser:
     def test_parse_valid_json_returns_actions(self) -> None:
         """parse() should return Actions from a valid JSON array."""
         parser = JSONModeOutputParser()
-        payload = json.dumps([
-            {"action_type": "search", "effect_class": "read_only"}
-        ])
+        payload = json.dumps([{"action_type": "search", "effect_class": "read_only"}])
         output = _make_output(raw_text=payload)
 
         result = parser.parse(output, "run-1")
@@ -245,9 +225,7 @@ class TestJSONModeOutputParser:
     def test_parse_action_run_id_from_parameter(self) -> None:
         """parsed Actions should have run_id from the run_id parameter."""
         parser = JSONModeOutputParser()
-        payload = json.dumps([
-            {"action_type": "fetch", "effect_class": "read_only"}
-        ])
+        payload = json.dumps([{"action_type": "fetch", "effect_class": "read_only"}])
         output = _make_output(raw_text=payload)
 
         result = parser.parse(output, "run-77")
@@ -257,9 +235,7 @@ class TestJSONModeOutputParser:
     def test_parse_action_id_auto_generated(self) -> None:
         """action_id should be auto-generated when not provided."""
         parser = JSONModeOutputParser()
-        payload = json.dumps([
-            {"action_type": "fetch", "effect_class": "read_only"}
-        ])
+        payload = json.dumps([{"action_type": "fetch", "effect_class": "read_only"}])
         output = _make_output(raw_text=payload)
 
         result = parser.parse(output, "run-1")
@@ -269,9 +245,9 @@ class TestJSONModeOutputParser:
     def test_parse_action_id_used_when_provided(self) -> None:
         """action_id should be used from JSON when present."""
         parser = JSONModeOutputParser()
-        payload = json.dumps([
-            {"action_id": "my-action-1", "action_type": "fetch", "effect_class": "read_only"}
-        ])
+        payload = json.dumps(
+            [{"action_id": "my-action-1", "action_type": "fetch", "effect_class": "read_only"}]
+        )
         output = _make_output(raw_text=payload)
 
         result = parser.parse(output, "run-1")
@@ -281,13 +257,15 @@ class TestJSONModeOutputParser:
     def test_parse_input_json_populated(self) -> None:
         """input_json should be populated from the JSON payload."""
         parser = JSONModeOutputParser()
-        payload = json.dumps([
-            {
-                "action_type": "write",
-                "effect_class": "idempotent_write",
-                "input_json": {"path": "/tmp/x", "content": "hello"},
-            }
-        ])
+        payload = json.dumps(
+            [
+                {
+                    "action_type": "write",
+                    "effect_class": "idempotent_write",
+                    "input_json": {"path": "/tmp/x", "content": "hello"},
+                }
+            ]
+        )
         output = _make_output(raw_text=payload)
 
         result = parser.parse(output, "run-1")
@@ -297,13 +275,15 @@ class TestJSONModeOutputParser:
     def test_parse_interaction_target_populated(self) -> None:
         """interaction_target should be populated from the JSON payload."""
         parser = JSONModeOutputParser()
-        payload = json.dumps([
-            {
-                "action_type": "call_api",
-                "effect_class": "idempotent_write",
-                "interaction_target": "it_service",
-            }
-        ])
+        payload = json.dumps(
+            [
+                {
+                    "action_type": "call_api",
+                    "effect_class": "idempotent_write",
+                    "interaction_target": "it_service",
+                }
+            ]
+        )
         output = _make_output(raw_text=payload)
 
         result = parser.parse(output, "run-1")
@@ -313,13 +293,15 @@ class TestJSONModeOutputParser:
     def test_parse_invalid_interaction_target_ignored(self) -> None:
         """interaction_target should be None when value is not valid."""
         parser = JSONModeOutputParser()
-        payload = json.dumps([
-            {
-                "action_type": "call_api",
-                "effect_class": "read_only",
-                "interaction_target": "bogus_target",
-            }
-        ])
+        payload = json.dumps(
+            [
+                {
+                    "action_type": "call_api",
+                    "effect_class": "read_only",
+                    "interaction_target": "bogus_target",
+                }
+            ]
+        )
         output = _make_output(raw_text=payload)
 
         result = parser.parse(output, "run-1")
@@ -329,13 +311,15 @@ class TestJSONModeOutputParser:
     def test_parse_timeout_ms_populated(self) -> None:
         """timeout_ms should be populated from the JSON payload."""
         parser = JSONModeOutputParser()
-        payload = json.dumps([
-            {
-                "action_type": "fetch",
-                "effect_class": "read_only",
-                "timeout_ms": 5000,
-            }
-        ])
+        payload = json.dumps(
+            [
+                {
+                    "action_type": "fetch",
+                    "effect_class": "read_only",
+                    "timeout_ms": 5000,
+                }
+            ]
+        )
         output = _make_output(raw_text=payload)
 
         result = parser.parse(output, "run-1")
@@ -345,13 +329,15 @@ class TestJSONModeOutputParser:
     def test_parse_invalid_timeout_ms_ignored(self) -> None:
         """timeout_ms should be None when value is not a positive int."""
         parser = JSONModeOutputParser()
-        payload = json.dumps([
-            {
-                "action_type": "fetch",
-                "effect_class": "read_only",
-                "timeout_ms": -1,
-            }
-        ])
+        payload = json.dumps(
+            [
+                {
+                    "action_type": "fetch",
+                    "effect_class": "read_only",
+                    "timeout_ms": -1,
+                }
+            ]
+        )
         output = _make_output(raw_text=payload)
 
         result = parser.parse(output, "run-1")
@@ -361,10 +347,12 @@ class TestJSONModeOutputParser:
     def test_parse_item_missing_action_type_skipped(self) -> None:
         """Items missing action_type should be silently skipped."""
         parser = JSONModeOutputParser()
-        payload = json.dumps([
-            {"effect_class": "read_only"},
-            {"action_type": "valid_action", "effect_class": "read_only"},
-        ])
+        payload = json.dumps(
+            [
+                {"effect_class": "read_only"},
+                {"action_type": "valid_action", "effect_class": "read_only"},
+            ]
+        )
         output = _make_output(raw_text=payload)
 
         result = parser.parse(output, "run-1")
@@ -375,10 +363,12 @@ class TestJSONModeOutputParser:
     def test_parse_item_invalid_effect_class_skipped(self) -> None:
         """Items with invalid effect_class should be silently skipped."""
         parser = JSONModeOutputParser()
-        payload = json.dumps([
-            {"action_type": "tool", "effect_class": "totally_invalid"},
-            {"action_type": "valid_tool", "effect_class": "read_only"},
-        ])
+        payload = json.dumps(
+            [
+                {"action_type": "tool", "effect_class": "totally_invalid"},
+                {"action_type": "valid_tool", "effect_class": "read_only"},
+            ]
+        )
         output = _make_output(raw_text=payload)
 
         result = parser.parse(output, "run-1")
@@ -389,10 +379,12 @@ class TestJSONModeOutputParser:
     def test_parse_multiple_valid_items(self) -> None:
         """parse() should return one Action per valid JSON array element."""
         parser = JSONModeOutputParser()
-        payload = json.dumps([
-            {"action_type": "search", "effect_class": "read_only"},
-            {"action_type": "write", "effect_class": "compensatable_write"},
-        ])
+        payload = json.dumps(
+            [
+                {"action_type": "search", "effect_class": "read_only"},
+                {"action_type": "write", "effect_class": "compensatable_write"},
+            ]
+        )
         output = _make_output(raw_text=payload)
 
         result = parser.parse(output, "run-1")
@@ -402,9 +394,7 @@ class TestJSONModeOutputParser:
     def test_parse_plan_returns_sequential_plan(self) -> None:
         """parse_plan() should return a SequentialPlan."""
         parser = JSONModeOutputParser()
-        payload = json.dumps([
-            {"action_type": "search", "effect_class": "read_only"}
-        ])
+        payload = json.dumps([{"action_type": "search", "effect_class": "read_only"}])
         output = _make_output(raw_text=payload)
 
         result = parser.parse_plan(output, "run-1")
@@ -425,10 +415,12 @@ class TestJSONModeOutputParser:
     def test_parse_non_dict_array_item_skipped(self) -> None:
         """Non-dict items in the JSON array should be silently skipped."""
         parser = JSONModeOutputParser()
-        payload = json.dumps([
-            "a string item",
-            {"action_type": "fetch", "effect_class": "read_only"},
-        ])
+        payload = json.dumps(
+            [
+                "a string item",
+                {"action_type": "fetch", "effect_class": "read_only"},
+            ]
+        )
         output = _make_output(raw_text=payload)
 
         result = parser.parse(output, "run-1")

@@ -128,7 +128,7 @@ if TEMPORAL_AVAILABLE:
                 raw_expected_signals = input_json.get("expected_signals", 1)
             try:
                 expected_signals = max(1, int(raw_expected_signals))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 expected_signals = 1
 
             await temporal_workflow.wait_condition(
@@ -171,8 +171,7 @@ if TEMPORAL_AVAILABLE:
             if (
                 current_priority is not None
                 and incoming_priority is not None
-                and self._PRIORITY_RANK[incoming_priority]
-                < self._PRIORITY_RANK[current_priority]
+                and self._PRIORITY_RANK[incoming_priority] < self._PRIORITY_RANK[current_priority]
             ):
                 return
 
@@ -201,9 +200,7 @@ if TEMPORAL_AVAILABLE:
                 self._projection["waiting_external"] = True
                 self._projection["ready_for_dispatch"] = False
                 self._projection["recovery_mode"] = "human_escalation"
-                self._projection["recovery_reason"] = str(
-                    signal_payload.get("reason", "timeout")
-                )
+                self._projection["recovery_reason"] = str(signal_payload.get("reason", "timeout"))
                 return
 
             if incoming_priority == "external_callback":

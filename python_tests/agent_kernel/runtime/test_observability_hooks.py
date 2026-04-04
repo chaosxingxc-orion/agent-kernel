@@ -137,9 +137,7 @@ class TestLoggingObservabilityHookJSON:
 
     def test_admission_evaluated_json_fields(self) -> None:
         hook, handler = self._hook_and_handler()
-        hook.on_admission_evaluated(
-            run_id="run-5", action_id="act-5", admitted=True, latency_ms=5
-        )
+        hook.on_admission_evaluated(run_id="run-5", action_id="act-5", admitted=True, latency_ms=5)
         obj = self._parse(handler)
         assert obj["event"] == "admission_evaluated"
         assert obj["admitted"] is True

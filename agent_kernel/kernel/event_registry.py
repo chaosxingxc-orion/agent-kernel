@@ -411,6 +411,66 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
         authority="ObservabilityHook",
         affects_replay=False,
     ),
+    # --- Task lifecycle events (TaskManager layer) ---
+    EventTypeDescriptor(
+        event_type="task.registered",
+        description=(
+            "A new task descriptor was registered in TaskRegistry. "
+            "Emitted once per task_id at registration time."
+        ),
+        authority="TaskManager",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="task.attempt_started",
+        description=(
+            "A new run attempt was launched for a task. attempt_seq increments on each retry."
+        ),
+        authority="TaskManager",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="task.attempt_completed",
+        description="A run attempt for a task finished with outcome='completed'.",
+        authority="TaskManager",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="task.attempt_failed",
+        description=(
+            "A run attempt for a task finished with outcome='failed' or 'cancelled'. "
+            "RestartPolicyEngine will evaluate next action."
+        ),
+        authority="TaskManager",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="task.restarting",
+        description=(
+            "RestartPolicyEngine decided to retry; new run is being launched. "
+            "Task transitions to 'restarting' state."
+        ),
+        authority="TaskManager",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="task.reflecting",
+        description=(
+            "Retry budget exhausted; task is awaiting model reflection decision. "
+            "ReflectionBridge will construct LLM context."
+        ),
+        authority="TaskManager",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="task.completed",
+        description=(
+            "Task goal achieved; all active attempts are complete. "
+            "Terminal state — no further attempts will be made."
+        ),
+        authority="TaskManager",
+        affects_replay=True,
+    ),
 ]
 
 for _descriptor in _KERNEL_EVENTS:

@@ -623,8 +623,10 @@ class CompositeObservabilityHook:
         for hook in self.hooks:
             with contextlib.suppress(Exception):
                 hook.on_reflection_round(
-                    run_id=run_id, action_id=action_id,
-                    round_num=round_num, corrected=corrected,
+                    run_id=run_id,
+                    action_id=action_id,
+                    round_num=round_num,
+                    corrected=corrected,
                 )
 
     def on_circuit_breaker_trip(
@@ -634,8 +636,10 @@ class CompositeObservabilityHook:
         for hook in self.hooks:
             with contextlib.suppress(Exception):
                 hook.on_circuit_breaker_trip(
-                    run_id=run_id, effect_class=effect_class,
-                    failure_count=failure_count, tripped=tripped,
+                    run_id=run_id,
+                    effect_class=effect_class,
+                    failure_count=failure_count,
+                    tripped=tripped,
                 )
 
     def on_branch_rollback_triggered(
@@ -777,9 +781,7 @@ class OtelObservabilityHook:
         tracer = self._get_tracer()
         if tracer is None:
             return
-        with tracer.start_as_current_span(
-            "agent_kernel.run_transition"
-        ) as span:
+        with tracer.start_as_current_span("agent_kernel.run_transition") as span:
             if span.is_recording():
                 span.set_attribute("agent_kernel.run_id", run_id)
                 span.set_attribute("agent_kernel.from_state", from_state)
@@ -813,12 +815,8 @@ class OtelObservabilityHook:
                 span.set_attribute("agent_kernel.model_ref", model_ref)
                 span.set_attribute("agent_kernel.latency_ms", latency_ms)
                 if token_usage is not None:
-                    span.set_attribute(
-                        "agent_kernel.token_usage.input", token_usage.input_tokens
-                    )
-                    span.set_attribute(
-                        "agent_kernel.token_usage.output", token_usage.output_tokens
-                    )
+                    span.set_attribute("agent_kernel.token_usage.input", token_usage.input_tokens)
+                    span.set_attribute("agent_kernel.token_usage.output", token_usage.output_tokens)
                     span.set_attribute(
                         "agent_kernel.token_usage.reasoning",
                         token_usage.reasoning_tokens,
@@ -1019,9 +1017,7 @@ class OtelObservabilityHook:
         tracer = self._get_tracer()
         if tracer is None:
             return
-        with tracer.start_as_current_span(
-            "agent_kernel.branch_rollback_triggered"
-        ) as span:
+        with tracer.start_as_current_span("agent_kernel.branch_rollback_triggered") as span:
             if span.is_recording():
                 span.set_attribute("agent_kernel.run_id", run_id)
                 span.set_attribute("agent_kernel.group_key", group_idempotency_key)
@@ -1040,9 +1036,7 @@ class OtelObservabilityHook:
         tracer = self._get_tracer()
         if tracer is None:
             return
-        with tracer.start_as_current_span(
-            f"agent_kernel.phase.{phase_name.lstrip('_')}"
-        ) as span:
+        with tracer.start_as_current_span(f"agent_kernel.phase.{phase_name.lstrip('_')}") as span:
             if span.is_recording():
                 span.set_attribute("agent_kernel.run_id", run_id)
                 span.set_attribute("agent_kernel.action_id", action_id)
@@ -1172,9 +1166,7 @@ class MetricsObservabilityHook:
             )
             self._dispatch_attempt_latency = meter.create_histogram(
                 "agent_kernel.dispatch_attempt_latency_ms",
-                description=(
-                    "Wall-clock duration from DedupeStore reservation to executor return"
-                ),
+                description=("Wall-clock duration from DedupeStore reservation to executor return"),
                 unit="ms",
             )
 
@@ -1292,9 +1284,7 @@ class MetricsObservabilityHook:
         """Record dispatch attempt latency histogram keyed by dedupe_outcome."""
         if self._dispatch_attempt_latency is None:
             return
-        self._dispatch_attempt_latency.record(
-            latency_ms, {"dedupe_outcome": dedupe_outcome}
-        )
+        self._dispatch_attempt_latency.record(latency_ms, {"dedupe_outcome": dedupe_outcome})
 
     def on_parallel_branch_result(
         self,

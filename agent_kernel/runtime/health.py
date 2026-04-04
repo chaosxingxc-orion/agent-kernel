@@ -143,8 +143,7 @@ class KernelHealthProbe:
             "component": self.component_name,
             "status": aggregate.value,
             "checks": {
-                name: {"status": s.value, "message": msg}
-                for name, (s, msg) in results.items()
+                name: {"status": s.value, "message": msg} for name, (s, msg) in results.items()
             },
             "timestamp_ms": int(time.time() * 1000),
         }

@@ -76,9 +76,7 @@ def test_parse_snapshot_id_returns_run_id_and_offset() -> None:
 
 def test_parse_snapshot_id_allows_colon_in_run_id() -> None:
     """Checkpoint adapter should parse lineage run ids that include ':' characters."""
-    run_id, offset = AgentCoreCheckpointAdapter.parse_snapshot_id(
-        "snapshot:session-1:research:21"
-    )
+    run_id, offset = AgentCoreCheckpointAdapter.parse_snapshot_id("snapshot:session-1:research:21")
     assert run_id == "session-1:research"
     assert offset == 21
 

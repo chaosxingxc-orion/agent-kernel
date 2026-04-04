@@ -144,9 +144,7 @@ class TestEventExportingEventLog:
 
         export_port = AsyncMock()
         export_port.export_commit = _slow_export
-        wrapper = EventExportingEventLog(
-            inner, export_port, export_timeout_ms=1
-        )  # 1 ms timeout
+        wrapper = EventExportingEventLog(inner, export_port, export_timeout_ms=1)  # 1 ms timeout
 
         async def _run() -> None:
             await wrapper.append_action_commit(_make_commit("run-4"))
@@ -317,9 +315,7 @@ class TestInMemoryRunTraceStore:
 
     def test_terminal_detection_on_completed(self) -> None:
         store = InMemoryRunTraceStore()
-        asyncio.run(
-            store.export_commit(_make_commit("run-h", event_types=["run.completed"]))
-        )
+        asyncio.run(store.export_commit(_make_commit("run-h", event_types=["run.completed"])))
         trace = store.get("run-h")
         assert trace is not None
         assert trace.is_terminal
@@ -327,9 +323,7 @@ class TestInMemoryRunTraceStore:
 
     def test_terminal_detection_on_aborted(self) -> None:
         store = InMemoryRunTraceStore()
-        asyncio.run(
-            store.export_commit(_make_commit("run-i", event_types=["run.aborted"]))
-        )
+        asyncio.run(store.export_commit(_make_commit("run-i", event_types=["run.aborted"])))
         trace = store.get("run-i")
         assert trace is not None
         assert trace.is_terminal

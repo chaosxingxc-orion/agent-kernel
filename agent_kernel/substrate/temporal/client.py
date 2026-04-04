@@ -46,10 +46,7 @@ async def create_temporal_client(
         client_module = import_module("temporalio.client")
         client_cls = client_module.Client
     except Exception as exc:  # pragma: no cover
-        raise RuntimeError(
-            "Temporal SDK is required."
-            " Install dependency: temporalio"
-        ) from exc
+        raise RuntimeError("Temporal SDK is required. Install dependency: temporalio") from exc
     return await client_cls.connect(
         active_config.target_host,
         namespace=active_config.namespace,

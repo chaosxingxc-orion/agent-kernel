@@ -64,10 +64,7 @@ class _DelayedFirstGetProjectionService(InMemoryDecisionProjectionService):
         self._delay_consumed = False
 
     async def get(self, run_id: str):  # type: ignore[override]
-        if (
-            not self._delay_consumed
-            and _in_temporal_workflow_context()
-        ):
+        if not self._delay_consumed and _in_temporal_workflow_context():
             self._delay_consumed = True
             await temporal_workflow.sleep(timedelta(seconds=1))
         return await super().get(run_id)
@@ -91,10 +88,7 @@ class _PerRunDelayedFirstGetProjectionService(InMemoryDecisionProjectionService)
         self._delay_seconds = delay_seconds
 
     async def get(self, run_id: str):  # type: ignore[override]
-        if (
-            run_id in self._remaining_delayed_run_ids
-            and _in_temporal_workflow_context()
-        ):
+        if run_id in self._remaining_delayed_run_ids and _in_temporal_workflow_context():
             self._remaining_delayed_run_ids.remove(run_id)
             await temporal_workflow.sleep(timedelta(seconds=self._delay_seconds))
         return await super().get(run_id)

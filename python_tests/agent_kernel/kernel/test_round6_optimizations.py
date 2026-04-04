@@ -128,9 +128,7 @@ class TestPlanExecutorBranchDedupe:
 
         action = MagicMock(spec=Action)
         action.action_id = "act-2"
-        group = ParallelGroup(
-            actions=[action], join_strategy="all", group_idempotency_key="grp-2"
-        )
+        group = ParallelGroup(actions=[action], join_strategy="all", group_idempotency_key="grp-2")
         plan = ParallelPlan(groups=[group])
         executor = PlanExecutor(turn_runner=_runner, dedupe_store=store)
         asyncio.run(executor.execute_plan(plan, run_id="run-1"))
@@ -201,7 +199,8 @@ class TestBranchRollbackHook:
         )
         plan = ParallelPlan(groups=[group])
         executor = PlanExecutor(
-            turn_runner=_runner, observability_hook=_StubHook()  # type: ignore[arg-type]
+            turn_runner=_runner,
+            observability_hook=_StubHook(),  # type: ignore[arg-type]
         )
         asyncio.run(executor.execute_plan(plan, run_id="run-1"))
 
@@ -237,11 +236,10 @@ class TestBranchRollbackHook:
                 emitted_events=[],
             )
 
-        group = ParallelGroup(
-            actions=[action], join_strategy="all", group_idempotency_key="grp-ok"
-        )
+        group = ParallelGroup(actions=[action], join_strategy="all", group_idempotency_key="grp-ok")
         executor = PlanExecutor(
-            turn_runner=_runner, observability_hook=_StubHook()  # type: ignore[arg-type]
+            turn_runner=_runner,
+            observability_hook=_StubHook(),  # type: ignore[arg-type]
         )
         asyncio.run(executor.execute_plan(ParallelPlan(groups=[group]), run_id="run-1"))
         assert rollbacks == []
@@ -501,17 +499,13 @@ class TestOnTurnPhaseHook:
         from agent_kernel.runtime.observability_hooks import LoggingObservabilityHook
 
         hook = LoggingObservabilityHook(use_json=True, logger_name="test_r6e")
-        hook.on_turn_phase(
-            run_id="r1", action_id="a1", phase_name="_phase_snapshot", elapsed_ms=3
-        )
+        hook.on_turn_phase(run_id="r1", action_id="a1", phase_name="_phase_snapshot", elapsed_ms=3)
 
     def test_metrics_hook_on_turn_phase_does_not_raise(self) -> None:
         from agent_kernel.runtime.observability_hooks import MetricsObservabilityHook
 
         hook = MetricsObservabilityHook()
-        hook.on_turn_phase(
-            run_id="r1", action_id="a1", phase_name="_phase_execute", elapsed_ms=12
-        )
+        hook.on_turn_phase(run_id="r1", action_id="a1", phase_name="_phase_execute", elapsed_ms=12)
 
     def test_composite_hook_fans_out_on_turn_phase(self) -> None:
         from agent_kernel.runtime.observability_hooks import CompositeObservabilityHook
@@ -549,9 +543,7 @@ class TestHealthCheckFactories:
         assert "reachable" in msg.lower()
         store.close()
 
-    def test_sqlite_dedupe_store_health_check_unhealthy_on_closed_conn(
-        self, tmp_path
-    ) -> None:
+    def test_sqlite_dedupe_store_health_check_unhealthy_on_closed_conn(self, tmp_path) -> None:
         from agent_kernel.kernel.persistence.sqlite_dedupe_store import SQLiteDedupeStore
         from agent_kernel.runtime.health import (
             HealthStatus,

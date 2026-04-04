@@ -158,7 +158,6 @@ def _make_exporter(
 
 
 class TestOTLPRunTraceExporter:
-
     def test_action_commit_produces_one_span(self) -> None:
         exporter, tracer = _make_exporter()
         action = _make_action("run-1")
@@ -318,6 +317,7 @@ class TestOTLPRunTraceExporter:
                     del sys.modules[k]
             # Also block the import itself
             import builtins
+
             original_import = builtins.__import__
 
             def _blocking_import(name: str, *args: Any, **kwargs: Any) -> Any:

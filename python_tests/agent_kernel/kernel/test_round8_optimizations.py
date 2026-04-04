@@ -110,9 +110,7 @@ class TestDedupeAwareScriptRuntimeUnknownEffect:
             dedupe_store=dedupe,
         )
 
-        asyncio.run(
-            runtime.execute_script(self._make_input())
-        )
+        asyncio.run(runtime.execute_script(self._make_input()))
 
         record = dedupe.get("script:r1:a1:s1")
         assert record is not None
@@ -135,9 +133,7 @@ class TestDedupeAwareScriptRuntimeUnknownEffect:
         # First call.
         asyncio.run(runtime.execute_script(self._make_input()))
         # Second call with same idempotency key → noop.
-        result2 = asyncio.run(
-            runtime.execute_script(self._make_input())
-        )
+        result2 = asyncio.run(runtime.execute_script(self._make_input()))
         # Noop result has exit_code=0, execution_ms=0.
         assert result2.exit_code == 0
         assert result2.execution_ms == 0
@@ -173,9 +169,7 @@ class TestDedupeAwareScriptRuntimeUnknownEffect:
 
         # Original exception propagates even when mark_unknown_effect raises.
         with pytest.raises(ValueError, match="inner error"):
-            asyncio.run(
-                runtime.execute_script(self._make_input())
-            )
+            asyncio.run(runtime.execute_script(self._make_input()))
 
 
 # ---------------------------------------------------------------------------
@@ -207,12 +201,8 @@ class TestColocatedSQLiteBundle:
         run_id = "run-el-1"
         bundle = ColocatedSQLiteBundle(":memory:")
         commit = _make_commit(run_id, f"{run_id}:a1")
-        asyncio.run(
-            bundle.event_log.append_action_commit(commit)
-        )
-        events = asyncio.run(
-            bundle.event_log.load(run_id)
-        )
+        asyncio.run(bundle.event_log.append_action_commit(commit))
+        events = asyncio.run(bundle.event_log.load(run_id))
         assert len(events) == 1
         assert events[0].run_id == run_id
         bundle.close()
@@ -253,9 +243,7 @@ class TestColocatedSQLiteBundle:
         assert commit_ref.startswith("commit-ref-")
 
         # Both stores should reflect the write.
-        events = asyncio.run(
-            bundle.event_log.load(run_id)
-        )
+        events = asyncio.run(bundle.event_log.load(run_id))
         assert len(events) == 1
 
         record = bundle.dedupe_store.get(envelope.dispatch_idempotency_key)
@@ -282,9 +270,7 @@ class TestColocatedSQLiteBundle:
         assert commit_ref2 == ""
 
         # Event log should have only one event (first call).
-        events = asyncio.run(
-            bundle.event_log.load(run_id)
-        )
+        events = asyncio.run(bundle.event_log.load(run_id))
         assert len(events) == 1
         bundle.close()
 
@@ -515,9 +501,7 @@ class TestVerifyEventDedupeConsistency:
         # Append a dispatched event.
         key = f"{run_id}:a1"
         commit = _make_commit(run_id, key)
-        asyncio.run(
-            event_log.append_action_commit(commit)
-        )
+        asyncio.run(event_log.append_action_commit(commit))
 
         # Reserve + acknowledge dedupe.
         envelope = _make_envelope(run_id)
@@ -525,9 +509,7 @@ class TestVerifyEventDedupeConsistency:
         dedupe.mark_dispatched(key)
         dedupe.mark_acknowledged(key)
 
-        report = asyncio.run(
-            averify_event_dedupe_consistency(event_log, dedupe, run_id)
-        )
+        report = asyncio.run(averify_event_dedupe_consistency(event_log, dedupe, run_id))
         assert report.is_consistent
         event_log.close()
 
@@ -546,9 +528,7 @@ class TestVerifyEventDedupeConsistency:
         commit = _make_commit(run_id, envelope.dispatch_idempotency_key)
         bundle.atomic_dispatch_record(commit, envelope)
 
-        report = verify_event_dedupe_consistency(
-            bundle.event_log, bundle.dedupe_store, run_id
-        )
+        report = verify_event_dedupe_consistency(bundle.event_log, bundle.dedupe_store, run_id)
         assert report.is_consistent
         bundle.close()
 
@@ -567,9 +547,7 @@ class TestVerifyEventDedupeConsistency:
         # Reserve dedupe but do NOT append an event.
         bundle.dedupe_store.reserve(envelope)
 
-        report = verify_event_dedupe_consistency(
-            bundle.event_log, bundle.dedupe_store, run_id
-        )
+        report = verify_event_dedupe_consistency(bundle.event_log, bundle.dedupe_store, run_id)
         assert not report.is_consistent
         assert report.violations[0].kind == "orphaned_dedupe_key"
         bundle.close()

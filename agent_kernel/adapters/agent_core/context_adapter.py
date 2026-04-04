@@ -103,9 +103,7 @@ class AgentCoreContextAdapter:
         """
         binding_ref = f"ctx:{input_value.session_id}"
         if input_value.context_ref is not None:
-            self._context_by_binding[binding_ref] = (
-                input_value.context_ref
-            )
+            self._context_by_binding[binding_ref] = input_value.context_ref
         content_hash = _build_context_content_hash(input_value)
         return RuntimeContextBinding(
             binding_ref=binding_ref,
@@ -143,7 +141,8 @@ class AgentCoreContextAdapter:
         """
         binding_ref = self._binding_by_run.get(run_id, "")
         context_ref = self._context_by_binding.get(
-            binding_ref, f"ctx:{run_id}",
+            binding_ref,
+            f"ctx:{run_id}",
         )
         return AgentCoreContextExport(
             run_id=run_id,

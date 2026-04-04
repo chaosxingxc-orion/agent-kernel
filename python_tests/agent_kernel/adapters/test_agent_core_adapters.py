@@ -116,9 +116,9 @@ def test_session_adapter_kind_query_keeps_session_isolation() -> None:
     asyncio.run(adapter.bind_run_to_session("session-b", "run-b-primary", "primary"))
     asyncio.run(adapter.bind_run_to_session("session-b", "run-b-child", "child"))
 
-    assert asyncio.run(
-        adapter.resolve_session_run_by_kind("session-a", "primary")
-    ) == ["run-a-primary"]
+    assert asyncio.run(adapter.resolve_session_run_by_kind("session-a", "primary")) == [
+        "run-a-primary"
+    ]
     assert asyncio.run(adapter.resolve_session_run_by_kind("session-a", "child")) == []
 
 
@@ -178,9 +178,7 @@ def test_checkpoint_adapter_exposes_checkpoint_resume_port_aliases() -> None:
 
     checkpoint_view = asyncio.run(adapter.export_checkpoint("run-1"))
     resume_request = asyncio.run(
-        adapter.import_resume(
-            AgentCoreResumeInput(run_id="run-1", snapshot_id="snapshot:run-1:9")
-        )
+        adapter.import_resume(AgentCoreResumeInput(run_id="run-1", snapshot_id="snapshot:run-1:9"))
     )
     assert checkpoint_view.projected_offset == 9
     assert resume_request.snapshot_offset == 9

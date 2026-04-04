@@ -230,9 +230,7 @@ class JSONModeOutputParser:
             Parsed ``Action``, or ``None`` when the item is invalid.
         """
         if not isinstance(item, dict):
-            _LOG.warning(
-                "JSONModeOutputParser: item[%d] is not a dict for run_id=%s", idx, run_id
-            )
+            _LOG.warning("JSONModeOutputParser: item[%d] is not a dict for run_id=%s", idx, run_id)
             return None
 
         action_type = item.get("action_type")

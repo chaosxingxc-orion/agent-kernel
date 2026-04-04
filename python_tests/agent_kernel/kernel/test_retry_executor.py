@@ -49,9 +49,7 @@ class TestRetryingExecutorServiceSuccessPaths:
         assert inner.calls == 1
 
     def test_succeeds_after_one_transient_failure(self) -> None:
-        inner = _CountingExecutor(
-            results=[TransientExecutionError("flaky"), {"ack": True}]
-        )
+        inner = _CountingExecutor(results=[TransientExecutionError("flaky"), {"ack": True}])
         svc = RetryingExecutorService(inner, max_attempts=2, base_delay_ms=0, jitter_ms=0)
         result = asyncio.run(svc.execute(object()))
         assert result == {"ack": True}

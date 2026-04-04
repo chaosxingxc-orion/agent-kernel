@@ -169,9 +169,7 @@ def test_turn_engine_returns_completed_noop_when_snapshot_build_fails() -> None:
         executor=_StubExecutor(result={"acknowledged": True}),
     )
 
-    result = asyncio.run(
-        turn_engine.run_turn(_build_turn_input(), _build_action())
-    )
+    result = asyncio.run(turn_engine.run_turn(_build_turn_input(), _build_action()))
 
     assert result.state == "completed_noop"
     assert result.outcome_kind == "noop"
@@ -188,9 +186,7 @@ def test_turn_engine_blocks_when_admission_denies() -> None:
         executor=_StubExecutor(result={"acknowledged": True}),
     )
 
-    result = asyncio.run(
-        turn_engine.run_turn(_build_turn_input(), _build_action())
-    )
+    result = asyncio.run(turn_engine.run_turn(_build_turn_input(), _build_action()))
 
     assert result.state == "dispatch_blocked"
     assert result.outcome_kind == "blocked"
@@ -216,9 +212,7 @@ def test_turn_engine_blocks_duplicate_dedupe_key_before_dispatch() -> None:
         dedupe_store=dedupe_store,
         executor=_StubExecutor(result={"acknowledged": True}),
     )
-    result = asyncio.run(
-        turn_engine.run_turn(_build_turn_input(), _build_action())
-    )
+    result = asyncio.run(turn_engine.run_turn(_build_turn_input(), _build_action()))
 
     assert result.state == "dispatch_blocked"
     assert result.outcome_kind == "blocked"
@@ -234,9 +228,7 @@ def test_turn_engine_returns_dispatched_when_executor_acknowledged() -> None:
         executor=_StubExecutor(result={"acknowledged": True}),
     )
 
-    result = asyncio.run(
-        turn_engine.run_turn(_build_turn_input(), _build_action())
-    )
+    result = asyncio.run(turn_engine.run_turn(_build_turn_input(), _build_action()))
 
     assert result.state == "dispatch_acknowledged"
     assert result.outcome_kind == "dispatched"
@@ -253,7 +245,6 @@ def test_turn_engine_returns_dispatched_when_executor_acknowledged() -> None:
     ]
 
 
-
 def test_turn_engine_effect_unknown_maps_to_recovery_pending() -> None:
     """Ambiguous execution evidence should move turn into recovery_pending."""
     turn_engine = TurnEngine(
@@ -263,19 +254,14 @@ def test_turn_engine_effect_unknown_maps_to_recovery_pending() -> None:
         executor=_StubExecutor(result={"acknowledged": False}),
     )
 
-    result = asyncio.run(
-        turn_engine.run_turn(_build_turn_input(), _build_action())
-    )
+    result = asyncio.run(turn_engine.run_turn(_build_turn_input(), _build_action()))
 
     assert result.state == "recovery_pending"
     assert result.outcome_kind == "recovery_pending"
     assert result.recovery_input is not None
     assert result.recovery_input.failure_class == "unknown"
     assert result.recovery_input.evidence_priority_source == "local_inference"
-    assert (
-        result.recovery_input.evidence_priority_ref
-        == "turn_engine:effect_unknown_without_ack"
-    )
+    assert result.recovery_input.evidence_priority_ref == "turn_engine:effect_unknown_without_ack"
 
 
 def test_turn_engine_passes_execution_context_to_context_aware_executor() -> None:
@@ -348,9 +334,7 @@ def test_turn_engine_strict_mode_requires_declared_snapshot_inputs() -> None:
         require_declared_snapshot_inputs=True,
     )
 
-    result = asyncio.run(
-        turn_engine.run_turn(_build_turn_input(), _build_action())
-    )
+    result = asyncio.run(turn_engine.run_turn(_build_turn_input(), _build_action()))
 
     assert result.state == "completed_noop"
     assert result.outcome_kind == "noop"
@@ -547,8 +531,12 @@ class _CapturingHook:
         latency_ms: int,
     ) -> None:
         self.admission_calls.append(
-            {"run_id": run_id, "action_id": action_id, "admitted": admitted,
-             "latency_ms": latency_ms}
+            {
+                "run_id": run_id,
+                "action_id": action_id,
+                "admitted": admitted,
+                "latency_ms": latency_ms,
+            }
         )
 
     def on_dispatch_attempted(
@@ -560,8 +548,12 @@ class _CapturingHook:
         latency_ms: int,
     ) -> None:
         self.dispatch_calls.append(
-            {"run_id": run_id, "action_id": action_id, "dedupe_outcome": dedupe_outcome,
-             "latency_ms": latency_ms}
+            {
+                "run_id": run_id,
+                "action_id": action_id,
+                "dedupe_outcome": dedupe_outcome,
+                "latency_ms": latency_ms,
+            }
         )
 
 
