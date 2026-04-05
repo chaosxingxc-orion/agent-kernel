@@ -1,640 +1,112 @@
-# agent-kernel 完整架构设计
+﻿# ARCHITECTURE
 
-> **0.1 Baseline + 演进路线图**
->
-> 标注说明：**✓ 已实现** | **○ 待实现**
->
-> 测试覆盖：6 814 通过（2026-04-04）
+本文档描述 `agent-kernel` 当前实现的系统架构，不包含“未来可能”设计，仅记录可落地行为。
 
----
+## 1. 系统分层
 
-## 一、总体分层
+### 1.1 Platform Layer
 
-```
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  PLATFORM LAYER（平台层）                                                     ║
-║                                                                              ║
-║  agent-core Runner │ REST/gRPC Gateway │ Scheduler │ Human Review UI        ║
-║                                                                              ║
-║  ┌──────────────────────────────────────────────────────────────────────┐   ║
-║  │  EventExportPort  ✓（进化层：平台拥有，内核不依赖）                      │   ║
-║  │  InMemoryRunTraceStore ✓  │  OTLPRunTraceExporter ✓  │  <Kafka/S3> ○  │   ║
-║  └──────────────────────────────────────────────────────────────────────┘   ║
-╚══════════════════════════════╦═══════════════════════════════════════════════╝
-                               ║ StartRunRequest / SignalRunRequest (frozen DTO)
-                               ▼
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  KERNEL BOUNDARY                                                             ║
-║                                                                              ║
-║  KernelFacade ✓  ←── 唯一平台入口                                            ║
-║  KernelRuntime ✓ ←── 单系统入口，一次 start() 装配全部服务                    ║
-║       ├── RuntimeSubstrate (Protocol) ✓  ←── 可插拔执行基底接口              ║
-║       │     ├── TemporalAdaptor ✓  ←── Temporal 作为托管组件                 ║
-║       │     │     ├── mode="sdk"  连接外部 Temporal 集群                     ║
-║       │     │     └── mode="host" 启动内嵌 dev-server（无需外部进程）         ║
-║       │     └── LocalFSMAdaptor ✓  ←── 直接驱动 TurnEngine（开发/嵌入）      ║
-║       ├── KernelHealthProbe ✓ (liveness / readiness)                        ║
-║       └── RunActorDependencyBundle ✓ (共享服务实例)                           ║
-╚══════════════════════════════╦═══════════════════════════════════════════════╝
-                               ║
-                               ▼
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  COGNITIVE RUNTIME LAYER（认知运行时层）                                       ║
-║                                                                              ║
-║  ┌─────────────────────────────────────────────────────────────────────┐    ║
-║  │  ReasoningLoop ✓（kernel/cognitive/reasoning_loop.py）               │    ║
-║  │                                                                     │    ║
-║  │  ContextPort ✓ ──► ContextWindow ✓ ──► LLMGateway ✓               │    ║
-║  │  （装配上下文）         （模型输入）       （推理基底）                  │    ║
-║  │                                              │                      │    ║
-║  │                                      ModelOutput ✓                  │    ║
-║  │                                              │                      │    ║
-║  │                                      OutputParser ✓                 │    ║
-║  │                                      （LLM输出 → Action[]）          │    ║
-║  └──────────────────────────┬──────────────────────────────────────────┘    ║
-║                             │ Action[] 进入执行管道                           ║
-║  ┌──────────────────────────▼──────────────────────────────────────────┐    ║
-║  │  ExecutionPlan Layer ✓                                               │    ║
-║  │                                                                     │    ║
-║  │  SequentialPlan ✓  │  ParallelPlan ✓  │  PlanExecutor ✓            │    ║
-║  │  （串行执行）          （并行派发+聚合）    （计划解释执行器）              │    ║
-║  │                                                                     │    ║
-║  │  ConditionalPlan ✓ │  DependencyGraph ✓  │  SpeculativePlan ✓      │    ║
-║  │  （条件路由）          （节点依赖 DAG）       （投机执行池）               │    ║
-║  │  PlanTypeRegistry ✓  （能力声明注册表）                               │    ║
-║  └──────────────────────────┬──────────────────────────────────────────┘    ║
-║                             │                                                ║
-╚══════════════════════════════╦═══════════════════════════════════════════════╝
-                               ║
-                               ▼
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  RUNTIME SUBSTRATE LAYER（可插拔执行基底层）                                   ║
-║                                                                              ║
-║  ┌──────────────────────────────────────┐  ┌───────────────────────────┐    ║
-║  │  TemporalAdaptor ✓                   │  │  LocalFSMAdaptor ✓         │    ║
-║  │  substrate/temporal/adaptor.py       │  │  substrate/local/adaptor.py│    ║
-║  │                                      │  │                           │    ║
-║  │  mode="sdk"                          │  │  直接驱动 RunActorWorkflow  │    ║
-║  │    Client.connect(address)           │  │  asyncio.create_task()     │    ║
-║  │    ── 外部 Temporal 集群             │  │  ── 无需外部进程            │    ║
-║  │                                      │  │  ── 适合开发/嵌入/测试      │    ║
-║  │  mode="host"                         │  │                           │    ║
-║  │    WorkflowEnvironment.start_local() │  │  LocalWorkflowGateway ✓   │    ║
-║  │    ── 内嵌 dev-server（无外部进程）   │  │    _workflows: dict        │    ║
-║  │                                      │  │    _run_tasks: dict        │    ║
-║  │  内核托管：start(deps) / stop()       │  │    signal/cancel/query     │    ║
-║  │  Temporal SDK 类型不逃逸出此模块      │  │    全部 in-process 路由     │    ║
-║  └──────────────────────────────────────┘  └───────────────────────────┘    ║
-║                                                                              ║
-║  Temporal Server: Workflow History │ Task Queues │ Timers │ Replay Engine   ║
-╚══════════════════════════════╦═══════════════════════════════════════════════╝
-                               ║
-              ┌────────────────╩──────────────────┐
-        Run A ▼                             Run B  ▼   ··· Run N
-╔══════════════════════════╗  ╔══════════════════════════╗
-║  RunActorWorkflow ✓      ║  ║  RunActorWorkflow ✓      ║
-║  Authority 1: LIFECYCLE  ║  ║  Authority 1: LIFECYCLE  ║
-║                          ║  ║                          ║
-║  TurnEngine FSM ✓        ║  ║  TurnEngine FSM ✓        ║
-║  （当前：串行单动作）       ║  ║                          ║
-╚══════════════╦═══════════╝  ╚══════════════════════════╝
-               ║
-               ▼
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  SOUTHBOUND SUBSTRATE LAYER（南向基底层）                                      ║
-║                                                                              ║
-║  TemporalActivityGateway ✓                                                   ║
-║    ├── execute_tool(ToolActivityInput) ✓                                    ║
-║    ├── execute_mcp(MCPActivityInput) ✓                                      ║
-║    ├── execute_verification(...) ✓                                          ║
-║    ├── execute_reconciliation(...) ✓                                        ║
-║    ├── execute_inference(InferenceActivityInput) ✓  ← LLM 推理 Activity     ║
-║    └── execute_skill_script(ScriptActivityInput) ✓  ← 脚本执行 Activity     ║
-║                                                                              ║
-║  [Activity 边界：持久性在此保证]                                               ║
-║                  │                            │                              ║
-║         ┌────────▼────────┐         ┌─────────▼────────┐                   ║
-║         │  LLMGateway ✓   │         │ ScriptRuntime ✓  │                   ║
-║         │  (Protocol)     │         │ (Protocol)       │                   ║
-║         │                 │         │                  │                   ║
-║         │ infer()         │         │ execute_script() │                   ║
-║         │ count_tokens()  │         │ validate_script()│                   ║
-║         │ stream_infer()  │         │                  │                   ║
-║         │                 │         │ host_kind 路由：  │                   ║
-║         │ 职责：           │         │ local_process    │                   ║
-║         │ provider 路由   │         │ in_process_python│                   ║
-║         │ token 预算执行  │         │ remote_service   │                   ║
-║         │ rate limit 处理 │         └──────────────────┘                   ║
-║         │ 响应格式归一化   │                                                  ║
-║         └────────┬────────┘                                                 ║
-║                  │                                                           ║
-║         Provider SDK (PoC：OpenAI ✓ │ Anthropic ✓)                         ║
-║         Google │ Local (Ollama/vLLM) ○                                     ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-```
+平台层（UI、网关、调度器、外部系统）只通过 `KernelFacade` 与内核交互。
 
----
+### 1.2 Kernel Boundary
 
-## 二、TurnEngine FSM：当前与目标状态
+- `KernelFacade`：唯一平台入口
+- `KernelRuntime`：统一生命周期入口（组装依赖 + 启停 substrate）
+- `KernelHealthProbe`：健康检查聚合
 
-```
-【当前已实现 ✓】串行单动作路径：
+### 1.3 Runtime Core
 
-collecting ──► intent_committed ──► snapshot_built ──► admission_checked
-    │                                                         │
-    │                                             ┌───────────┴────────────┐
-    │                                             │                        │
-    │                                      dispatch_blocked          dispatched
-    │                                             │                        │
-    │                                      completed_noop    dispatch_acknowledged
-    │                                                              │
-    │                                                      effect_recorded
-    │                                                      effect_unknown
-    │                                                           │
-    │                                                   recovery_pending
-    └───────────────────────────────────────────────────────────┘
+- `RunActorWorkflow`：单 run 生命周期 orchestrator
+- `TurnEngine`：执行回合状态机
+- `PlanExecutor`：多计划模型执行器
 
-【已实现 ✓】新增状态（Phases 4–6）：
+### 1.4 Substrate Layer
 
-推理路径（ReasoningLoop 集成）：
-  reasoning ✓ ──► intent_committed（替代外部直接注入 Action）
+- `TemporalAdaptor`（sdk/host）
+- `LocalFSMAdaptor`（in-process）
 
-并行执行路径（PlanExecutor）：
-  parallel_dispatched ✓     ← 并行组已派发，等待聚合
-  parallel_joined ✓         ← barrier 完成，全部成功
-  parallel_partial_failure ✓ ← 部分分支失败，收集证据
+## 2. 六权威模型
 
-模型反思路径：
-  reflecting ✓              ← 接收故障证据，模型推理反思
-  （反思完成后重入 intent_committed，带修正后的 Action）
-```
+`agent-kernel` 通过六个“不可越权组件”保证执行一致性：
 
----
+1. `RunActor`：生命周期权威
+2. `KernelRuntimeEventLog`：事件事实权威（append-only）
+3. `DecisionProjectionService`：投影视图权威（由事件重建）
+4. `DispatchAdmissionService`：副作用前置准入权威
+5. `ExecutorService`：外部执行权威
+6. `RecoveryGateService`：恢复决策权威
 
-## 三、六权威详细结构（已实现 ✓）
+约束：
+- 任何组件不得绕过 `Admission` 直接触发外部副作用
+- 任何恢复动作必须通过 `RecoveryGate` 决策
+- 任何状态读取以 projection 为准，不直接拼接内部临时状态
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                            六权威职责分离                                   │
-│                                                                          │
-│  Authority 2 ✓              Authority 3 ✓          Authority 4 ✓         │
-│  ┌─────────────────┐       ┌──────────────────┐   ┌──────────────────┐  │
-│  │ RuntimeEventLog │       │ DecisionProjection│   │ DispatchAdmission│  │
-│  │                 │◄──────│ Service           │   │ Service          │  │
-│  │ append_commit() │       │ catch_up()        │   │ admit(action,    │  │
-│  │ load()          │       │ readiness()       │   │   snapshot)      │  │
-│  │                 │       │ get()             │   │ approval_state   │  │
-│  │ Backends:       │       │                  │   │ permission_mode  │  │
-│  │  InMemory ✓     │       │ replays:          │   │ peer_run_bindings│  │
-│  │  SQLite ✓       │       │  authoritative_   │   └──────────────────┘  │
-│  │                 │       │  fact +           │                         │
-│  │ EventExporting  │       │  derived_replayable│                         │
-│  │ Wrapper ✓       │       │  (skip diagnostic)│                         │
-│  └─────────────────┘       └──────────────────┘                         │
-│                                                                          │
-│              ┌────────────────────────────────────┐                     │
-│              │  DedupeStore ✓ (at-most-once)       │                     │
-│              │  reserved → dispatched →            │                     │
-│              │  acknowledged / unknown_effect      │                     │
-│              │  InMemory ✓ │ SQLite ✓              │                     │
-│              └──────────────────┬─────────────────┘                     │
-│                                 │                                        │
-│  Authority 5 ✓                  ▼                                        │
-│  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │  ExecutorService（host_kind × interaction_target 双维路由）         │   │
-│  │                                                                  │   │
-│  │  host_kind（执行机制）✓        interaction_target（交互对象）✓      │   │
-│  │  local_process                 agent_peer   ← 另一个智能体内核     │   │
-│  │  local_cli                     it_service   ← REST/gRPC/企业系统  │   │
-│  │  cli_process                   data_system  ← DB/向量库/数据湖    │   │
-│  │  in_process_python             tool_executor← MCP/函数调用/CLI    │   │
-│  │  remote_service                human_actor  ← 审批/反馈/上报      │   │
-│  │  [llm_inference ○]             event_stream ← Kafka/pub-sub      │   │
-│  └──────────────────────────────────┬───────────────────────────────┘   │
-│                                     │ effect_unknown / exception         │
-│                                     ▼                                    │
-│  Authority 6 ✓ + ○                                                       │
-│  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │  RecoveryGateService + CompensationRegistry ✓                     │   │
-│  │                                                                  │   │
-│  │  RecoveryMode：                                                   │   │
-│  │    static_compensation ✓ ─── CompensationRegistry 查找+执行       │   │
-│  │    human_escalation ✓    ─── escalation_channel_ref              │   │
-│  │    abort ✓               ─── run 进入终态                         │   │
-│  │    reflect_and_retry ✓   ─── 故障证据→模型反思→重新生成             │   │
-│  │                                                                  │   │
-│  │  ReflectionPolicy ✓：max_rounds / reflectable_failure_kinds      │   │
-│  │  ScriptFailureEvidence ✓：结构化故障证据供模型理解                  │   │
-│  │  ReflectionContextBuilder ✓：故障→ContextWindow 转换              │   │
-│  └──────────────────────────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────────────────────┘
-```
+## 3. 生命周期主链路
 
----
+1. 平台调用 `KernelFacade.start_run()`
+2. facade 转发到 gateway `start_workflow()`
+3. `RunActorWorkflow.run()` 初始化 run 上下文与 projection
+4. 外部输入统一走 `signal_run()` -> `signal_workflow()`
+5. workflow 将 signal 落为权威事件，驱动 `process_action_commit()`
+6. `TurnEngine` 执行一轮决策/准入/执行/恢复
+7. 结果写回 event log，projection catch-up 更新可查询视图
 
-## 四、认知运行时层（已实现 ✓）
+## 4. 计划执行模型
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│  COGNITIVE RUNTIME LAYER                                                  │
-│                                                                          │
-│  上下文工程质量 → 大模型输出质量上界                                         │
-│  大模型输出质量 ← f(上下文质量, 模型自身能力)   ← 两者不可互相推导            │
-│                                                                          │
-│  ContextPort ✓（Protocol，kernel/cognitive/context_port.py）              │
-│       │                                                                  │
-│       │  assemble(run_id, snapshot, history) → ContextWindow ✓          │
-│       │                                                                  │
-│       │  ContextWindow 组成：                                             │
-│       │    ├── 系统指令（来自 capability_scope + policy）                  │
-│       │    ├── 工具定义（来自 tool_bindings，已通过 Admission 预检）        │
-│       │    ├── 技能定义（来自 skill_bindings，含脚本清单）                  │
-│       │    ├── 对话历史（来自 EventLog，按 token 预算裁剪）                 │
-│       │    ├── 当前 run 状态（来自 ProjectionService）                     │
-│       │    ├── 记忆绑定（来自 memory_binding_ref，平台层提供）              │
-│       │    └── 恢复上下文（来自 RecoveryOutcomeStore，如有）               │
-│       │                                                                  │
-│       ▼                                                                  │
-│  LLMGateway ✓（Protocol，kernel/cognitive/llm_gateway.py）                │
-│       │                                                                  │
-│       │  infer(context, config, idempotency_key) → ModelOutput ✓        │
-│       │  count_tokens(context, model_ref) → int                         │
-│       │  stream_infer(context, config) → AsyncIterator[Chunk]           │
-│       │                                                                  │
-│       │  InferenceConfig ✓：                                             │
-│       │    model_ref + TokenBudget ✓                                    │
-│       │    TokenBudget：max_input / max_output / reasoning_budget       │
-│       │    temperature / stop_sequences / turn_kind_overrides ✓        │
-│       │    （预算按 turn 类型可配置：推理轮 vs 工具选择轮预算差异极大）       │
-│       │                                                                  │
-│       ▼                                                                  │
-│  ModelOutput ✓ → OutputParser ✓（kernel/cognitive/output_parser.py）     │
-│                       │                                                  │
-│                       │  parse(output, snapshot) → list[Action]         │
-│                       │  或 → ExecutionPlan ✓（含并行组）                 │
-│                       │                                                  │
-│                       ▼                                                  │
-│                  Action[] 进入 TurnEngine / PlanExecutor ✓               │
-└──────────────────────────────────────────────────────────────────────────┘
-```
+已支持的执行计划类型：
+- `SequentialPlan`
+- `ParallelPlan`
+- `ConditionalPlan`
+- `DependencyGraph`
+- `SpeculativePlan`
 
----
+`KernelFacade.submit_plan()` 在 facade 层做 plan_type 校验后，序列化计划并发出 `plan_submitted` 信号。workflow 侧反序列化并调用 `PlanExecutor.execute_plan()`（若已注入 plan executor）。
 
-## 五、并行执行模型（已实现 ✓）
+## 5. 幂等与一致性
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│  PARALLEL EXECUTION MODEL                                                 │
-│                                                                          │
-│  ExecutionPlan ✓（kernel/contracts.py）                                   │
-│    ├── SequentialPlan ✓：steps: list[Action]                              │
-│    └── ParallelPlan ✓：groups: list[ParallelGroup]                        │
-│                                                                          │
-│  ParallelGroup ✓：                                                        │
-│    actions: list[Action]                                                 │
-│    join_strategy: "all" | "any" | "n_of_m"                              │
-│    n: int | None                                                         │
-│    timeout_ms: int | None                                                │
-│                                                                          │
-│  PlanExecutor ✓（kernel/plan_executor.py）：                               │
-│                                                                          │
-│    SequentialPlan → TurnEngine 逐步执行                                   │
-│                                                                          │
-│    ParallelPlan →                                                         │
-│      asyncio.gather(                                                     │
-│          execute_activity(action_a),  ← Temporal 原生并行                │
-│          execute_activity(action_b),                                     │
-│          execute_activity(action_c),                                     │
-│      )                                                                   │
-│                                                                          │
-│    并行子智能体 →                                                          │
-│      asyncio.gather(                                                     │
-│          start_child_workflow(skill_a),  ← SpawnChildRunRequest ✓       │
-│          start_child_workflow(skill_b),                                  │
-│          start_child_workflow(skill_c),                                  │
-│      ) + barrier                                                         │
-│                                                                          │
-│  BranchMonitor ✓（每分支独立心跳）：                                        │
-│    每个 Activity / Child Workflow 有独立心跳检测                           │
-│    脚本运行在子进程：wrapper 每 N 秒调 activity.heartbeat()                │
-│    子进程无输出 + 耗尽超时预算 → suspected_cause = "infinite_loop"         │
-│                                                                          │
-│  BranchResult ✓ / BranchFailure ✓：                                      │
-│    每个分支独立结果收集                                                    │
-│    join 点汇聚：成功结果合并 + 失败证据分类                                 │
-│                                                                          │
-│  幂等保证：                                                                │
-│    join_strategy = "all" → 组级幂等键（any 失败则整组进 Recovery）          │
-│    join_strategy = "any" → 每 Action 独立幂等键（已完成的不重复执行）        │
-└──────────────────────────────────────────────────────────────────────────┘
-```
+### 5.1 事件与回放
 
----
+- 事件日志是事实来源
+- replay 支持重建 task 状态
+- 对 `task.attempt_started` 做 replay 去重，避免重复回放产生 attempt 膨胀
 
-## 六、故障恢复 + 模型反思闭环（部分待实现）
+### 5.2 Task 状态一致性
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│  FAULT RECOVERY + REFLECTION LOOP                                         │
-│                                                                          │
-│  【已实现 ✓】                                                              │
-│  static_compensation → CompensationRegistry.execute(action)             │
-│  human_escalation    → escalation_channel_ref                           │
-│  abort               → run 终态                                          │
-│  FailureEnvelope ✓ 证据优先链：external_ack > evidence_ref > inference   │
-│  RecoveryOutcomeStore ✓（独立存储，不污染 EventLog）                       │
-│  RunHeartbeatMonitor ✓（Run 级心跳）                                      │
-│                                                                          │
-│  【已实现 ✓】reflect_and_retry 完整闭环：                                   │
-│                                                                          │
-│  脚本超时（死循环）检测：                                                   │
-│  Script Activity wrapper                                                 │
-│    └── 子进程运行 + 每 N 秒 activity.heartbeat()                          │
-│    └── 超时 → kill 子进程 → 构建 ScriptFailureEvidence ✓                  │
-│              ├── failure_kind = "heartbeat_timeout"                      │
-│              ├── budget_consumed_ratio ≈ 1.0（死循环特征）                │
-│              ├── output_produced = False（无输出特征）                    │
-│              └── suspected_cause = "possible_infinite_loop"             │
-│                                                                          │
-│  ReflectionContextBuilder ✓（kernel/cognitive/reflection_builder.py）：  │
-│    ScriptFailureEvidence + 原始脚本 + 成功分支结果                         │
-│    → ContextWindow 增量（结构化给模型看）                                  │
-│                                                                          │
-│  ReflectionPolicy ✓（kernel/recovery/）：                                │
-│    max_rounds: int = 3                                                  │
-│    reflection_timeout_ms: int                                           │
-│    reflectable_failure_kinds: {heartbeat_timeout, runtime_error, ...}  │
-│    non_reflectable_failure_kinds: {resource_exhausted, permission_denied}│
-│    escalate_on_exhaustion: bool                                         │
-│                                                                          │
-│  reflect_and_retry 执行流：                                               │
-│    parallel_partial_failure 事件                                         │
-│        ↓ RecoveryGate 决策：reflect_and_retry                            │
-│    ReflectionContextBuilder 装配上下文                                   │
-│        ↓ ReasoningLoop（模型接收故障证据推理）                              │
-│    模型输出：故障分析 + 修正脚本                                            │
-│        ↓ 新 Action（修正后脚本）重入六权威管道                              │
-│    成功 → 继续 │ 再次失败 → reflection_round + 1                          │
-│        ↓ round > max_rounds                                              │
-│    escalate_on_exhaustion=True  → human_escalation                      │
-│    escalate_on_exhaustion=False → abort                                  │
-│                                                                          │
-│  reflection_round 写入 TurnIntentLog ✓（重启后不丢失计数）                 │
-└──────────────────────────────────────────────────────────────────────────┘
-```
+- `complete_attempt()` 仅在匹配 active run_id 时推进生命周期
+- 错误 run_id 不允许“误完成”任务
+- 重试失败时，决策动作与任务最终状态一致（避免 action=retry 但状态=aborted）
 
----
+## 6. 可观测性与运维
 
-## 七、技能子系统（部分实现）
+### 6.1 健康探针
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│  SKILL SUBSYSTEM                                                          │
-│                                                                          │
-│  【已实现 ✓】                                                              │
-│  SkillDefinition ✓（skill_id / version / effect_class / tool_bindings）  │
-│  SkillRuntimeHost ✓（cli_process / in_process_python / remote_service）  │
-│  skill_bindings 在 CapabilitySnapshot ✓                                  │
-│  SpawnChildRunRequest ✓（Child Workflow 派发基础设施）                     │
-│  active_child_runs 追踪 ✓                                                │
-│                                                                          │
-│  【已实现 ✓】技能完整驱动链路：                                             │
-│                                                                          │
-│  技能注入（平台→内核）：                                                    │
-│    技能定义通过 ContextPort 注入 ContextWindow（脚本清单、参数 schema）✓    │
-│                                                                          │
-│  技能调用（模型决策）：                                                     │
-│    模型输出：Action(action_type="skill_call", skill_id=...) ✓            │
-│    经过六权威管道：Admission 检查 skill_id ∈ skill_bindings               │
-│                                                                          │
-│  技能生命周期（内核治理）：                                                  │
-│    复杂技能 → SpawnChildRunRequest → Child RunActorWorkflow ✓            │
-│    原子技能 → execute_skill_script Activity ✓                            │
-│                                                                          │
-│  技能内脚本执行（子 Run 模型驱动）：                                         │
-│    子 Run 的模型看到：技能目标 + 可用脚本列表 + 当前状态                    │
-│    模型输出：Action(action_type="script_execution", script_id=...) ✓    │
-│    经过六权威管道 + ScriptRuntime ✓ 路由到 host_kind 执行机制              │
-│                                                                          │
-│  串行 / 并行脚本：                                                         │
-│    串行 → TurnEngine 逐 Turn 执行 ✓                                       │
-│    并行 → PlanExecutor + ParallelGroup ✓                                 │
-│    失败反思 → reflect_and_retry ✓                                         │
-└──────────────────────────────────────────────────────────────────────────┘
-```
+`KernelRuntime` 注入 `KernelHealthProbe`，当前默认挂载：
+- `event_log` 可达性
+- `worker` 存活性
 
----
+并通过 facade 暴露：
+- `get_health()`（liveness）
+- `get_health_readiness()`（readiness）
 
-## 八、两层持久化（已实现 ✓）
+### 6.2 内存后端风险提示
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│  TWO-LAYER PERSISTENCE                                                    │
-│                                                                          │
-│  操作层（内核拥有）✓              进化层（平台拥有）✓                        │
-│  ─────────────────────           ──────────────────────────────────     │
-│  SQLiteKernelRuntimeEventLog     EventExportPort（Protocol）              │
-│  SQLiteDedupeStore               InMemoryRunTraceStore (dev/test)        │
-│  SQLiteTurnIntentLog             OTLPRunTraceExporter (OTel spans)       │
-│  SQLiteRecoveryOutcomeStore      <Kafka / S3 / PostgreSQL> ○             │
-│                                                                          │
-│  EventExportingEventLog（装饰器 wrapper）✓                                │
-│    inner.append() ← 操作层                                               │
-│    asyncio.create_task(_safe_export()) ← 火-忘导出                       │
-│                                                                          │
-│  Projection 始终读 base_event_log（raw inner），不读 wrapper ✓            │
-└──────────────────────────────────────────────────────────────────────────┘
-```
+`InMemoryKernelRuntimeEventLog` 在 run 数超过保留阈值时会逐出最老 run，并显式输出 warning。生产建议使用持久化后端（例如 SQLite）。
 
----
+## 7. Substrate 选择建议
 
-## 九、可观测性层（已实现 ✓）
+- 生产环境：`TemporalSubstrateConfig(mode="sdk")`
+- 本地开发/CI：`TemporalSubstrateConfig(mode="host")`
+- 轻量嵌入测试：`LocalSubstrateConfig`
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│  OBSERVABILITY LAYER                                                      │
-│                                                                          │
-│  同步 Hook（热路径）✓                   异步导出（火-忘）✓                  │
-│  ObservabilityHook Protocol            EventExportPort Protocol          │
-│    OtelObservabilityHook               OTLPRunTraceExporter              │
-│    LoggingObservabilityHook            InMemoryRunTraceStore             │
-│    CompositeObservabilityHook                                            │
-│    RunHeartbeatMonitor                 OTel Span 结构：                  │
-│                                          kernel.turn / kernel.lifecycle  │
-│  KernelHealthProbe ✓                     span attrs: run_id/action_type  │
-│    liveness() / readiness()              /effect_class/interaction_target│
-│    → /healthz / /readyz                  span events: 每个 RuntimeEvent  │
-│                                                                          │
-│  KernelSelfHeartbeat ✓                                                   │
-│    event_log_check() + projection_check()                               │
-└──────────────────────────────────────────────────────────────────────────┘
-```
+## 8. 扩展点
 
----
+- Action/Plan/Recovery/Event 注册表
+- Observability Hook
+- Event export port
+- Task view log / dedupe store / checkpoint adapter / context adapter
 
-## 十、协议扩展层（已实现 ✓）
+## 9. 已知边界
 
-```
-Contract Boundary              Kernel Impl (PoC) ✓    Production Path
-──────────────────────────     ─────────────────────   ─────────────────────
-KernelRuntimeEventLog      ←── InMemory / SQLite       PostgreSQL
-DecisionProjectionService  ←── InMemory                Redis / Postgres read
-DispatchAdmissionService   ←── Static                  Policy Engine / OPA
-ExecutorService            ←── Async / Activity        Temporal Activity Pool
-RecoveryGateService        ←── PlannedGate             ML Planner / Rule DSL
-RecoveryOutcomeStore       ←── InMemory / SQLite        Postgres
-DedupeStorePort            ←── InMemory / SQLite        Redis
-TurnIntentLog              ←── InMemory / SQLite        SQLite
-TemporalWorkflowGateway    ←── TemporalSDKWorkflowGateway  Mock / Test harness
-RuntimeSubstrate           ←── TemporalAdaptor ✓          LocalFSMAdaptor ✓
-ObservabilityHook          ←── Logging / OTel           Composite / Custom
-EventExportPort            ←── InMemoryRunTrace         OTLPExporter / Kafka
-LLMGateway ✓               ←── OpenAI / Anthropic (PoC)  Full Provider Matrix ○
-ScriptRuntime ✓            ←── InProcess / LocalProcess  Sandbox / Remote ○
-ContextPort ✓              ←── InMemoryContextPort (PoC) Platform-specific
-OutputParser ✓             ←── ToolCall / JSONMode        Custom Parser
-
-Registry Extension Points ✓：
-  KERNEL_EVENT_REGISTRY          → custom run.* event types
-  KERNEL_RECOVERY_MODE_REGISTRY  → custom recovery modes
-  CompensationRegistry           → effect_class → async callable
-```
-
----
-
-## 十一、关键不变量
-
-```
-1. ✓ 单一规范路径：Platform → KernelFacade → RuntimeSubstrate → RunActorWorkflow → TurnEngine
-2. ✓ 事件真相不可变：EventLog append-only，derived_diagnostic 不参与决策
-3. ✓ Admission 是副作用唯一门：approve_state 约束强制 readonly
-4. ✓ At-most-once dispatch：DedupeStore 单调状态机，无逆转
-5. ✓ Recovery 不写 EventLog：RecoveryOutcomeStore 独立存储
-6. ✓ 基底受内核托管：KernelRuntime 拥有 RuntimeSubstrate 生命周期，Temporal 是其中一个实现
-7. ✓ DTO 不可变：frozen=True, slots=True
-8. ✓ 进化层不阻塞操作层：fire-and-forget，Projection 读 raw inner
-9. ✓ 上下文工程不旁路：所有模型输入经 ContextPort，不允许平台直接拼 prompt 绕过内核
-10. ✓ 模型推理是受治理的动作：LLM 调用有幂等键 / Token 预算 / Temporal Activity 边界
-11. ✓ 反思轮次有上界：ReflectionPolicy.max_rounds 防止无限反思循环
-12. ✓ 基底连接模式可配置：TemporalSubstrateConfig.mode="sdk"|"host" 统一入口，无需外部脚本
-```
-
----
-
-## 十二、执行委托数据结构（ExecutionPlan 体系）
-
-### 设计原则
-
-内核接受"工作委托"（Plan 级别），不只做单步执行。**结构感知在计划调度层（PlanExecutor），治理不变量在原子步骤层（TurnEngine）**，搜索策略永远在平台层之外。
-
-### 判断一个结构是否需要成为内核原语的标准
-
-> 如果该结构影响 ①哪些副作用被提交、②如何处理失败与恢复、③去重粒度 —— 则它必须是内核原语。
-
-### Plan 类型总览
-
-| Plan 类型 | 状态 | Temporal 兼容 | 说明 |
-|---|---|---|---|
-| `SequentialPlan` | ✓ 已实现 | ✅ | 线性顺序执行 |
-| `ParallelPlan` | ✓ 已实现 | ✅ | 并行组 + join_strategy |
-| `ConditionalPlan` | ✓ 合约完成 | ✅ | 条件路由，基于 gating_action 结果分支 |
-| `DependencyGraph` | ✓ 合约完成 | ✅（需规范化排序） | 节点依赖 DAG，graphlib 执行 |
-| `SpeculativePlan` | ✓ 合约完成 | ⚠️ Child Workflow 模式 | 投机执行池，外部信号选 winner |
-
-### Temporal 安全策略
-
-- **`continue_as_new`**：`RunActorWorkflow` 追踪 `_history_event_count`，达到 `history_event_threshold`（默认 10,000 轮）时调用 `continue_as_new(RunInput)`，重置 History，保留 `run_id / session_id / parent_run_id`。
-- **`SpeculativePlan` 必须用 Child Workflow**：每个候选独立 History，避免主 Workflow History 爆炸（K 候选 × N 步 × 4 events/step 的乘法开销）。
-- **`DependencyGraph` 确定性**：节点必须按 `node_id` 字典序构建拓扑图，同层节点按字典序 `create_task`。
-
-### Branch ≠ child_run — 架构约束说明
-
-> **重要**：Branch 和 child run 是不同层次的概念，不可混同。
-
-| 概念 | 归属 | 说明 |
-|------|------|------|
-| **Branch** | TRACE / hi-agent | 逻辑轨迹身份（trajectory identity）。由 hi-agent 创建、命名、管理语义。agent-kernel 只记录生命周期事件，不拥有语义。 |
-| **child run** | agent-kernel | 一个可能的内核执行载体（execution vehicle）。由 `spawn_child_run` 创建，对应一个独立的 `RunActorWorkflow` 实例。 |
-
-**V1 映射关系**：`1 Branch → 1 child run`（最简映射，便于实现）。
-
-**架构约束**：此映射是 V1 的实现选择，**不是架构约束**。
-- 未来一个 Branch 可能跨越多个 child run（失败重试、迁移）。
-- 未来多个 Branch 可能共享一个 child run（批处理、并发轻量分支）。
-- kernel 不得将 `branch_id == child_run_id` 的假设写入任何持久化结构或协议契约。
-- hi-agent 拥有 Branch 的演进空间，kernel 只负责可靠执行和事件记录。
-
-### KernelFacade 接口体系（v0.2）
-
-```
-KernelFacade
-├── 能力发现
-│   ├── get_manifest() → KernelManifest        # 聚合三大注册表 + PlanTypeRegistry
-│   └── get_health() → dict                    # 透出 KernelHealthProbe.liveness()
-├── 生命周期（已有）
-│   ├── start_run / cancel_run / resume_run / spawn_child_run
-│   └── signal_run（保留，用于平台私有信号）
-├── 计划提交
-│   └── submit_plan(run_id, plan: ExecutionPlan) → PlanSubmissionResponse
-├── 治理交互（新增）
-│   ├── submit_approval(ApprovalRequest)        # human_actor 审批入口
-│   └── commit_speculation(run_id, winner_id)   # 投机执行 winner 选择
-└── 可观测性（已有）
-    ├── stream_run_events / query_run / query_run_dashboard
-    └── escalate_recovery
-```
-
----
-
-## 十三、已实现 vs 待实现全览
-
-| 模块 | 状态 | 所在文件 |
-|------|------|---------|
-| 六权威协议 | ✓ | `kernel/contracts.py` + 各实现 |
-| TurnEngine FSM（串行） | ✓ | `kernel/turn_engine.py` |
-| KernelRuntime 单系统入口 | ✓ | `runtime/kernel_runtime.py` |
-| RuntimeSubstrate Protocol | ✓ | `kernel/contracts.py` |
-| TemporalAdaptor（sdk + host 模式） | ✓ | `substrate/temporal/adaptor.py` |
-| LocalFSMAdaptor | ✓ | `substrate/local/adaptor.py` |
-| KernelFacade 平台入口 | ✓ | `adapters/facade/kernel_facade.py` |
-| CapabilitySnapshot v2 | ✓ | `kernel/capability_snapshot.py` |
-| DedupeStore（InMemory+SQLite） | ✓ | `kernel/dedupe_store.py` + persistence |
-| CompensationRegistry | ✓ | `kernel/recovery/compensation_registry.py` |
-| EventExportPort + 导出层 | ✓ | `kernel/event_export.py` |
-| OTLPRunTraceExporter | ✓ | `runtime/otel_export.py` |
-| ObservabilityHook 体系 | ✓ | `runtime/observability_hooks.py` |
-| KernelHealthProbe + 心跳 | ✓ | `runtime/health.py` + `heartbeat.py` |
-| InteractionTarget（5类） | ✓ | `kernel/contracts.py` |
-| SkillDefinition 合约 | ✓ | `skills/contracts.py` |
-| ContextPort + ContextWindow | ✓ | `kernel/cognitive/context_port.py` |
-| LLMGateway Protocol | ✓ | `kernel/cognitive/llm_gateway.py` |
-| InferenceConfig + TokenBudget | ✓ | `kernel/contracts.py` |
-| execute_inference Activity | ✓ | `substrate/temporal/activity_gateway.py` |
-| OutputParser Protocol | ✓ | `kernel/cognitive/output_parser.py` |
-| ReasoningLoop | ✓ | `kernel/cognitive/reasoning_loop.py` |
-| ExecutionPlan + ParallelPlan | ✓ | `kernel/contracts.py` |
-| PlanExecutor | ✓ | `kernel/plan_executor.py` |
-| TurnEngine 并行状态 | ✓ | `kernel/turn_engine.py` |
-| BranchMonitor | ✓ | `kernel/contracts.py` + `plan_executor.py` |
-| ScriptRuntime Protocol | ✓ | `kernel/cognitive/script_runtime.py` |
-| execute_skill_script Activity | ✓ | `substrate/temporal/activity_gateway.py` |
-| reflect_and_retry 恢复模式 | ✓ | `kernel/recovery/gate.py` + `recovery/` |
-| ScriptFailureEvidence | ✓ | `kernel/failure_evidence.py` |
-| ReflectionPolicy | ✓ | `kernel/recovery/` |
-| ReflectionContextBuilder | ✓ | `kernel/cognitive/reflection_builder.py` |
-| 技能驱动完整链路 | ✓ | `skills/` + Child Workflow 集成 |
-| **ConditionalPlan（条件路由）** | **✓** | `kernel/contracts.py` |
-| **DependencyGraph（节点依赖 DAG）** | **✓** | `kernel/contracts.py` |
-| **SpeculativePlan（投机执行池）** | **✓** | `kernel/contracts.py` |
-| **PlanTypeRegistry（计划类型注册表）** | **✓** | `kernel/plan_type_registry.py` |
-| **KernelManifest（能力声明 DTO）** | **✓** | `kernel/contracts.py` |
-| **ApprovalRequest / PlanSubmissionResponse** | **✓** | `kernel/contracts.py` |
-| **KernelFacade.get_manifest()** | **✓** | `adapters/facade/kernel_facade.py` |
-| **KernelFacade.submit_plan()** | **✓** | `adapters/facade/kernel_facade.py` |
-| **KernelFacade.submit_approval()** | **✓** | `adapters/facade/kernel_facade.py` |
-| **KernelFacade.commit_speculation()** | **✓** | `adapters/facade/kernel_facade.py` |
-| **KernelFacade.get_health()** | **✓** | `adapters/facade/kernel_facade.py` |
-| **RunActorWorkflow continue_as_new** | **✓** | `substrate/temporal/run_actor_workflow.py` |
-| PlanExecutor ConditionalPlan 执行路径 | ○ | 待实现（python-statemachine） |
-| PlanExecutor DependencyGraph 执行路径 | ○ | 待实现（graphlib + asyncio.TaskGroup） |
-| SpeculativePlan Child Workflow 执行路径 | ○ | 待实现（spawn_child_run 驱动） |
+- LocalFSM 不提供跨进程隔离与 Temporal 历史能力
+- Temporal 集成测试依赖本机策略允许测试 server 启动
+- In-memory 后端不适合长期生产审计留存
