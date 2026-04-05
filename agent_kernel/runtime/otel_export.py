@@ -76,6 +76,7 @@ class OTLPRunTraceExporter:
         include_payload: When ``True``, ``payload_json`` of each
             ``RuntimeEvent`` is serialised into span event attributes.
             Disable in production if payloads contain PII.
+
     """
 
     def __init__(
@@ -85,14 +86,16 @@ class OTLPRunTraceExporter:
         service_name: str = "agent-kernel",
         include_payload: bool = False,
     ) -> None:
+        """Initialize the instance with configured dependencies."""
         self._tracer = _resolve_tracer(tracer_provider, service_name)
         self._include_payload = include_payload
 
     async def export_commit(self, commit: ActionCommit) -> None:
-        """Exports one commit as an OpenTelemetry span.
+        """Export one commit as an OpenTelemetry span.
 
         Args:
             commit: The ``ActionCommit`` to export.
+
         """
         span_name = "kernel.turn" if commit.action is not None else "kernel.lifecycle"
         attributes = _build_span_attributes(commit)
@@ -125,7 +128,7 @@ class OTLPRunTraceExporter:
 
 
 def _resolve_tracer(provider: Any | None, service_name: str) -> Any:
-    """Resolves an OTel Tracer from the given or global provider.
+    """Resolve an OTel Tracer from the given or global provider.
 
     Args:
         provider: Explicit ``TracerProvider``, or ``None`` to use global.
@@ -136,6 +139,7 @@ def _resolve_tracer(provider: Any | None, service_name: str) -> Any:
 
     Raises:
         ImportError: If ``opentelemetry-api`` is not installed.
+
     """
     try:
         import opentelemetry.trace as otel_trace  # type: ignore[import]
@@ -151,13 +155,14 @@ def _resolve_tracer(provider: Any | None, service_name: str) -> Any:
 
 
 def _build_span_attributes(commit: ActionCommit) -> dict[str, Any]:
-    """Builds the OTel span attribute dict for a commit.
+    """Build the OTel span attribute dict for a commit.
 
     Args:
         commit: The commit to extract attributes from.
 
     Returns:
         Flat dict of OTel-compatible attribute key/value pairs.
+
     """
     attrs: dict[str, Any] = {
         "kernel.run_id": commit.run_id,
@@ -179,7 +184,7 @@ def _build_span_attributes(commit: ActionCommit) -> dict[str, Any]:
 
 
 def _iso_to_ns(iso_timestamp: str) -> int | None:
-    """Converts an ISO8601 UTC timestamp string to nanoseconds since epoch.
+    """Convert an ISO8601 UTC timestamp string to nanoseconds since epoch.
 
     Returns ``None`` on parse failure so the span uses the current time.
 
@@ -188,6 +193,7 @@ def _iso_to_ns(iso_timestamp: str) -> int | None:
 
     Returns:
         Nanoseconds since Unix epoch, or ``None`` on failure.
+
     """
     try:
         from datetime import UTC, datetime

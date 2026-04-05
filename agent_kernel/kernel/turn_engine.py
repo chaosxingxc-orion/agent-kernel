@@ -47,6 +47,7 @@ from agent_kernel.kernel.dedupe_store import (
     IdempotencyEnvelope,
 )
 from agent_kernel.kernel.failure_evidence import apply_failure_evidence_priority
+from agent_kernel.kernel.idempotency_key_policy import IdempotencyKeyPolicy
 from agent_kernel.kernel.remote_service_policy import (
     RemoteDispatchPolicyDecision,
     evaluate_remote_service_policy,
@@ -79,6 +80,7 @@ class TurnStateEvent:
         reason: Optional human-readable reason for the transition.
         metadata: Optional extra key-value pairs for diagnostic events
             (e.g. effect scope downgrade fields, deprecation markers).
+
     """
 
     state: str
@@ -96,6 +98,7 @@ class TurnInput:
         based_on_offset: Baseline offset the turn replays from.
         trigger_type: Discriminator for the turn trigger origin.
         history: Optional ordered event history for passing to reasoning loop.
+
     """
 
     run_id: str
@@ -121,6 +124,7 @@ class TurnResult:
         action_commit: Optional commit metadata for a successful dispatch.
         recovery_input: Optional failure envelope when recovery is pending.
         emitted_events: Ordered list of state-transition event dicts.
+
     """
 
     state: TurnState
@@ -146,6 +150,7 @@ class _TurnIdentity:
             run identity, trigger type, action, and offset.
         intent_commit_ref: Reference linking turn to its intent commit.
         dispatch_dedupe_key: Deduplication key for at-most-once dispatch.
+
     """
 
     decision_ref: str
@@ -164,6 +169,7 @@ class _DispatchPolicy:
         block_reason: Human-readable reason when ``should_block`` is True.
         remote_policy_decision: Remote idempotency policy evaluation
             result when the action targets a remote service.
+
     """
 
     host_kind: HostKind
@@ -176,13 +182,14 @@ class SnapshotBuilderPort(Protocol):
     """Protocol for capability snapshot construction."""
 
     def build(self, input_value: CapabilitySnapshotInput) -> CapabilitySnapshot:
-        """Builds one capability snapshot.
+        """Build one capability snapshot.
 
         Args:
             input_value: Normalized snapshot input payload.
 
         Returns:
             Immutable capability snapshot with deterministic hash.
+
         """
 
 
@@ -190,7 +197,7 @@ class AdmissionPort(Protocol):
     """Protocol for admission checks in turn execution."""
 
     async def admit(self, action: Action, snapshot: CapabilitySnapshot) -> Any:
-        """Returns whether action is admitted for dispatch under snapshot.
+        """Return whether action is admitted for dispatch under snapshot.
 
         Args:
             action: Candidate action to evaluate.
@@ -198,10 +205,11 @@ class AdmissionPort(Protocol):
 
         Returns:
             Admission decision object consumed by turn execution.
+
         """
 
     async def check(self, action: Action, snapshot: CapabilitySnapshot) -> Any:
-        """Returns whether action is admitted for dispatch.
+        """Return whether action is admitted for dispatch.
 
         Args:
             action: Candidate action to evaluate.
@@ -209,6 +217,7 @@ class AdmissionPort(Protocol):
 
         Returns:
             Admission result or boolean indicating admission status.
+
         """
 
 
@@ -222,15 +231,18 @@ class ExecutorPort(Protocol):
         envelope: IdempotencyEnvelope,
         execution_context: ExecutionContext | None = None,
     ) -> dict[str, Any]:
-        """Executes one action and returns execution evidence payload.
+        """Execute one action and returns execution evidence payload.
 
         Args:
             action: Admitted action to execute.
             snapshot: Capability snapshot governing execution.
             envelope: Idempotency envelope for dispatch deduplication.
 
+            execution_context: Parameter from function signature.
+
         Returns:
             Execution evidence dictionary with acknowledgement status.
+
         """
 
 
@@ -242,7 +254,7 @@ class SnapshotInputResolverPort(Protocol):
         input_value: TurnInput,
         action: Action,
     ) -> CapabilitySnapshotInput:
-        """Resolves one snapshot input object.
+        """Resolve one snapshot input object.
 
         Args:
             input_value: Turn input providing run identity and offsets.
@@ -250,6 +262,7 @@ class SnapshotInputResolverPort(Protocol):
 
         Returns:
             Normalized snapshot input for capability snapshot builder.
+
         """
 
 
@@ -276,6 +289,7 @@ class TurnPhaseContext:
         dispatch_policy: Resolved dispatch policy (set in policy phase).
         envelope: Idempotency envelope for deduplication (set in dedupe phase).
         execute_result: Raw executor response dict (set in execute phase).
+
     """
 
     input_value: TurnInput
@@ -291,6 +305,7 @@ class TurnPhaseContext:
     # Internal flags set by _phase_dedupe and consumed by _phase_execute.
     _dedupe_available: bool = True
     _dedupe_outcome: str = "accepted"
+    _legacy_alias_key: str | None = None
 
 
 class TurnEngine:
@@ -301,7 +316,7 @@ class TurnEngine:
     ``_TURN_PHASES`` is a class-level ordered tuple of phase method names.
     Each phase is an ``async`` method that accepts a ``TurnPhaseContext`` and
     returns ``None``.  When a phase wants to terminate the turn early it sets
-    ``ctx.result`` — the dispatcher stops and returns that result.
+    ``ctx.result`` 鈥?the dispatcher stops and returns that result.
 
     Subclasses may override individual phase methods or extend
     ``_TURN_PHASES`` by re-declaring it in the subclass body::
@@ -350,6 +365,7 @@ class TurnEngine:
             ValueError: When *name* is already registered, or when the
                 anchor phase (*after* / *before*) is not found.
             TypeError: When both *after* and *before* are provided.
+
         """
         if after is not None and before is not None:
             raise TypeError("Provide at most one of 'after' or 'before', not both.")
@@ -388,7 +404,7 @@ class TurnEngine:
         observability_hook: Any | None = None,
         phase_timeout_ms: int | None = None,
     ) -> None:
-        """Initializes TurnEngine with required service dependencies.
+        """Initialize TurnEngine with required service dependencies.
 
         Args:
             snapshot_builder: Service that builds capability snapshots.
@@ -411,6 +427,7 @@ class TurnEngine:
                 caller so RunActorWorkflow can treat it as a recoverable
                 failure.  When ``None`` (default), no per-phase timeout is
                 applied.
+
         """
         self._snapshot_builder = snapshot_builder
         self._admission_service = admission_service
@@ -430,7 +447,7 @@ class TurnEngine:
         action: Action | None = None,
         admission_subject: Any | None = None,
     ) -> TurnResult:
-        """Runs one turn by dispatching through ``_TURN_PHASES`` in order.
+        """Run one turn by dispatching through ``_TURN_PHASES`` in order.
 
         Each phase is an async method accepting a ``TurnPhaseContext``.  When a
         phase sets ``ctx.result`` the dispatcher stops and returns that result,
@@ -449,6 +466,7 @@ class TurnEngine:
 
         Raises:
             TypeError: If the admission result is an unawaited awaitable.
+
         """
         ctx = TurnPhaseContext(
             input_value=input_value,
@@ -476,13 +494,13 @@ class TurnEngine:
                     )
             if ctx.result is not None:
                 return ctx.result
-        # Safety net — all paths through the phases must set ctx.result.
+        # Safety net 鈥?all paths through the phases must set ctx.result.
         raise RuntimeError(  # pragma: no cover
             "TurnEngine phases completed without setting ctx.result."
         )
 
     # ------------------------------------------------------------------
-    # Phase handlers — each sets ctx.result to terminate, or leaves it
+    # Phase handlers 鈥?each sets ctx.result to terminate, or leaves it
     # None to allow the next phase to run.
     # ------------------------------------------------------------------
 
@@ -570,6 +588,12 @@ class TurnEngine:
             )
             ctx.snapshot = self._snapshot_builder.build(snapshot_input)
             assert_snapshot_compatible(ctx.snapshot)
+            # Recompute identity with snapshot-aware idempotency key policy.
+            ctx.turn_identity = _build_turn_identity(
+                input_value=ctx.input_value,
+                action=ctx.action,
+                snapshot_hash=ctx.snapshot.snapshot_hash,
+            )
             ctx.emitted_events.append(TurnStateEvent(state="snapshot_built"))
         except CapabilitySnapshotBuildError, ValueError:
             ctx.emitted_events.append(TurnStateEvent(state="completed_noop"))
@@ -624,9 +648,9 @@ class TurnEngine:
         assert ctx.action is not None
         assert ctx.turn_identity is not None
         ti = ctx.turn_identity
-        # Validate action_type against KERNEL_ACTION_TYPE_REGISTRY (warning only —
-        # unknown types are not blocked so custom registrations loaded after startup
-        # still dispatch correctly).
+        # Validate action_type against KERNEL_ACTION_TYPE_REGISTRY (warning only).
+        # Unknown types are not blocked so custom registrations loaded after
+        # startup still dispatch correctly.
         validate_action_type(ctx.action.action_type)
         ctx.dispatch_policy = _resolve_dispatch_policy(action=ctx.action)
         if ctx.dispatch_policy.should_block:
@@ -656,6 +680,36 @@ class TurnEngine:
         assert ctx.dispatch_policy is not None
         ti = ctx.turn_identity
         dp = ctx.dispatch_policy
+        legacy_key = _legacy_dispatch_dedupe_key(
+            run_id=ctx.input_value.run_id,
+            action_id=ctx.action.action_id,
+            based_on_offset=ctx.input_value.based_on_offset,
+        )
+        if legacy_key != ti.dispatch_dedupe_key:
+            legacy_record = None
+            with contextlib.suppress(Exception):
+                legacy_record = self._dedupe_store.get(legacy_key)
+            if legacy_record is not None:
+                ctx.emitted_events.append(TurnStateEvent(state="dispatch_blocked"))
+                ctx.result = TurnResult(
+                    state="dispatch_blocked",
+                    outcome_kind="blocked",
+                    decision_ref=ti.decision_ref,
+                    decision_fingerprint=ti.decision_fingerprint,
+                    dispatch_dedupe_key=ti.dispatch_dedupe_key,
+                    intent_commit_ref=ti.intent_commit_ref,
+                    host_kind=dp.host_kind,
+                    remote_policy_decision=dp.remote_policy_decision,
+                    emitted_events=ctx.emitted_events,
+                )
+                if self._observability_hook is not None:
+                    with contextlib.suppress(Exception):
+                        self._observability_hook.on_dedupe_hit(
+                            run_id=ctx.input_value.run_id,
+                            action_id=legacy_key,
+                            outcome="duplicate",
+                        )
+                return
         ctx.envelope = _resolve_idempotency_envelope(
             admission_result=ctx.admission_result,
             turn_identity=ti,
@@ -695,6 +749,28 @@ class TurnEngine:
         dedupe_available = ctx._dedupe_available  # type: ignore[attr-defined]
         _dedupe_outcome = "degraded" if not dedupe_available else "accepted"
         ctx._dedupe_outcome = _dedupe_outcome  # type: ignore[attr-defined]
+        if dedupe_available and legacy_key != ti.dispatch_dedupe_key:
+            # Backward compatibility: mirror the new dedupe slot into the
+            # historical key shape so pre-policy readers can still resolve the
+            # same dispatch lifecycle.
+            with contextlib.suppress(Exception):
+                legacy_envelope = IdempotencyEnvelope(
+                    dispatch_idempotency_key=legacy_key,
+                    operation_fingerprint=ctx.envelope.operation_fingerprint,
+                    attempt_seq=ctx.envelope.attempt_seq,
+                    effect_scope=ctx.envelope.effect_scope,
+                    capability_snapshot_hash=ctx.envelope.capability_snapshot_hash,
+                    host_kind=ctx.envelope.host_kind,
+                    peer_operation_id=ctx.envelope.peer_operation_id,
+                    policy_snapshot_ref=ctx.envelope.policy_snapshot_ref,
+                    rule_bundle_hash=ctx.envelope.rule_bundle_hash,
+                )
+                legacy_reservation = self._dedupe_store.reserve_and_dispatch(
+                    legacy_envelope,
+                    peer_operation_id=ctx.envelope.peer_operation_id,
+                )
+                if legacy_reservation.accepted:
+                    ctx._legacy_alias_key = legacy_key  # type: ignore[attr-defined]
         # mark_dispatched() is no longer called here: _reserve_with_degradation
         # uses reserve_and_dispatch() which atomically combines reservation and
         # dispatch state update, eliminating the non-atomic window (D-M3).
@@ -718,6 +794,7 @@ class TurnEngine:
         dp = ctx.dispatch_policy
         dedupe_available: bool = ctx._dedupe_available  # type: ignore[attr-defined]
         _dedupe_outcome: str = ctx._dedupe_outcome  # type: ignore[attr-defined]
+        legacy_alias_key: str | None = ctx._legacy_alias_key  # type: ignore[attr-defined]
 
         execution_context = _build_execution_context(
             input_value=ctx.input_value,
@@ -737,11 +814,14 @@ class TurnEngine:
                 execution_context=execution_context,
             )
         except Exception:
-            # Ack-before-commit: executor raised before acknowledging — mark as
+            # Ack-before-commit: executor raised before acknowledging 鈥?mark as
             # unknown_effect so the DedupeStore does not stay in "dispatched".
             if dedupe_available:
                 with contextlib.suppress(Exception):
                     self._dedupe_store.mark_unknown_effect(ti.dispatch_dedupe_key)
+                if legacy_alias_key is not None:
+                    with contextlib.suppress(Exception):
+                        self._dedupe_store.mark_unknown_effect(legacy_alias_key)
             raise
         _dispatch_latency_ms = (time.monotonic_ns() - _dispatch_start_ns) // 1_000_000
         if self._observability_hook is not None:
@@ -756,6 +836,9 @@ class TurnEngine:
         if acknowledged:
             if dedupe_available:
                 self._dedupe_store.mark_acknowledged(ti.dispatch_dedupe_key)
+                if legacy_alias_key is not None:
+                    with contextlib.suppress(Exception):
+                        self._dedupe_store.mark_acknowledged(legacy_alias_key)
             ctx.emitted_events.append(TurnStateEvent(state="dispatch_acknowledged"))
             if self._observability_hook is not None:
                 with contextlib.suppress(Exception):
@@ -787,6 +870,9 @@ class TurnEngine:
 
         if dedupe_available:
             self._dedupe_store.mark_unknown_effect(ti.dispatch_dedupe_key)
+            if legacy_alias_key is not None:
+                with contextlib.suppress(Exception):
+                    self._dedupe_store.mark_unknown_effect(legacy_alias_key)
         ctx.emitted_events.extend(
             [TurnStateEvent(state="effect_unknown"), TurnStateEvent(state="recovery_pending")]
         )
@@ -811,16 +897,17 @@ class TurnEngine:
 
 
 def _utc_now_iso() -> str:
-    """Returns an RFC3339 UTC timestamp.
+    """Return an RFC3339 UTC timestamp.
 
     Returns:
         UTC timestamp string in ``YYYY-MM-DDTHH:MM:SSZ`` format.
+
     """
     return datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
 
 
 def _is_admitted(admission_result: Any) -> bool:
-    """Resolves admitted bool from varied admission return shapes.
+    """Resolve admitted bool from varied admission return shapes.
 
     Compatibility:
       - ``bool`` return is accepted for test doubles.
@@ -837,6 +924,7 @@ def _is_admitted(admission_result: Any) -> bool:
     Raises:
         TypeError: If ``admission_result`` is an awaitable that was not
             awaited before the check.
+
     """
     if inspect.isawaitable(admission_result):
         raise TypeError("Admission result must be awaited before admission check.")
@@ -853,7 +941,7 @@ async def _evaluate_admission(
     action: Action,
     snapshot: CapabilitySnapshot,
 ) -> Any:
-    """Evaluates admission via the canonical ``admit(action, snapshot)`` interface.
+    """Evaluate admission via the canonical ``admit(action, snapshot)`` interface.
 
     Args:
         admission_service: Admission service implementing ``admit()``.
@@ -865,6 +953,7 @@ async def _evaluate_admission(
 
     Raises:
         TypeError: When the service does not implement ``admit()``.
+
     """
     admit_method = getattr(admission_service, "admit", None)
     if not callable(admit_method):
@@ -881,7 +970,7 @@ def _resolve_idempotency_envelope(
     snapshot: CapabilitySnapshot,
     host_kind: HostKind,
 ) -> IdempotencyEnvelope:
-    """Resolves idempotency envelope from admission result or deterministic fallback."""
+    """Resolve idempotency envelope from admission result or deterministic fallback."""
     envelope_payload = getattr(admission_result, "idempotency_envelope", None)
     parsed = _parse_idempotency_envelope(
         envelope_payload=envelope_payload,
@@ -913,7 +1002,7 @@ def _parse_idempotency_envelope(
     envelope_payload: Any,
     capability_snapshot_hash: str,
 ) -> IdempotencyEnvelope | None:  # pylint: disable=too-many-return-statements
-    """Parses envelope from admission-provided payload when valid."""
+    """Parse envelope from admission-provided payload when valid."""
     if isinstance(envelope_payload, IdempotencyEnvelope):
         return envelope_payload
     if not isinstance(envelope_payload, dict):
@@ -959,7 +1048,7 @@ def _build_execution_context(
     admission_result: Any,
     envelope: IdempotencyEnvelope,
 ) -> ExecutionContext:
-    """Builds execution context envelope for executor/recovery traceability."""
+    """Build execution context envelope for executor/recovery traceability."""
     policy_snapshot_ref = getattr(admission_result, "policy_snapshot_ref", None)
     grant_ref = getattr(admission_result, "grant_ref", None)
     rule_bundle_hash = envelope.rule_bundle_hash
@@ -992,7 +1081,7 @@ def _build_execution_context(
 def _execution_context_payload(
     execution_context: ExecutionContext,
 ) -> dict[str, Any]:
-    """Builds minimal replay-safe execution context payload."""
+    """Build minimal replay-safe execution context payload."""
     return {
         "run_id": execution_context.run_id,
         "action_id": execution_context.action_id,
@@ -1018,7 +1107,7 @@ async def _execute_with_context(
     envelope: IdempotencyEnvelope,
     execution_context: ExecutionContext,
 ) -> dict[str, Any]:
-    """Executes action and passes execution context when executor supports it."""
+    """Execute action and passes execution context when executor supports it."""
     execute_method = executor.execute
     try:
         signature = inspect.signature(execute_method)
@@ -1066,7 +1155,7 @@ def _reserve_with_degradation(
             rule_bundle_hash=envelope.rule_bundle_hash,
         )
         _logger.warning(
-            "dedupe_store unavailable run=%s action=%s effect_class=%s — degrading",
+            "dedupe_store unavailable run=%s action=%s effect_class=%s 鈥?degrading",
             action.run_id,
             action.action_id,
             action.effect_class,
@@ -1085,7 +1174,7 @@ def _reserve_with_degradation(
 
 
 def _resolve_dedupe_downgrade_scope(host_kind: HostKind) -> str:
-    """Resolves degraded effect scope when dedupe persistence is unavailable."""
+    """Resolve degraded effect scope when dedupe persistence is unavailable."""
     if host_kind == "remote_service":
         return "irreversible_write"
     return "compensatable_write"
@@ -1097,7 +1186,7 @@ def _resolve_snapshot_input(
     resolver: SnapshotInputResolverPort | None,
     require_declared_snapshot_inputs: bool,
 ) -> CapabilitySnapshotInput:
-    """Resolves snapshot input from resolver or action payload.
+    """Resolve snapshot input from resolver or action payload.
 
     When ``require_declared_snapshot_inputs`` is enabled, missing declared
     payload raises ``CapabilitySnapshotBuildError`` to enforce v6.4 strict mode.
@@ -1114,6 +1203,7 @@ def _resolve_snapshot_input(
     Raises:
         CapabilitySnapshotBuildError: When strict mode is enabled and
             no declared snapshot payload is present in the action.
+
     """
     if resolver is not None:
         return resolver.resolve(input_value, action)
@@ -1148,8 +1238,12 @@ def _resolve_snapshot_input(
     )
 
 
-def _build_turn_identity(input_value: TurnInput, action: Action) -> _TurnIdentity:
-    """Builds deterministic identity fields for one turn.
+def _build_turn_identity(
+    input_value: TurnInput,
+    action: Action,
+    snapshot_hash: str | None = None,
+) -> _TurnIdentity:
+    """Build deterministic identity fields for one turn.
 
     Args:
         input_value: Turn input with run identity and offsets.
@@ -1157,6 +1251,7 @@ def _build_turn_identity(input_value: TurnInput, action: Action) -> _TurnIdentit
 
     Returns:
         Immutable turn identity with decision references and dedupe key.
+
     """
     return _TurnIdentity(
         decision_ref=f"decision:{input_value.run_id}:{input_value.based_on_offset}",
@@ -1168,13 +1263,28 @@ def _build_turn_identity(input_value: TurnInput, action: Action) -> _TurnIdentit
         ),
         intent_commit_ref=f"intent:{action.action_id}:{input_value.through_offset}",
         dispatch_dedupe_key=(
-            f"{input_value.run_id}:{action.action_id}:{input_value.based_on_offset}"
+            IdempotencyKeyPolicy.generate(
+                run_id=input_value.run_id,
+                action=action,
+                snapshot_hash=snapshot_hash,
+            )
+            if snapshot_hash is not None
+            else _legacy_dispatch_dedupe_key(
+                run_id=input_value.run_id,
+                action_id=action.action_id,
+                based_on_offset=input_value.based_on_offset,
+            )
         ),
     )
 
 
+def _legacy_dispatch_dedupe_key(run_id: str, action_id: str, based_on_offset: int) -> str:
+    """Return historical dispatch key format used by pre-policy snapshots."""
+    return f"{run_id}:{action_id}:{based_on_offset}"
+
+
 def _resolve_dispatch_policy(action: Action) -> _DispatchPolicy:
-    """Resolves dispatch host and enforces remote idempotency safeguards.
+    """Resolve dispatch host and enforces remote idempotency safeguards.
 
     Conservative v6.4 enforcement:
       - Explicit local hosts bypass remote contract checks.
@@ -1186,6 +1296,7 @@ def _resolve_dispatch_policy(action: Action) -> _DispatchPolicy:
 
     Returns:
         Dispatch policy with host kind and optional block decision.
+
     """
     host_kind = _resolve_dispatch_host_kind(action)
     if host_kind != "remote_service" or action.effect_class == "read_only":
@@ -1212,13 +1323,14 @@ def _resolve_dispatch_policy(action: Action) -> _DispatchPolicy:
 
 
 def _resolve_dispatch_host_kind(action: Action) -> HostKind:
-    """Resolves dispatch host kind from explicit hints and effect metadata.
+    """Resolve dispatch host kind from explicit hints and effect metadata.
 
     Args:
         action: Action with policy tags, payload, and effect metadata.
 
     Returns:
         Resolved host kind, defaulting to ``"local_cli"``.
+
     """
     explicit_host_kind = _resolve_explicit_host_kind(action)
     if explicit_host_kind is not None:
@@ -1230,13 +1342,14 @@ def _resolve_dispatch_host_kind(action: Action) -> HostKind:
 
 
 def _resolve_explicit_host_kind(action: Action) -> HostKind | None:
-    """Resolves explicit host kind from policy tags and action payload.
+    """Resolve explicit host kind from policy tags and action payload.
 
     Args:
         action: Action carrying policy tags and input payload.
 
     Returns:
         Explicit host kind when found, otherwise ``None``.
+
     """
     host_kind_from_tags = _extract_host_kind_from_policy_tags(action.policy_tags)
     if host_kind_from_tags is not None:
@@ -1250,13 +1363,14 @@ def _resolve_explicit_host_kind(action: Action) -> HostKind | None:
 
 
 def _extract_host_kind_from_policy_tags(policy_tags: list[str]) -> HostKind | None:
-    """Extracts host kind from policy tags when present.
+    """Extract host kind from policy tags when present.
 
     Args:
         policy_tags: List of policy tag strings to search.
 
     Returns:
         Normalized host kind when a valid tag is found, else ``None``.
+
     """
     for tag in policy_tags:
         normalized_tag = tag.strip().lower()
@@ -1275,13 +1389,14 @@ def _extract_host_kind_from_policy_tags(policy_tags: list[str]) -> HostKind | No
 
 
 def _extract_host_kind_from_payload(payload: dict[str, Any]) -> HostKind | None:
-    """Extracts host kind from action payload using conservative key aliases.
+    """Extract host kind from action payload using conservative key aliases.
 
     Args:
         payload: Action input payload dictionary.
 
     Returns:
         Normalized host kind when a valid value is found, else ``None``.
+
     """
     for key in ("host_kind", "dispatch_host_kind", "host", "dispatch_host"):
         host_kind = _normalize_host_kind(payload.get(key))
@@ -1298,13 +1413,14 @@ def _extract_host_kind_from_payload(payload: dict[str, Any]) -> HostKind | None:
 
 
 def _normalize_host_kind(value: Any) -> HostKind | None:
-    """Normalizes one host kind value to canonical literal form.
+    """Normalize one host kind value to canonical literal form.
 
     Args:
         value: Raw host kind value, typically a string.
 
     Returns:
         Canonical host kind literal, or ``None`` when invalid.
+
     """
     if not isinstance(value, str):
         return None
@@ -1323,13 +1439,14 @@ def _normalize_host_kind(value: Any) -> HostKind | None:
 def _extract_remote_service_contract(
     input_json: dict[str, Any] | None,
 ) -> RemoteServiceIdempotencyContract | None:
-    """Extracts remote-service contract from action payload if available.
+    """Extract remote-service contract from action payload if available.
 
     Args:
         input_json: Action input payload, may be ``None``.
 
     Returns:
         Parsed contract when a valid candidate is found, else ``None``.
+
     """
     if not isinstance(input_json, dict):
         return None
@@ -1358,13 +1475,14 @@ def _extract_remote_service_contract(
 def _parse_remote_service_contract(
     payload: Any,
 ) -> RemoteServiceIdempotencyContract | None:
-    """Parses RemoteServiceIdempotencyContract from dict payload.
+    """Parse RemoteServiceIdempotencyContract from dict payload.
 
     Args:
         payload: Candidate dict payload with contract fields.
 
     Returns:
         Typed contract when all required fields are valid, else ``None``.
+
     """
     if not isinstance(payload, dict):
         return None
@@ -1396,7 +1514,7 @@ def _parse_remote_service_contract(
 
 
 def _read_optional_string(payload: dict[str, Any], key: str) -> str | None:
-    """Reads one non-empty string field from a payload dict.
+    """Read one non-empty string field from a payload dict.
 
     Args:
         payload: Dictionary to read from.
@@ -1404,6 +1522,7 @@ def _read_optional_string(payload: dict[str, Any], key: str) -> str | None:
 
     Returns:
         Trimmed non-empty string value, or ``None`` when absent or empty.
+
     """
     value = payload.get(key)
     if isinstance(value, str):
@@ -1422,7 +1541,7 @@ def _build_recovery_pending_turn_result(
     remote_policy_decision: RemoteDispatchPolicyDecision | None,
     emitted_events: list[TurnStateEvent],
 ) -> TurnResult:
-    """Builds recovery-pending result with normalized failure evidence fields.
+    """Build recovery-pending result with normalized failure evidence fields.
 
     Args:
         input_value: Original turn input.
@@ -1435,6 +1554,7 @@ def _build_recovery_pending_turn_result(
 
     Returns:
         Turn result in ``recovery_pending`` state with failure envelope.
+
     """
     external_ack_ref = _read_optional_string(execute_result, "external_ack_ref")
     evidence_ref = _read_optional_string(execute_result, "evidence_ref")

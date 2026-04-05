@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# Optional OpenTelemetry import — degrades gracefully when not installed.
+# Optional OpenTelemetry import 鈥?degrades gracefully when not installed.
 # ---------------------------------------------------------------------------
 try:
     from opentelemetry import trace as _otel_trace
@@ -68,7 +68,7 @@ except ImportError:  # pragma: no cover
 
 
 def _extract_otel_context(trace_context: str | None) -> Any | None:
-    """Extracts OTel context from a W3C traceparent string.
+    """Extract OTel context from a W3C traceparent string.
 
     Returns ``None`` (ambient context) when OTel is not installed, when
     ``trace_context`` is absent, or when extraction fails.
@@ -78,6 +78,7 @@ def _extract_otel_context(trace_context: str | None) -> Any | None:
 
     Returns:
         Extracted OTel ``Context`` for use as a span parent, or ``None``.
+
     """
     if not _OTEL_AVAILABLE or not trace_context or _PROPAGATOR is None:
         return None
@@ -178,6 +179,7 @@ def _json_log(logger: logging.Logger, event: str, **fields: Any) -> None:
         logger: Target logger.
         event: Short event name (e.g. ``"turn_transition"``).
         **fields: Additional context fields serialised into the JSON object.
+
     """
     record = {"ts_ms": int(time.time() * 1_000), "event": event, **fields}
     logger.debug(json.dumps(record, default=str))
@@ -201,6 +203,7 @@ class LoggingObservabilityHook:
             Defaults to ``"agent_kernel.observability"``.
         use_json: When ``True`` emits JSON-formatted log lines.
             Defaults to ``False`` (key=value text format).
+
     """
 
     logger_name: str = "agent_kernel.observability"
@@ -234,6 +237,7 @@ class LoggingObservabilityHook:
             to_state: New FSM state.
             turn_offset: Monotonic turn offset.
             timestamp_ms: UTC epoch milliseconds.
+
         """
         self._log(
             "turn_transition",
@@ -260,6 +264,7 @@ class LoggingObservabilityHook:
             from_state: Previous lifecycle state.
             to_state: New lifecycle state.
             timestamp_ms: UTC epoch milliseconds.
+
         """
         self._log(
             "run_transition",
@@ -456,6 +461,7 @@ class CompositeObservabilityHook:
 
     Args:
         hooks: Ordered list of hook implementations to fan-out to.
+
     """
 
     hooks: list[Any] = field(default_factory=list)
@@ -681,8 +687,7 @@ class CompositeObservabilityHook:
 
 @dataclass(slots=True)
 class OtelObservabilityHook:
-    """OpenTelemetry-backed ObservabilityHook that emits one span per
-    transition.
+    """OpenTelemetry-backed ObservabilityHook that emits one span per transition.
 
     Degrades to a no-op when ``opentelemetry-api`` is not installed, so
     deployments without an OTel backend pay zero import cost.
@@ -704,6 +709,7 @@ class OtelObservabilityHook:
 
         hook = OtelObservabilityHook()
         # Wire into CompositeObservabilityHook or use directly.
+
     """
 
     tracer_name: str = "agent_kernel"
@@ -740,6 +746,7 @@ class OtelObservabilityHook:
             turn_offset: Monotonic turn offset.
             timestamp_ms: UTC epoch milliseconds.
             trace_context: Optional W3C traceparent to restore remote parent span.
+
         """
         tracer = self._get_tracer()
         if tracer is None:
@@ -777,6 +784,7 @@ class OtelObservabilityHook:
             from_state: Previous lifecycle state.
             to_state: New lifecycle state.
             timestamp_ms: UTC epoch milliseconds.
+
         """
         tracer = self._get_tracer()
         if tracer is None:
@@ -805,6 +813,7 @@ class OtelObservabilityHook:
             model_ref: Provider-qualified model identifier.
             latency_ms: Wall-clock latency in milliseconds.
             token_usage: Typed token consumption, or ``None``.
+
         """
         tracer = self._get_tracer()
         if tracer is None:
@@ -841,6 +850,7 @@ class OtelObservabilityHook:
             action_type: Discriminator string for the action class.
             outcome_kind: Outcome label (``"dispatched"``, ``"blocked"``, etc.).
             latency_ms: Wall-clock latency of the dispatch call.
+
         """
         tracer = self._get_tracer()
         if tracer is None:
@@ -868,6 +878,7 @@ class OtelObservabilityHook:
             run_id: Run identifier.
             reason_code: Failure reason code that triggered recovery.
             mode: Recovery mode selected.
+
         """
         tracer = self._get_tracer()
         if tracer is None:
@@ -895,6 +906,7 @@ class OtelObservabilityHook:
             action_id: Action being admitted or rejected.
             admitted: ``True`` when admission was granted.
             latency_ms: Wall-clock duration of the admission check.
+
         """
         tracer = self._get_tracer()
         if tracer is None:
@@ -923,6 +935,7 @@ class OtelObservabilityHook:
             action_id: Action being dispatched.
             dedupe_outcome: Outcome of the dedupe reservation.
             latency_ms: Wall-clock duration from reservation to executor return.
+
         """
         tracer = self._get_tracer()
         if tracer is None:
@@ -953,6 +966,7 @@ class OtelObservabilityHook:
             action_id: Branch action identifier.
             outcome: Branch outcome label.
             failure_code: Exception type or failure discriminator when failed.
+
         """
         tracer = self._get_tracer()
         if tracer is None:
@@ -1045,7 +1059,7 @@ class OtelObservabilityHook:
 
 
 # ---------------------------------------------------------------------------
-# MetricsObservabilityHook — OTel Counter + Histogram metrics
+# MetricsObservabilityHook 鈥?OTel Counter + Histogram metrics
 # ---------------------------------------------------------------------------
 
 try:
@@ -1061,21 +1075,21 @@ class MetricsObservabilityHook:
     """ObservabilityHook that records OTel Counter and Histogram metrics.
 
     All OTel instruments are created once in ``__init__`` and reused on every
-    call — creating instruments per-call is an OTel API misuse and wastes CPU.
+    call 鈥?creating instruments per-call is an OTel API misuse and wastes CPU.
 
     Instruments created (all ``None`` when ``opentelemetry-api`` is absent):
 
-    * ``agent_kernel.llm_calls`` (Counter) — per LLM call, keyed by
+    * ``agent_kernel.llm_calls`` (Counter) 鈥?per LLM call, keyed by
       ``model_ref``.
-    * ``agent_kernel.llm_latency_ms`` (Histogram) — wall-clock inference
+    * ``agent_kernel.llm_latency_ms`` (Histogram) 鈥?wall-clock inference
       latency in milliseconds.
     * ``agent_kernel.llm_input_tokens`` / ``agent_kernel.llm_output_tokens``
-      (Counter) — token consumption totals.
-    * ``agent_kernel.action_dispatches`` (Counter) — per dispatch attempt,
+      (Counter) 鈥?token consumption totals.
+    * ``agent_kernel.action_dispatches`` (Counter) 鈥?per dispatch attempt,
       keyed by ``action_type`` and ``outcome_kind``.
-    * ``agent_kernel.action_dispatch_latency_ms`` (Histogram) — dispatch
+    * ``agent_kernel.action_dispatch_latency_ms`` (Histogram) 鈥?dispatch
       latency in milliseconds.
-    * ``agent_kernel.recovery_triggers`` (Counter) — per recovery decision,
+    * ``agent_kernel.recovery_triggers`` (Counter) 鈥?per recovery decision,
       keyed by ``mode`` and ``reason_code``.
 
     Degrades to a no-op when ``opentelemetry-api`` is not installed.
@@ -1084,9 +1098,11 @@ class MetricsObservabilityHook:
         meter_name: Instrumentation scope name passed to
             ``opentelemetry.metrics.get_meter()``.
             Defaults to ``"agent_kernel"``.
+
     """
 
     def __init__(self, meter_name: str = "agent_kernel") -> None:
+        """Initialize the instance with configured dependencies."""
         self.meter_name = meter_name
         self._llm_calls: Any = None
         self._llm_latency: Any = None
@@ -1180,7 +1196,7 @@ class MetricsObservabilityHook:
         turn_offset: int,
         timestamp_ms: int,
     ) -> None:
-        """No-op — FSM transition metrics not tracked here."""
+        """No-op 鈥?FSM transition metrics not tracked here."""
 
     def on_run_lifecycle_transition(
         self,
@@ -1190,7 +1206,7 @@ class MetricsObservabilityHook:
         to_state: str,
         timestamp_ms: int,
     ) -> None:
-        """No-op — lifecycle transition metrics not tracked here."""
+        """No-op 鈥?lifecycle transition metrics not tracked here."""
 
     def on_llm_call(
         self,
@@ -1207,6 +1223,7 @@ class MetricsObservabilityHook:
             model_ref: Provider-qualified model identifier.
             latency_ms: Wall-clock latency in milliseconds.
             token_usage: Typed token consumption, or ``None``.
+
         """
         if self._llm_calls is None:
             return
@@ -1234,6 +1251,7 @@ class MetricsObservabilityHook:
             action_type: Discriminator string for the action class.
             outcome_kind: Outcome label.
             latency_ms: Wall-clock latency of the dispatch call.
+
         """
         if self._action_dispatches is None:
             return
@@ -1254,6 +1272,7 @@ class MetricsObservabilityHook:
             run_id: Run identifier.
             reason_code: Failure reason code that triggered recovery.
             mode: Recovery mode selected.
+
         """
         if self._recovery_triggers is None:
             return
@@ -1304,6 +1323,7 @@ class MetricsObservabilityHook:
             outcome: Branch outcome label (``"acknowledged"``, ``"failed"``,
                 ``"timeout"``).
             failure_code: Exception type or failure discriminator when failed.
+
         """
         if self._parallel_branch_results is None:
             return

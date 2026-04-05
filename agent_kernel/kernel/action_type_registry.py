@@ -50,6 +50,7 @@ class ActionTypeDescriptor:
             values permitted for actions of this type.  When non-empty, callers
             can use ``validate_effect_class()`` to reject unknown classes before
             dispatch.  When empty (default), no per-type restriction is applied.
+
     """
 
     action_type: str
@@ -79,6 +80,7 @@ class ActionTypeRegistry:
 
         Raises:
             ValueError: When ``descriptor.action_type`` is already registered.
+
         """
         if descriptor.action_type in self._entries:
             raise ValueError(
@@ -95,6 +97,7 @@ class ActionTypeRegistry:
 
         Returns:
             Matching descriptor, or ``None`` when not registered.
+
         """
         return self._entries.get(action_type)
 
@@ -103,6 +106,7 @@ class ActionTypeRegistry:
 
         Returns:
             Immutable set of registered action type strings.
+
         """
         return frozenset(self._entries)
 
@@ -111,6 +115,7 @@ class ActionTypeRegistry:
 
         Returns:
             Alphabetically sorted list of all registered descriptors.
+
         """
         return sorted(self._entries.values(), key=lambda d: d.action_type)
 
@@ -213,6 +218,7 @@ def validate_effect_class(effect_class: str, strict: bool = False) -> bool:
 
     Raises:
         ValueError: When ``strict=True`` and the effect_class is unknown.
+
     """
     if effect_class in KNOWN_EFFECT_CLASSES:
         return True
@@ -241,6 +247,7 @@ def validate_action_type(action_type: str, strict: bool = False) -> bool:
 
     Raises:
         ValueError: When ``strict=True`` and the action_type is not registered.
+
     """
     if action_type in KERNEL_ACTION_TYPE_REGISTRY.known_types():
         return True

@@ -33,6 +33,7 @@ class AgentCoreCallbackInput:
         callback_payload: Optional callback payload dictionary.
         run_id: Optional explicit run id for direct routing.
         caused_by: Optional causal reference for provenance tracing.
+
     """
 
     session_id: str
@@ -64,6 +65,7 @@ class AgentCoreSessionAdapter:
     """
 
     def __init__(self) -> None:
+        """Initialize in-memory session-to-run bindings."""
         # Storage model:
         #   session_id -> ordered binding records.
         # The list preserves bind sequence so legacy callers that expect
@@ -88,6 +90,7 @@ class AgentCoreSessionAdapter:
             Same ``run_id`` + same ``binding_kind``: idempotent,
             do not append. Same ``run_id`` + different
             ``binding_kind``: allowed concurrently.
+
         """
         bindings = self._session_bindings.setdefault(session_id, [])
         candidate = _SessionRunBinding(run_id=run_id, binding_kind=binding_kind)
@@ -110,6 +113,7 @@ class AgentCoreSessionAdapter:
 
         Raises:
             ValueError: If session identity cannot be extracted.
+
         """
         session_id = self._extract_session_id(session)
         if not session_id:
@@ -117,7 +121,7 @@ class AgentCoreSessionAdapter:
         await self.bind_run_to_session(session_id, run_id, binding_kind)
 
     async def resolve_session_run(self, session_id: str) -> list[str]:
-        """Resolves all run identifiers bound to one session.
+        """Resolve all run identifiers bound to one session.
 
         Args:
             session_id: Platform session identifier.
@@ -129,12 +133,13 @@ class AgentCoreSessionAdapter:
         Compatibility note:
             This method intentionally keeps the legacy "all bindings" view and
             does not filter by kind.
+
         """
         bindings = self._session_bindings.get(session_id, [])
         return [binding.run_id for binding in bindings]
 
     async def resolve_session_run_by_kind(self, session_id: str, binding_kind: str) -> list[str]:
-        """Resolves run identifiers for one session filtered by binding kind.
+        """Resolve run identifiers for one session filtered by binding kind.
 
         Args:
             session_id: Platform session identifier.
@@ -142,18 +147,21 @@ class AgentCoreSessionAdapter:
 
         Returns:
             Run identifiers bound under ``binding_kind``, ordered by bind time.
+
         """
         bindings = self._session_bindings.get(session_id, [])
         return [binding.run_id for binding in bindings if binding.binding_kind == binding_kind]
 
     async def resolve_openjiuwen_session(self, session: Any) -> list[str]:
-        """Resolves all runs bound to one openjiuwen session object.
+        """Resolve all runs bound to one openjiuwen session object.
+
+        Args:
+            session: Session-like object exposing ``session_id()`` or
+                ``session_id``.
 
         Returns:
             Bound run ids. Empty list when session cannot be identified.
 
-        Args:
-            session:
         """
         session_id = self._extract_session_id(session)
         if not session_id:
@@ -161,7 +169,7 @@ class AgentCoreSessionAdapter:
         return await self.resolve_session_run(session_id)
 
     def translate_callback(self, input_value: AgentCoreCallbackInput) -> SignalRunRequest:
-        """Translates one platform callback into a kernel signal request.
+        """Translate one platform callback into a kernel signal request.
 
         Args:
             input_value: Callback payload from the platform layer.
@@ -174,6 +182,7 @@ class AgentCoreSessionAdapter:
 
         Returns:
             A kernel signal request with deterministic routing behavior.
+
         """
         run_id = input_value.run_id
         if run_id is None:
@@ -187,26 +196,36 @@ class AgentCoreSessionAdapter:
         )
 
     def from_session_signal(self, input_value: AgentCoreCallbackInput) -> SignalRunRequest:
-        """Ingress-compatible alias for translating session signal input.
+        """Translate session signal input using ingress-compatible naming.
+
+        This is a compatibility alias for integrators using older method names.
+
         Args:
-            input_value:
+            input_value: Callback payload from the platform layer.
+
         Returns:
-            SignalRunRequest:
+            Kernel signal request with normalized routing fields.
+
         """
         return self.translate_callback(input_value)
 
     def from_callback(self, input_value: AgentCoreCallbackInput) -> SignalRunRequest:
-        """Ingress-compatible alias for translating callback input.
+        """Translate callback input using ingress-compatible naming.
+
+        This is a compatibility alias for integrators using older method names.
+
         Args:
-            input_value:
+            input_value: Callback payload from the platform layer.
+
         Returns:
-            SignalRunRequest:
+            Kernel signal request with normalized routing fields.
+
         """
         return self.translate_callback(input_value)
 
     @staticmethod
     def _extract_session_id(session: Any | None) -> str | None:
-        """Extracts ``session_id`` from flexible session representations.
+        """Extract ``session_id`` from flexible session representations.
 
         Supported forms:
           - raw string session id
@@ -218,6 +237,7 @@ class AgentCoreSessionAdapter:
 
         Returns:
             Extracted session id string, or ``None`` when extraction fails.
+
         """
         if session is None:
             return None

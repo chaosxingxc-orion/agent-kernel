@@ -44,6 +44,7 @@ class PlanTypeDescriptor:
             Workflows rather than in-process asyncio tasks.  Critical for
             Temporal History safety (avoids bloat in the parent Workflow).
         since_version: Kernel version when this plan type was introduced.
+
     """
 
     plan_type: str
@@ -72,6 +73,7 @@ class PlanTypeRegistry:
 
         Raises:
             ValueError: When ``descriptor.plan_type`` is already registered.
+
         """
         if descriptor.plan_type in self._entries:
             raise ValueError(
@@ -88,6 +90,7 @@ class PlanTypeRegistry:
 
         Returns:
             Matching descriptor, or ``None`` when not registered.
+
         """
         return self._entries.get(plan_type)
 
@@ -96,6 +99,7 @@ class PlanTypeRegistry:
 
         Returns:
             Immutable set of registered plan type strings.
+
         """
         return frozenset(self._entries)
 
@@ -104,6 +108,7 @@ class PlanTypeRegistry:
 
         Returns:
             Alphabetically sorted list of all registered descriptors.
+
         """
         return sorted(self._entries.values(), key=lambda d: d.plan_type)
 

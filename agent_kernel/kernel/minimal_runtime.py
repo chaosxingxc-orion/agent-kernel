@@ -16,6 +16,7 @@ contract semantics and strict boundaries, but they are not production storage.
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -23,11 +24,13 @@ from typing import TYPE_CHECKING, Any, Literal
 
 # Maximum number of run_ids retained in InMemoryKernelRuntimeEventLog before
 # oldest entries are evicted.  Prevents OOM in long-running PoC/test scenarios.
-# Production: use a persistent store — this cap is intentionally conservative.
+# Production: use a persistent store 鈥?this cap is intentionally conservative.
 _MAX_RETAINED_RUNS = 5000
+_logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from agent_kernel.kernel.capability_snapshot import CapabilitySnapshot
+    from agent_kernel.kernel.persistence.event_schema_migration import EventSchemaMigrator
 
 from agent_kernel.kernel.contracts import (
     Action,
@@ -64,12 +67,13 @@ class InMemoryKernelRuntimeEventLog(KernelRuntimeEventLog):
     """
 
     def __init__(self) -> None:
+        """Initialize the instance with configured dependencies."""
         self._events_by_run: dict[str, list[RuntimeEvent]] = {}
         self._next_offset_by_run: dict[str, int] = {}
         self._commit_sequence: int = 0
 
     async def append_action_commit(self, commit: ActionCommit) -> str:
-        """Appends one action commit and normalizes event offsets.
+        """Append one action commit and normalizes event offsets.
 
         Args:
             commit: Commit envelope to append.
@@ -79,6 +83,7 @@ class InMemoryKernelRuntimeEventLog(KernelRuntimeEventLog):
 
         Raises:
             ValueError: If commit has no events.
+
         """
         if not commit.events:
             raise ValueError("ActionCommit.events must contain at least one event.")
@@ -111,12 +116,19 @@ class InMemoryKernelRuntimeEventLog(KernelRuntimeEventLog):
         # Production: use a persistent store instead of this in-memory cap.
         if len(self._events_by_run) > _MAX_RETAINED_RUNS:
             oldest = next(iter(self._events_by_run))
+            _logger.warning(
+                "InMemoryKernelRuntimeEventLog evicting oldest run history due to cap "
+                "max_retained_runs=%d evicted_run_id=%s; use persistent event log "
+                "backend for scale deployments.",
+                _MAX_RETAINED_RUNS,
+                oldest,
+            )
             del self._events_by_run[oldest]
             self._next_offset_by_run.pop(oldest, None)
         return f"commit-ref-{self._commit_sequence}"
 
     async def load(self, run_id: str, after_offset: int = 0) -> list[RuntimeEvent]:
-        """Loads run events after an offset in ascending order.
+        """Load run events after an offset in ascending order.
 
         Args:
             run_id: Run identifier to load events for.
@@ -124,12 +136,13 @@ class InMemoryKernelRuntimeEventLog(KernelRuntimeEventLog):
 
         Returns:
             Ordered list of runtime events after the specified offset.
+
         """
         run_events = self._events_by_run.get(run_id, [])
         return [event for event in run_events if event.commit_offset > after_offset]
 
     def cleanup_completed_run(self, run_id: str) -> None:
-        """Removes all stored events for a completed run to reclaim memory.
+        """Remove all stored events for a completed run to reclaim memory.
 
         This is a PoC-level cleanup hook for callers that know a run has
         reached a terminal state (``run.completed`` or ``run.aborted``).
@@ -138,6 +151,7 @@ class InMemoryKernelRuntimeEventLog(KernelRuntimeEventLog):
 
         Args:
             run_id: Run identifier whose events should be released.
+
         """
         self._events_by_run.pop(run_id, None)
         self._next_offset_by_run.pop(run_id, None)
@@ -150,22 +164,27 @@ class InMemoryDecisionProjectionService(DecisionProjectionService):
         self,
         event_log: KernelRuntimeEventLog,
         reject_derived_diagnostic_authority_input: bool = True,
+        event_schema_migrator: EventSchemaMigrator | None = None,
+        target_event_schema_version: str | None = None,
     ) -> None:
-        """Initializes projection service with backing event log.
+        """Initialize projection service with backing event log.
 
         Args:
             event_log: Authoritative event log for replay.
             reject_derived_diagnostic_authority_input: When ``True``, rejects
                 ``derived_diagnostic`` events from entering projection
                 authority replay path.
+
         """
         self._event_log = event_log
         self._projection_by_run: dict[str, RunProjection] = {}
         self._reject_derived_diagnostic_authority_input = reject_derived_diagnostic_authority_input
         self._run_locks: dict[str, asyncio.Lock] = {}
+        self._event_schema_migrator = event_schema_migrator
+        self._target_event_schema_version = target_event_schema_version
 
     def _get_lock(self, run_id: str) -> asyncio.Lock:
-        """Returns (creating on demand) the per-run asyncio.Lock."""
+        """Return (creating on demand) the per-run asyncio.Lock."""
         if run_id not in self._run_locks:
             self._run_locks[run_id] = asyncio.Lock()
         return self._run_locks[run_id]
@@ -179,6 +198,7 @@ class InMemoryDecisionProjectionService(DecisionProjectionService):
 
         Returns:
             Updated projection at or past ``through_offset``.
+
         """
         async with self._get_lock(run_id):
             projection = self._projection_by_run.get(run_id, _default_projection(run_id))
@@ -188,6 +208,7 @@ class InMemoryDecisionProjectionService(DecisionProjectionService):
             for event in unseen_events:
                 if event.commit_offset > through_offset:
                     break
+                event = self._maybe_migrate_event(event)
                 should_replay = _validate_projection_authority_input(
                     event=event,
                     reject_derived_diagnostic_authority_input=(
@@ -201,7 +222,7 @@ class InMemoryDecisionProjectionService(DecisionProjectionService):
             return projection
 
     async def readiness(self, run_id: str, required_offset: int) -> bool:
-        """Returns whether projection has reached required offset.
+        """Return whether projection has reached required offset.
 
         Args:
             run_id: Run identifier to check.
@@ -209,18 +230,20 @@ class InMemoryDecisionProjectionService(DecisionProjectionService):
 
         Returns:
             ``True`` when projection has reached the required offset.
+
         """
         projection = await self.get(run_id)
         return projection.projected_offset >= required_offset
 
     async def get(self, run_id: str) -> RunProjection:
-        """Returns latest projection state by fully replaying unseen events.
+        """Return latest projection state by fully replaying unseen events.
 
         Args:
             run_id: Run identifier to project.
 
         Returns:
             Current authoritative projection for the run.
+
         """
         async with self._get_lock(run_id):
             projection = self._projection_by_run.get(run_id, _default_projection(run_id))
@@ -228,6 +251,7 @@ class InMemoryDecisionProjectionService(DecisionProjectionService):
                 run_id, after_offset=projection.projected_offset
             )
             for event in unseen_events:
+                event = self._maybe_migrate_event(event)
                 should_replay = _validate_projection_authority_input(
                     event=event,
                     reject_derived_diagnostic_authority_input=(
@@ -239,6 +263,14 @@ class InMemoryDecisionProjectionService(DecisionProjectionService):
                 projection = _apply_projection_event(projection, event)
             self._projection_by_run[run_id] = projection
             return projection
+
+    def _maybe_migrate_event(self, event: RuntimeEvent) -> RuntimeEvent:
+        """Migrate one event to target schema version when configured."""
+        if self._event_schema_migrator is None:
+            return event
+        if self._target_event_schema_version is None:
+            return event
+        return self._event_schema_migrator.migrate(event, self._target_event_schema_version)
 
 
 class StaticDispatchAdmissionService(DispatchAdmissionService):
@@ -253,6 +285,7 @@ class StaticDispatchAdmissionService(DispatchAdmissionService):
 
         Returns:
             Admission result with grant and execution envelope when admitted.
+
         """
         del snapshot
         denied_result = _evaluate_action_policy_denies(action)
@@ -261,7 +294,7 @@ class StaticDispatchAdmissionService(DispatchAdmissionService):
         return _build_admitted_result(action)
 
     async def check(self, action: Action, projection: RunProjection) -> AdmissionResult:
-        """Applies minimal policy denies, then admits only dispatch-ready projections.
+        """Apply minimal policy denies, then admits only dispatch-ready projections.
 
         Args:
             action: Candidate action to evaluate.
@@ -269,6 +302,7 @@ class StaticDispatchAdmissionService(DispatchAdmissionService):
 
         Returns:
             Admission result with deny reason or granted admission.
+
         """
         denied_result = _evaluate_action_policy_denies(action)
         if denied_result is not None:
@@ -286,16 +320,17 @@ class AsyncExecutorService(ExecutorService):
     """Runs admitted actions via an injected async handler."""
 
     def __init__(self, handler: AsyncActionHandler | None = None) -> None:
-        """Initializes executor with optional async handler.
+        """Initialize executor with optional async handler.
 
         Args:
             handler: Optional async action handler. When ``None``,
                 a deterministic default result is returned.
+
         """
         self._handler = handler
 
     async def execute(self, action: Action, grant_ref: str | None = None) -> Any:
-        """Executes action via handler or a deterministic default result.
+        """Execute action via handler or a deterministic default result.
 
         Args:
             action: Admitted action to execute.
@@ -303,6 +338,7 @@ class AsyncExecutorService(ExecutorService):
 
         Returns:
             Execution result from handler or deterministic default dict.
+
         """
         if self._handler is None:
             return {
@@ -335,10 +371,11 @@ class ActivityBackedExecutorService(ExecutorService):
     """
 
     def __init__(self, activity_gateway: TemporalActivityGateway) -> None:
-        """Initializes executor with activity gateway for tool/MCP dispatch.
+        """Initialize executor with activity gateway for tool/MCP dispatch.
 
         Args:
             activity_gateway: Gateway for delegating side-effect execution.
+
         """
         self._activity_gateway = activity_gateway
 
@@ -351,6 +388,7 @@ class ActivityBackedExecutorService(ExecutorService):
 
         Returns:
             Raw execution result from the activity gateway.
+
         """
         del grant_ref
         route = _resolve_activity_execution_route(action)
@@ -367,6 +405,7 @@ class StaticRecoveryPolicy:
         mode: Recovery mode to apply (``"abort"``, ``"static_compensation"``,
             or ``"human_escalation"``).
         reason_prefix: Prefix for generated recovery reason strings.
+
     """
 
     mode: str = "abort"
@@ -377,21 +416,23 @@ class StaticRecoveryGateService(RecoveryGateService):
     """Selects recovery outcome from static policy with deterministic reason."""
 
     def __init__(self, policy: StaticRecoveryPolicy | None = None) -> None:
-        """Initializes recovery gate with static policy.
+        """Initialize recovery gate with static policy.
 
         Args:
             policy: Optional recovery policy override. Defaults to abort mode.
+
         """
         self._policy = policy or StaticRecoveryPolicy()
 
     async def decide(self, recovery_input: RecoveryInput) -> RecoveryDecision:
-        """Returns policy-driven recovery decision.
+        """Return policy-driven recovery decision.
 
         Args:
             recovery_input: Failure envelope for recovery evaluation.
 
         Returns:
             Deterministic recovery decision based on static policy.
+
         """
         return RecoveryDecision(
             run_id=recovery_input.run_id,
@@ -404,24 +445,27 @@ class InMemoryDecisionDeduper(DecisionDeduper):
     """Tracks decision fingerprints in-memory for idempotent decision rounds."""
 
     def __init__(self) -> None:
+        """Initialize the instance with configured dependencies."""
         self._seen_fingerprints: set[str] = set()
 
     async def seen(self, fingerprint: str) -> bool:
-        """Returns whether fingerprint has already been processed.
+        """Return whether fingerprint has already been processed.
 
         Args:
             fingerprint: Decision fingerprint to check.
 
         Returns:
             ``True`` when the fingerprint has been seen before.
+
         """
         return fingerprint in self._seen_fingerprints
 
     async def mark(self, fingerprint: str) -> None:
-        """Marks fingerprint as processed.
+        """Mark fingerprint as processed.
 
         Args:
             fingerprint: Decision fingerprint to record.
+
         """
         self._seen_fingerprints.add(fingerprint)
 
@@ -430,25 +474,28 @@ class InMemoryRecoveryOutcomeStore(RecoveryOutcomeStore):
     """Stores recovery outcomes in memory for PoC recovery-closure tests."""
 
     def __init__(self) -> None:
+        """Initialize the instance with configured dependencies."""
         self._outcomes_by_run: dict[str, list[RecoveryOutcome]] = {}
 
     async def write_outcome(self, outcome: RecoveryOutcome) -> None:
-        """Appends one recovery outcome for the run.
+        """Append one recovery outcome for the run.
 
         Args:
             outcome: Recovery outcome to persist.
+
         """
         run_outcomes = self._outcomes_by_run.setdefault(outcome.run_id, [])
         run_outcomes.append(outcome)
 
     async def latest_for_run(self, run_id: str) -> RecoveryOutcome | None:
-        """Returns latest outcome or ``None`` when run has no records.
+        """Return latest outcome or ``None`` when run has no records.
 
         Args:
             run_id: Run identifier to look up.
 
         Returns:
             Most recent recovery outcome, or ``None`` if none exists.
+
         """
         run_outcomes = self._outcomes_by_run.get(run_id, [])
         if not run_outcomes:
@@ -460,7 +507,7 @@ DispatchHostKind = Literal["local_cli", "local_process", "remote_service"]
 
 
 def _requires_remote_idempotency_contract_block(action: Action) -> bool:
-    """Returns whether admission must block a remote guaranteed claim.
+    """Return whether admission must block a remote guaranteed claim.
 
     This is a conservative second safety net on top of TurnEngine. Admission
     blocks only when the action requests a remote guaranteed side-effect claim
@@ -482,7 +529,7 @@ def _requires_remote_idempotency_contract_block(action: Action) -> bool:
 
 
 def _resolve_dispatch_host_kind(action: Action) -> DispatchHostKind:
-    """Resolves dispatch host kind using explicit hints and safe defaults."""
+    """Resolve dispatch host kind using explicit hints and safe defaults."""
     explicit_host_kind = _resolve_explicit_host_kind(action)
     if explicit_host_kind is not None:
         return explicit_host_kind
@@ -492,7 +539,7 @@ def _resolve_dispatch_host_kind(action: Action) -> DispatchHostKind:
 
 
 def _resolve_explicit_host_kind(action: Action) -> DispatchHostKind | None:
-    """Resolves explicit host kind from policy tags or input payload."""
+    """Resolve explicit host kind from policy tags or input payload."""
     host_kind_from_tags = _extract_host_kind_from_policy_tags(action.policy_tags)
     if host_kind_from_tags is not None:
         return host_kind_from_tags
@@ -504,7 +551,7 @@ def _resolve_explicit_host_kind(action: Action) -> DispatchHostKind | None:
 def _extract_host_kind_from_policy_tags(
     policy_tags: list[str],
 ) -> DispatchHostKind | None:
-    """Extracts host kind from policy tags when supported aliases are present."""
+    """Extract host kind from policy tags when supported aliases are present."""
     for tag in policy_tags:
         normalized_tag = tag.strip().lower()
         for prefix in (
@@ -524,7 +571,7 @@ def _extract_host_kind_from_policy_tags(
 def _extract_host_kind_from_payload(
     payload: dict[str, Any],
 ) -> DispatchHostKind | None:
-    """Extracts host kind from direct payload keys and dispatch envelope."""
+    """Extract host kind from direct payload keys and dispatch envelope."""
     for key in ("host_kind", "dispatch_host_kind", "host", "dispatch_host"):
         host_kind = _normalize_host_kind(payload.get(key))
         if host_kind is not None:
@@ -540,7 +587,7 @@ def _extract_host_kind_from_payload(
 
 
 def _normalize_host_kind(value: Any) -> DispatchHostKind | None:
-    """Normalizes host kind string to canonical literal."""
+    """Normalize host kind string to canonical literal."""
     if not isinstance(value, str):
         return None
     normalized_value = value.strip().lower()
@@ -552,7 +599,7 @@ def _normalize_host_kind(value: Any) -> DispatchHostKind | None:
 def _extract_remote_service_contract(
     input_json: dict[str, Any] | None,
 ) -> RemoteServiceIdempotencyContract | None:
-    """Extracts first valid remote-service idempotency contract from payload."""
+    """Extract first valid remote-service idempotency contract from payload."""
     if not isinstance(input_json, dict):
         return None
 
@@ -580,7 +627,7 @@ def _extract_remote_service_contract(
 def _parse_remote_service_contract(
     payload: Any,
 ) -> RemoteServiceIdempotencyContract | None:
-    """Parses ``RemoteServiceIdempotencyContract`` from dict payload."""
+    """Parse ``RemoteServiceIdempotencyContract`` from dict payload."""
     if not isinstance(payload, dict):
         return None
 
@@ -611,7 +658,7 @@ def _parse_remote_service_contract(
 
 
 def _evaluate_action_policy_denies(action: Action) -> AdmissionResult | None:
-    """Evaluates action-level deny checks shared by admit/check paths."""
+    """Evaluate action-level deny checks shared by admit/check paths."""
     if "requires_human_review" in action.policy_tags:
         return AdmissionResult(admitted=False, reason_code="policy_denied")
     if action.timeout_ms is not None and action.timeout_ms > 0 and action.timeout_ms > 300000:
@@ -629,7 +676,7 @@ def _evaluate_action_policy_denies(action: Action) -> AdmissionResult | None:
 
 
 def _build_admitted_result(action: Action) -> AdmissionResult:
-    """Builds canonical admitted result with grant and execution envelope."""
+    """Build canonical admitted result with grant and execution envelope."""
     host_kind = _resolve_sandbox_host_kind(action)
     grant_ref = f"grant:{action.action_id}"
     return AdmissionResult(
@@ -658,7 +705,7 @@ def _build_admitted_result(action: Action) -> AdmissionResult:
 def _resolve_sandbox_host_kind(
     action: Action,
 ) -> Literal["local_process", "local_cli", "remote_service"]:
-    """Resolves conservative sandbox host kind from action hints."""
+    """Resolve conservative sandbox host kind from action hints."""
     normalized_tags = {tag.strip().lower() for tag in action.policy_tags}
     for candidate, host_kind in (
         ("host:local_process", "local_process"),
@@ -676,7 +723,7 @@ def _resolve_sandbox_host_kind(
 
 
 def _extract_max_cost_from_policy_tags(policy_tags: list[str]) -> float | None:
-    """Extracts the first valid ``max_cost:<number>`` value from policy tags."""
+    """Extract the first valid ``max_cost:<number>`` value from policy tags."""
     for tag in policy_tags:
         if not tag.startswith("max_cost:"):
             continue
@@ -688,14 +735,14 @@ def _extract_max_cost_from_policy_tags(policy_tags: list[str]) -> float | None:
 
 
 def _extract_estimated_cost(input_json: dict[str, Any] | None) -> float | None:
-    """Extracts numeric ``estimated_cost`` from action input when valid."""
+    """Extract numeric ``estimated_cost`` from action input when valid."""
     if not isinstance(input_json, dict):
         return None
     return _coerce_finite_number(input_json.get("estimated_cost"))
 
 
 def _parse_finite_float(raw_value: str) -> float | None:
-    """Parses a finite float from text and returns ``None`` on failure."""
+    """Parse a finite float from text and returns ``None`` on failure."""
     try:
         parsed_value = float(raw_value)
     except ValueError:
@@ -706,7 +753,7 @@ def _parse_finite_float(raw_value: str) -> float | None:
 
 
 def _coerce_finite_number(value: Any) -> float | None:
-    """Returns finite float when value is a numeric input, else ``None``."""
+    """Return finite float when value is a numeric input, else ``None``."""
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)) and math.isfinite(value):
@@ -715,7 +762,7 @@ def _coerce_finite_number(value: Any) -> float | None:
 
 
 def _default_projection(run_id: str) -> RunProjection:
-    """Creates the initial projection baseline for a run."""
+    """Create the initial projection baseline for a run."""
     return RunProjection(
         run_id=run_id,
         lifecycle_state="created",
@@ -726,7 +773,7 @@ def _default_projection(run_id: str) -> RunProjection:
 
 
 def _apply_projection_event(projection: RunProjection, event: RuntimeEvent) -> RunProjection:
-    """Applies one runtime event to projection state.
+    """Apply one runtime event to projection state.
 
     The mapping intentionally covers only the minimal event taxonomy needed by
     current PoC flows. Unknown events still advance offset to preserve replay
@@ -761,7 +808,7 @@ def _validate_projection_authority_input(
     event: RuntimeEvent,
     reject_derived_diagnostic_authority_input: bool,
 ) -> bool:
-    """Returns whether the event should participate in projection replay.
+    """Return whether the event should participate in projection replay.
 
     ``derived_diagnostic`` events are intentionally excluded from projection
     replay (architecture invariant: "never replayed").  They may appear in the
@@ -776,6 +823,7 @@ def _validate_projection_authority_input(
 
     Returns:
         ``True`` when the event should be replayed, ``False`` to skip.
+
     """
     return not (
         reject_derived_diagnostic_authority_input and event.event_authority == "derived_diagnostic"
@@ -786,7 +834,7 @@ def _resolve_projection_transition(
     projection: RunProjection,
     event: RuntimeEvent,
 ) -> tuple[str, bool, bool, str | None, str | None]:
-    """Resolves lifecycle, waiting flag, and dispatch readiness for one event.
+    """Resolve lifecycle, waiting flag, and dispatch readiness for one event.
 
     Lifecycle authority lives in projection replay, not at signal ingress.
     This function is therefore the single boundary where ``run.*`` facts,
@@ -827,7 +875,7 @@ def _resolve_projection_transition(
 def _projection_unchanged_state(
     projection: RunProjection,
 ) -> tuple[str, bool, bool, str | None, str | None]:
-    """Returns tuple that preserves current projection fields unchanged."""
+    """Return tuple that preserves current projection fields unchanged."""
     return (
         projection.lifecycle_state,
         projection.waiting_external,
@@ -838,7 +886,7 @@ def _projection_unchanged_state(
 
 
 def _resolve_dynamic_transition(event_type: str) -> tuple[str, bool, bool, str | None] | None:
-    """Resolves transition for dynamic event families."""
+    """Resolve transition for dynamic event families."""
     # Child lifecycle propagation uses signal envelopes in current workflow wiring.
     # These signals should only update child-run tracking and must not force
     # readiness transitions on the parent run.
@@ -853,7 +901,7 @@ def _is_lower_priority_operational_conflict(
     projection: RunProjection,
     event: RuntimeEvent,
 ) -> bool:
-    """Returns whether incoming operational class loses to existing projection class.
+    """Return whether incoming operational class loses to existing projection class.
 
     v6.4 operational precedence is explicit and deterministic:
     ``Cancel > HardFailure > Timeout > ExternalCallback``.
@@ -870,7 +918,7 @@ def _is_lower_priority_operational_conflict(
 def _projection_operational_priority(
     projection: RunProjection,
 ) -> str | None:
-    """Returns current projection operational class used for conflict resolution."""
+    """Return current projection operational class used for conflict resolution."""
     if projection.lifecycle_state == "aborted":
         if _is_cancel_reason(projection.recovery_reason):
             return "cancel"
@@ -881,7 +929,7 @@ def _projection_operational_priority(
 
 
 def _event_operational_priority(event_type: str) -> str | None:
-    """Returns operational class for an incoming event type."""
+    """Return operational class for an incoming event type."""
     if event_type == "run.cancel_requested":
         return "cancel"
     if event_type in ("run.recovery_aborted", "run.aborted"):
@@ -894,14 +942,14 @@ def _event_operational_priority(event_type: str) -> str | None:
 
 
 def _is_cancel_reason(reason: str | None) -> bool:
-    """Returns whether a recovery reason represents cancellation semantics."""
+    """Return whether a recovery reason represents cancellation semantics."""
     if not reason:
         return False
     return "cancel" in reason.lower()
 
 
 def _resolve_active_child_runs(projection: RunProjection, event: RuntimeEvent) -> list[str]:
-    """Resolves active child runs for one event.
+    """Resolve active child runs for one event.
 
     Child run tracking is modeled as a simple set-like list on projection:
       - Spawn events add ``child_run_id`` if present and not already tracked.
@@ -927,7 +975,7 @@ def _resolve_active_child_runs(projection: RunProjection, event: RuntimeEvent) -
 
 
 def _extract_child_run_id(event: RuntimeEvent) -> str | None:
-    """Extracts child run id from event payload when present and valid."""
+    """Extract child run id from event payload when present and valid."""
     payload = event.payload_json or {}
     child_run_id = payload.get("child_run_id")
     if isinstance(child_run_id, str) and child_run_id:
@@ -936,7 +984,7 @@ def _extract_child_run_id(event: RuntimeEvent) -> str | None:
 
 
 def _derive_recovery_reason(event: RuntimeEvent, fallback: str | None) -> str | None:
-    """Extracts recovery reason from event payload when available."""
+    """Extract recovery reason from event payload when available."""
     payload = event.payload_json or {}
     reason_value = payload.get("reason")
     if isinstance(reason_value, str):
@@ -947,7 +995,7 @@ def _derive_recovery_reason(event: RuntimeEvent, fallback: str | None) -> str | 
 
 
 def _derive_cancel_reason(event: RuntimeEvent, fallback: str | None) -> str:
-    """Derives cancellation reason with deterministic fallback marker."""
+    """Derive cancellation reason with deterministic fallback marker."""
     recovery_reason = _derive_recovery_reason(event=event, fallback=fallback)
     if recovery_reason is not None:
         return recovery_reason
@@ -955,7 +1003,7 @@ def _derive_cancel_reason(event: RuntimeEvent, fallback: str | None) -> str:
 
 
 def _resolve_activity_execution_route(action: Action) -> ActivityExecutionRoute:
-    """Resolves whether an action should execute via tool or MCP activity path."""
+    """Resolve whether an action should execute via tool or MCP activity path."""
     payload = action.input_json or {}
     if isinstance(payload.get("mcp"), dict):
         return "mcp"
@@ -965,7 +1013,7 @@ def _resolve_activity_execution_route(action: Action) -> ActivityExecutionRoute:
 
 
 def _build_tool_activity_input(action: Action) -> ToolActivityInput:
-    """Builds ToolActivityInput from action contract with deterministic fallbacks."""
+    """Build ToolActivityInput from action contract with deterministic fallbacks."""
     payload = action.input_json or {}
     tool_name = _first_non_empty_string(payload.get("tool_name"), payload.get("name"))
     if tool_name is None:
@@ -984,7 +1032,7 @@ def _build_tool_activity_input(action: Action) -> ToolActivityInput:
 
 
 def _build_mcp_activity_input(action: Action) -> MCPActivityInput:
-    """Builds MCPActivityInput from action payload with explicit defaulting."""
+    """Build MCPActivityInput from action payload with explicit defaulting."""
     payload = action.input_json or {}
     mcp_payload = payload.get("mcp")
     mcp_dict = mcp_payload if isinstance(mcp_payload, dict) else {}
@@ -1023,7 +1071,7 @@ def _build_mcp_activity_input(action: Action) -> MCPActivityInput:
 
 
 def _first_non_empty_string(*values: Any) -> str | None:
-    """Returns the first non-empty string from candidate values."""
+    """Return the first non-empty string from candidate values."""
     for value in values:
         if isinstance(value, str) and value:
             return value

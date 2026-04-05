@@ -17,11 +17,14 @@ class ChildRunIngressPort(Protocol):
     """Optional ingress port for child-run spawn translation."""
 
     def from_runner_child_spawn(self, input_value: Any) -> SpawnChildRunRequest:
-        """Translates child-run spawn payload into SpawnChildRunRequest.
+        """Translate child-run spawn payload into SpawnChildRunRequest.
+
         Args:
-            input_value:
+            input_value: External child-run payload from runner/ingress layer.
+
         Returns:
-            SpawnChildRunRequest:
+            Kernel child-run request object.
+
         """
         ...
 

@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from agent_kernel.kernel.persistence.sqlite_pool import SQLiteConnectionPool
+
 from agent_kernel.kernel.contracts import (
     ActionCommit,
     KernelRuntimeEventLog,
@@ -28,26 +30,37 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
     - reads return events ordered by ascending offset.
     """
 
-    def __init__(self, database_path: str | Path) -> None:
-        """Initializes one SQLite event log instance.
+    def __init__(
+        self,
+        database_path: str | Path,
+        pool: SQLiteConnectionPool | None = None,
+    ) -> None:
+        """Initialize one SQLite event log instance.
 
         Args:
             database_path: SQLite file path. Use ``":memory:"`` for in-memory mode.
+            pool: Optional shared SQLite connection pool.
         """
         self._database_path = str(database_path)
         self._lock = threading.Lock()
-        self._connection = sqlite3.connect(self._database_path, check_same_thread=False)
-        self._connection.row_factory = sqlite3.Row
-        self._connection.execute("PRAGMA foreign_keys = ON")
+        self._pool = pool
+        if self._pool is None:
+            self._connection = sqlite3.connect(self._database_path, check_same_thread=False)
+            self._connection.row_factory = sqlite3.Row
+            self._connection.execute("PRAGMA foreign_keys = ON")
+        else:
+            self._connection = self._pool.acquire_write()
+            self._connection.execute("PRAGMA foreign_keys = ON")
         self._initialize_schema()
 
     def close(self) -> None:
-        """Closes the underlying SQLite connection."""
+        """Close the underlying SQLite connection."""
         with self._lock:
-            self._connection.close()
+            if self._pool is None:
+                self._connection.close()
 
     async def append_action_commit(self, commit: ActionCommit) -> str:
-        """Appends one action commit and normalizes offsets for the run.
+        """Append one action commit and normalizes offsets for the run.
 
         Args:
             commit: Commit envelope that contains one or more runtime events.
@@ -57,6 +70,7 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
 
         Raises:
             ValueError: If ``commit.events`` is empty.
+
         """
         if not commit.events:
             raise ValueError("ActionCommit.events must contain at least one event.")
@@ -73,7 +87,7 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
         return f"commit-ref-{commit_sequence}"
 
     async def load(self, run_id: str, after_offset: int = 0) -> list[RuntimeEvent]:
-        """Loads run events after ``after_offset`` in ascending offset order.
+        """Load run events after ``after_offset`` in ascending offset order.
 
         Args:
             run_id: Run identifier to load events for.
@@ -81,6 +95,7 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
 
         Returns:
             Ordered list of runtime events after the specified offset.
+
         """
         query = """
             SELECT
@@ -101,31 +116,38 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
             ORDER BY commit_offset ASC
         """
         with self._lock:
-            rows = self._connection.execute(query, (run_id, after_offset)).fetchall()
+            if self._pool is None:
+                rows = self._connection.execute(query, (run_id, after_offset)).fetchall()
+            else:
+                with self._pool.read_connection() as read_conn:
+                    rows = read_conn.execute(query, (run_id, after_offset)).fetchall()
         return [self._row_to_runtime_event(row) for row in rows]
 
     async def max_offset(self, run_id: str) -> int:
-        """Returns the highest committed offset for a run, or 0 when empty.
+        """Return the highest committed offset for a run, or 0 when empty.
 
         Args:
             run_id: Run identifier to query.
 
         Returns:
             Highest ``commit_offset`` value in the log, or 0 when no events exist.
+
         """
         with self._lock:
-            cursor = self._connection.execute(
-                """
+            query = """
                 SELECT COALESCE(MAX(commit_offset), 0)
                 FROM runtime_events
                 WHERE stream_run_id = ?
-                """,
-                (run_id,),
-            )
+            """
+            if self._pool is None:
+                cursor = self._connection.execute(query, (run_id,))
+            else:
+                with self._pool.read_connection() as read_conn:
+                    cursor = read_conn.execute(query, (run_id,))
             return int(cursor.fetchone()[0])
 
     def _initialize_schema(self) -> None:
-        """Creates required tables and indexes when absent."""
+        """Create required tables and indexes when absent."""
         self._connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS action_commits (
@@ -166,13 +188,14 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
         )
 
     def _load_next_offset(self, stream_run_id: str) -> int:
-        """Returns the next offset to assign for one run stream.
+        """Return the next offset to assign for one run stream.
 
         Args:
             stream_run_id: Run stream identifier.
 
         Returns:
             Next sequential offset value.
+
         """
         cursor = self._connection.execute(
             """
@@ -186,13 +209,14 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
         return max_offset + 1
 
     def _insert_commit_row(self, commit: ActionCommit) -> int:
-        """Inserts one commit metadata row and returns commit sequence.
+        """Insert one commit metadata row and returns commit sequence.
 
         Args:
             commit: Action commit to persist.
 
         Returns:
             Auto-generated commit sequence identifier.
+
         """
         cursor = self._connection.execute(
             """
@@ -214,13 +238,14 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
         events: list[RuntimeEvent],
         starting_offset: int,
     ) -> None:
-        """Inserts runtime event rows in their original commit input order.
+        """Insert runtime event rows in their original commit input order.
 
         Args:
             stream_run_id: Run stream identifier for event partitioning.
             commit_sequence: Parent commit sequence foreign key.
             events: Ordered list of runtime events to persist.
             starting_offset: First offset to assign in this commit.
+
         """
         query = """
             INSERT INTO runtime_events (
@@ -264,13 +289,14 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
             )
 
     def _row_to_runtime_event(self, row: sqlite3.Row) -> RuntimeEvent:
-        """Converts one database row into ``RuntimeEvent``.
+        """Convert one database row into ``RuntimeEvent``.
 
         Args:
             row: SQLite row to convert.
 
         Returns:
             Typed runtime event from row fields.
+
         """
         return RuntimeEvent(
             run_id=str(row["event_run_id"]),
@@ -289,13 +315,14 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
 
 
 def _serialize_payload(payload_json: dict[str, Any] | None) -> str | None:
-    """Serializes payload JSON into SQLite text storage.
+    """Serialize payload JSON into SQLite text storage.
 
     Args:
         payload_json: Optional payload dictionary to serialize.
 
     Returns:
         Compact JSON string, or ``None`` when input is ``None``.
+
     """
     if payload_json is None:
         return None
@@ -310,6 +337,7 @@ def _deserialize_payload(raw_payload: Any) -> dict[str, Any] | None:
 
     Returns:
         Parsed dictionary, or ``None`` when input is ``None``.
+
     """
     if raw_payload is None:
         return None
@@ -317,13 +345,14 @@ def _deserialize_payload(raw_payload: Any) -> dict[str, Any] | None:
 
 
 def _as_optional_str(value: Any) -> str | None:
-    """Normalizes nullable SQLite values to optional strings.
+    """Normalize nullable SQLite values to optional strings.
 
     Args:
         value: Nullable value to normalize.
 
     Returns:
         String representation, or ``None`` when input is ``None``.
+
     """
     if value is None:
         return None

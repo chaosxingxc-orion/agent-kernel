@@ -32,6 +32,7 @@ class ReasoningResult:
         model_output: Raw normalised model output from the LLM gateway.
         context_window: Assembled context window passed to the model.
         inference_config: Inference configuration used for this cycle.
+
     """
 
     actions: list[Action]
@@ -52,6 +53,7 @@ class ReasoningLoop:
         llm_gateway: Protocol implementation that runs model inference.
         output_parser: Protocol implementation that parses model output into
             Actions.
+
     """
 
     def __init__(
@@ -61,6 +63,7 @@ class ReasoningLoop:
         output_parser: Any,
         observability_hook: Any | None = None,
     ) -> None:
+        """Initialize the instance with configured dependencies."""
         self._context_port = context_port
         self._llm_gateway = llm_gateway
         self._output_parser = output_parser
@@ -83,7 +86,7 @@ class ReasoningLoop:
            ``context_port.assemble(run_id, snapshot, history, inference_config,
            recovery_context)``
         2. ``llm_gateway.infer(context, inference_config, idempotency_key)``
-        3. ``output_parser.parse(output, run_id)`` → list[Action]
+        3. ``output_parser.parse(output, run_id)`` 鈫?list[Action]
 
         Args:
             run_id: Kernel run identifier for this reasoning turn.
@@ -104,6 +107,7 @@ class ReasoningLoop:
         Returns:
             ReasoningResult containing actions, model output, context window,
             and the inference config used.
+
         """
         resolved_key = idempotency_key or uuid.uuid4().hex
 

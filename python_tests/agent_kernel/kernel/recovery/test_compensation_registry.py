@@ -6,11 +6,14 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
 
+import pytest
+
 from agent_kernel.kernel.contracts import (
     Action,
     RecoveryInput,
     RunProjection,
 )
+from agent_kernel.kernel.recovery.compensation_errors import CompensationExhaustedError
 from agent_kernel.kernel.recovery.compensation_registry import (
     CompensationRegistry,
 )
@@ -344,3 +347,53 @@ class TestCompensationRegistryDedupeIntegration:
         asyncio.run(registry.execute(action1, dedupe_store=store))
         asyncio.run(registry.execute(action2, dedupe_store=store))
         assert set(calls) == {"act-1", "act-2"}
+
+
+class TestCompensationRegistryRetryAndTimeout:
+    def test_transient_error_retries_then_succeeds(self, monkeypatch: Any) -> None:
+        registry = CompensationRegistry()
+        calls = {"count": 0}
+
+        async def _handler(_action: Any) -> None:
+            calls["count"] += 1
+            if calls["count"] == 1:
+                from agent_kernel.kernel.recovery.compensation_errors import (
+                    TransientCompensationError,
+                )
+
+                raise TransientCompensationError("retry me")
+
+        monkeypatch.setattr(
+            "agent_kernel.kernel.recovery.compensation_registry._retry_delay_seconds",
+            lambda _base_ms, _attempt: 0.0,
+        )
+        registry.register("write", _handler, max_attempts=2, backoff_base_ms=1)
+        result = asyncio.run(registry.execute(_make_action("write")))
+        assert result is True
+        assert calls["count"] == 2
+
+    def test_timeout_marks_unknown_effect_when_dedupe_enabled(self) -> None:
+        from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
+
+        registry = CompensationRegistry()
+        store = InMemoryDedupeStore()
+
+        async def _slow_handler(_action: Any) -> None:
+            await asyncio.sleep(0.05)
+
+        registry.register("write", _slow_handler, timeout_ms=1, max_attempts=1)
+        result = asyncio.run(registry.execute(_make_action("write"), dedupe_store=store))
+        assert result is False
+        record = store.get("compensation:write:act-1")
+        assert record is not None
+        assert record.state == "unknown_effect"
+
+    def test_raise_on_failure_raises_exhausted_error(self) -> None:
+        registry = CompensationRegistry()
+
+        async def _handler(_action: Any) -> None:
+            raise RuntimeError("boom")
+
+        registry.register("write", _handler, max_attempts=1)
+        with pytest.raises(CompensationExhaustedError):
+            asyncio.run(registry.execute(_make_action("write"), raise_on_failure=True))

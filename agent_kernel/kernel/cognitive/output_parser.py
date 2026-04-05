@@ -1,9 +1,9 @@
 """Output parser implementations for the cognitive layer.
 
 Provides:
-  - ``ToolCallOutputParser`` — parses ``tool_calls`` from ``ModelOutput``
+  - ``ToolCallOutputParser`` 鈥?parses ``tool_calls`` from ``ModelOutput``
     into kernel ``Action`` objects.
-  - ``JSONModeOutputParser`` — parses a JSON array from ``ModelOutput.raw_text``
+  - ``JSONModeOutputParser`` 鈥?parses a JSON array from ``ModelOutput.raw_text``
     into kernel ``Action`` objects.
 
 Both parsers implement the ``OutputParser`` protocol defined in ``contracts.py``.
@@ -48,25 +48,27 @@ class ToolCallOutputParser:
 
     Attributes:
         _tool_effect_class_map: Mapping from tool name to ``EffectClass``.
+
     """
 
     def __init__(
         self,
         tool_effect_class_map: dict[str, EffectClass] | None = None,
     ) -> None:
-        """Initialises the parser with an optional tool effect class map.
+        """Initialise the parser with an optional tool effect class map.
 
         Args:
             tool_effect_class_map: Optional mapping from tool name to
                 ``EffectClass``.  Defaults to empty (all tools map to
                 ``"read_only"``).
+
         """
         self._tool_effect_class_map: dict[str, EffectClass] = (
             tool_effect_class_map if tool_effect_class_map is not None else {}
         )
 
     def parse(self, output: ModelOutput, run_id: str) -> list[Action]:
-        """Parses tool_calls from ``ModelOutput`` into a flat list of ``Action`` objects.
+        """Parse tool_calls from ``ModelOutput`` into a flat list of ``Action`` objects.
 
         Args:
             output: Normalised model output containing tool_calls.
@@ -75,6 +77,7 @@ class ToolCallOutputParser:
         Returns:
             Ordered list of kernel ``Action`` objects.  Empty when
             ``output.tool_calls`` is empty.
+
         """
         actions: list[Action] = []
         for tool_call in output.tool_calls:
@@ -99,7 +102,7 @@ class ToolCallOutputParser:
         return actions
 
     def parse_plan(self, output: ModelOutput, run_id: str) -> ExecutionPlan:
-        """Parses tool_calls from ``ModelOutput`` into a ``SequentialPlan``.
+        """Parse tool_calls from ``ModelOutput`` into a ``SequentialPlan``.
 
         Args:
             output: Normalised model output.
@@ -107,12 +110,13 @@ class ToolCallOutputParser:
 
         Returns:
             ``SequentialPlan`` wrapping the parsed actions as sequential steps.
+
         """
         return SequentialPlan(steps=tuple(self.parse(output, run_id)))
 
     @staticmethod
     def _resolve_action_id(tool_call: dict[str, Any]) -> str:
-        """Resolves a stable action identifier from a tool call dict.
+        """Resolve a stable action identifier from a tool call dict.
 
         Uses the ``id`` field when present and non-empty; otherwise generates
         a fresh UUID.
@@ -122,6 +126,7 @@ class ToolCallOutputParser:
 
         Returns:
             Non-empty action identifier string.
+
         """
         raw_id = tool_call.get("id", "")
         if raw_id:
@@ -161,7 +166,7 @@ class JSONModeOutputParser:
     """
 
     def parse(self, output: ModelOutput, run_id: str) -> list[Action]:
-        """Parses a JSON array from ``ModelOutput.raw_text`` into ``Action`` objects.
+        """Parse a JSON array from ``ModelOutput.raw_text`` into ``Action`` objects.
 
         Args:
             output: Normalised model output whose ``raw_text`` contains a
@@ -172,6 +177,7 @@ class JSONModeOutputParser:
             Ordered list of kernel ``Action`` objects.  Returns an empty list
             when ``raw_text`` cannot be parsed or does not contain a valid
             JSON array.
+
         """
         raw = (output.raw_text or "").strip()
         if not raw:
@@ -202,7 +208,7 @@ class JSONModeOutputParser:
         return actions
 
     def parse_plan(self, output: ModelOutput, run_id: str) -> ExecutionPlan:
-        """Parses JSON array from ``ModelOutput.raw_text`` into a ``SequentialPlan``.
+        """Parse JSON array from ``ModelOutput.raw_text`` into a ``SequentialPlan``.
 
         Args:
             output: Normalised model output.
@@ -210,6 +216,7 @@ class JSONModeOutputParser:
 
         Returns:
             ``SequentialPlan`` wrapping the parsed actions as sequential steps.
+
         """
         return SequentialPlan(steps=tuple(self.parse(output, run_id)))
 
@@ -219,7 +226,7 @@ class JSONModeOutputParser:
         run_id: str,
         idx: int,
     ) -> Action | None:
-        """Parses one action object from a JSON array element.
+        """Parse one action object from a JSON array element.
 
         Args:
             item: JSON object candidate (expected to be a dict).
@@ -228,6 +235,7 @@ class JSONModeOutputParser:
 
         Returns:
             Parsed ``Action``, or ``None`` when the item is invalid.
+
         """
         if not isinstance(item, dict):
             _LOG.warning("JSONModeOutputParser: item[%d] is not a dict for run_id=%s", idx, run_id)

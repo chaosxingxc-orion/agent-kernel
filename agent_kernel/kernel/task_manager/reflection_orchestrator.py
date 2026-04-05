@@ -3,9 +3,9 @@
 When RestartPolicyEngine decides action="reflect", callers use this class to
 drive the full reflect-and-retry cycle:
 
-1. ReflectionBridge.build_context(descriptor, attempts) → ReflectionContext
+1. ReflectionBridge.build_context(descriptor, attempts) 鈫?ReflectionContext
 2. Convert ReflectionContext to a recovery_context dict
-3. ReasoningLoop.run_once(recovery_context=...) → ReasoningResult
+3. ReasoningLoop.run_once(recovery_context=...) 鈫?ReasoningResult
 
 ReflectionOrchestrator is a **non-authority** coordinator.  It has no write
 access to the event log or run state; it only assembles context and calls the
@@ -57,6 +57,7 @@ def reflection_context_to_recovery_dict(ctx: ReflectionContext) -> dict[str, Any
     Returns:
         Dict with a ``"reflection"`` key containing structured failure context
         and a ``"prompt_fragment"`` key with the ready-to-use LLM text.
+
     """
     return {
         "reflection": {
@@ -73,13 +74,14 @@ def reflection_context_to_recovery_dict(ctx: ReflectionContext) -> dict[str, Any
 
 
 class ReflectionOrchestrator:
-    """Coordinates ReflectionBridge → ReasoningLoop for reflect-and-retry cycles.
+    """Coordinates ReflectionBridge 鈫?ReasoningLoop for reflect-and-retry cycles.
 
     Stateless; safe to share across concurrent reflect requests.
 
     Args:
         bridge: ReflectionBridge used to build the reflection context.
         loop: ReasoningLoop used to run the model inference cycle.
+
     """
 
     def __init__(
@@ -87,6 +89,7 @@ class ReflectionOrchestrator:
         bridge: ReflectionBridge,
         loop: ReasoningLoop,
     ) -> None:
+        """Initialize the instance with configured dependencies."""
         self._bridge = bridge
         self._loop = loop
 
@@ -119,6 +122,7 @@ class ReflectionOrchestrator:
 
         Returns:
             ReasoningResult with model-decided actions.
+
         """
         ctx: ReflectionContext = self._bridge.build_context(descriptor, attempts)
         recovery_context = reflection_context_to_recovery_dict(ctx)

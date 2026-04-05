@@ -100,6 +100,7 @@ class RuntimeEventLogConfig:
         sqlite_database_path: SQLite database file path when
             ``backend`` is ``"sqlite"``. Use ``":memory:"`` for
             process-local in-memory SQLite.
+
     """
 
     backend: EventLogBackend = "in_memory"
@@ -113,6 +114,7 @@ class RuntimeDedupeConfig:
     Attributes:
         backend: Dedupe backend kind.
         sqlite_database_path: SQLite path when ``backend`` is ``"sqlite"``.
+
     """
 
     backend: DedupeBackend = "in_memory"
@@ -143,6 +145,7 @@ class RuntimeStrictModeConfig:
         enabled: When ``True`` (default), workflow turn execution requires
             declared ``capability_snapshot_input`` and
             ``declarative_bundle_digest`` payloads.
+
     """
 
     enabled: bool = True
@@ -170,6 +173,7 @@ class AgentKernelRuntimeBundle:
         context_adapter: Agent-core context adapter for context management.
         checkpoint_adapter: Agent-core checkpoint adapter for checkpoint views.
         tool_mcp_adapter: Agent-core tool/MCP adapter for binding resolution.
+
     """
 
     event_log: KernelRuntimeEventLog
@@ -189,12 +193,12 @@ class AgentKernelRuntimeBundle:
     context_adapter: AgentCoreContextAdapter
     checkpoint_adapter: AgentCoreCheckpointAdapter
     tool_mcp_adapter: AgentCoreToolMCPAdapter
-    # Optional cognitive services — typed as Any to avoid circular imports.
+    # Optional cognitive services 鈥?typed as Any to avoid circular imports.
     cognitive_context_port: Any | None = None  # ContextPort Protocol
     cognitive_llm_gateway: Any | None = None  # LLMGateway Protocol
     cognitive_output_parser: Any | None = None  # OutputParser Protocol
     cognitive_reflection_policy: Any | None = None  # ReflectionPolicy
-    # Optional observability hook — fanned out to TurnEngine, ReasoningLoop,
+    # Optional observability hook 鈥?fanned out to TurnEngine, ReasoningLoop,
     # and PlannedRecoveryGateService so all emit points are live.
     observability_hook: Any | None = None  # ObservabilityHook Protocol
 
@@ -219,7 +223,7 @@ class AgentKernelRuntimeBundle:
         observability_hook: Any | None = None,
         circuit_breaker_policy: Any | None = None,
     ) -> AgentKernelRuntimeBundle:
-        """Builds one minimal-complete runtime bundle.
+        """Build one minimal-complete runtime bundle.
 
         Args:
             temporal_client: Temporal client used by substrate
@@ -252,9 +256,17 @@ class AgentKernelRuntimeBundle:
                 strict ``TemporalSDKActivityGateway`` when an
                 explicit ``activity_gateway`` is not provided.
 
+            circuit_breaker_policy: Parameter from function signature.
+            context_port: Parameter from function signature.
+            llm_gateway: Parameter from function signature.
+            observability_hook: Parameter from function signature.
+            output_parser: Parameter from function signature.
+            reflection_policy: Parameter from function signature.
+
         Returns:
             A fully wired runtime bundle using the selected event
             log backend.
+
         """
         kernel_core = cls._build_kernel_core(
             event_log_config=event_log_config,
@@ -318,7 +330,7 @@ class AgentKernelRuntimeBundle:
         observability_hook: Any | None = None,
         circuit_breaker_policy: Any | None = None,
     ) -> dict[str, Any]:
-        """Builds minimal kernel core services.
+        """Build minimal kernel core services.
 
         Args:
             event_log_config: Optional event log backend
@@ -347,9 +359,12 @@ class AgentKernelRuntimeBundle:
             observability_hook: Optional hook fanned out to
                 ReasoningLoop and PlannedRecoveryGateService.
 
+            circuit_breaker_policy: Parameter from function signature.
+
         Returns:
             Dictionary of kernel core service instances for
             bundle assembly.
+
         """
         event_log = AgentKernelRuntimeBundle._build_event_log(
             event_log_config or RuntimeEventLogConfig(),
@@ -415,7 +430,7 @@ class AgentKernelRuntimeBundle:
         tool_handlers: (Mapping[str, ToolActivityCallable] | None) = None,
         mcp_handlers: (Mapping[MCPHandlerKey, MCPActivityCallable] | None) = None,
     ) -> ExecutorService:
-        """Builds executor service from feature-toggle and deps.
+        """Build executor service from feature-toggle and deps.
 
         Args:
             enable_activity_backed_executor: Whether to use
@@ -431,6 +446,7 @@ class AgentKernelRuntimeBundle:
             ValueError: If activity-backed executor is enabled
                 without gateway dependency or handler
                 registrations.
+
         """
         if not enable_activity_backed_executor:
             return AsyncExecutorService()
@@ -453,7 +469,7 @@ class AgentKernelRuntimeBundle:
         tool_handlers: (Mapping[str, ToolActivityCallable] | None),
         mcp_handlers: (Mapping[MCPHandlerKey, MCPActivityCallable] | None),
     ) -> TemporalActivityGateway | None:
-        """Resolves activity gateway from dependency or handlers.
+        """Resolve activity gateway from dependency or handlers.
 
         Args:
             activity_gateway: Explicit activity gateway instance.
@@ -466,6 +482,7 @@ class AgentKernelRuntimeBundle:
         Raises:
             ValueError: If both explicit gateway and handler maps
                 are provided.
+
         """
         has_tool_handlers = bool(tool_handlers)
         has_mcp_handlers = bool(mcp_handlers)
@@ -485,7 +502,7 @@ class AgentKernelRuntimeBundle:
         tool_handlers: (Mapping[str, ToolActivityCallable] | None),
         mcp_handlers: (Mapping[MCPHandlerKey, MCPActivityCallable] | None),
     ) -> TemporalActivityGateway:
-        """Builds strict Temporal activity gateway from handlers.
+        """Build strict Temporal activity gateway from handlers.
 
         Args:
             tool_handlers: Tool handler mappings.
@@ -493,6 +510,7 @@ class AgentKernelRuntimeBundle:
 
         Returns:
             TemporalSDKActivityGateway instance.
+
         """
         return TemporalSDKActivityGateway(
             TemporalActivityBindings(
@@ -515,7 +533,7 @@ class AgentKernelRuntimeBundle:
     def _build_event_log(
         event_log_config: RuntimeEventLogConfig,
     ) -> KernelRuntimeEventLog:
-        """Builds event log backend from configuration.
+        """Build event log backend from configuration.
 
         Args:
             event_log_config: Event log backend selection and
@@ -527,6 +545,7 @@ class AgentKernelRuntimeBundle:
 
         Raises:
             ValueError: If backend value is not supported.
+
         """
         if event_log_config.backend == "in_memory":
             return InMemoryKernelRuntimeEventLog()
@@ -540,7 +559,7 @@ class AgentKernelRuntimeBundle:
     def _build_dedupe_store(
         dedupe_config: RuntimeDedupeConfig,
     ) -> DedupeStorePort:
-        """Builds dedupe backend from configuration.
+        """Build dedupe backend from configuration.
 
         Args:
             dedupe_config: Dedupe backend selection and backend options.
@@ -550,6 +569,7 @@ class AgentKernelRuntimeBundle:
 
         Raises:
             ValueError: If backend value is not supported.
+
         """
         if dedupe_config.backend == "in_memory":
             return InMemoryDedupeStore()
@@ -561,7 +581,7 @@ class AgentKernelRuntimeBundle:
     def _build_recovery_outcomes(
         recovery_outcome_config: RuntimeRecoveryOutcomeConfig,
     ) -> RecoveryOutcomeStore:
-        """Builds recovery outcome store backend from configuration."""
+        """Build recovery outcome store backend from configuration."""
         if recovery_outcome_config.backend == "in_memory":
             return InMemoryRecoveryOutcomeStore()
         if recovery_outcome_config.backend == "sqlite":
@@ -572,7 +592,7 @@ class AgentKernelRuntimeBundle:
     def _build_turn_intent_log(
         turn_intent_log_config: RuntimeTurnIntentLogConfig,
     ) -> TurnIntentLog | None:
-        """Builds turn intent log backend from configuration."""
+        """Build turn intent log backend from configuration."""
         if turn_intent_log_config.backend == "none":
             return None
         if turn_intent_log_config.backend == "sqlite":
@@ -584,7 +604,7 @@ class AgentKernelRuntimeBundle:
         temporal_client: Any,
         temporal_config: TemporalGatewayConfig | None,
     ) -> dict[str, Any]:
-        """Builds gateway, facade, and agent-core boundary adapters.
+        """Build gateway, facade, and agent-core boundary adapters.
 
         Args:
             temporal_client: Temporal client for substrate.
@@ -592,6 +612,7 @@ class AgentKernelRuntimeBundle:
 
         Returns:
             Dictionary of boundary component instances.
+
         """
         gateway = TemporalSDKWorkflowGateway(
             temporal_client,
@@ -620,10 +641,11 @@ class AgentKernelRuntimeBundle:
     def create_run_actor_dependency_bundle(
         self,
     ) -> RunActorDependencyBundle:
-        """Creates workflow dependency bundle for Temporal worker.
+        """Create workflow dependency bundle for Temporal worker.
 
         Returns:
             RunActorDependencyBundle wired with bundle services.
+
         """
         return RunActorDependencyBundle(
             event_log=self.event_log,
@@ -648,7 +670,7 @@ class AgentKernelRuntimeBundle:
         client: Any,
         config: TemporalWorkerConfig | None = None,
     ) -> TemporalKernelWorker:
-        """Creates worker wired with this bundle's dependencies.
+        """Create worker wired with this bundle's dependencies.
 
         Args:
             client: Temporal client instance.
@@ -656,6 +678,7 @@ class AgentKernelRuntimeBundle:
 
         Returns:
             TemporalKernelWorker wired with bundle dependencies.
+
         """
         return TemporalKernelWorker(
             client=client,

@@ -73,25 +73,33 @@ class KernelHealthProbe:
 
     Args:
         component_name: Identifier included in all probe responses.
+
     """
 
     component_name: str = "agent-kernel"
-    _checks: dict[str, HealthCheckFn] = field(default_factory=dict)
+    _checks: dict[str, tuple[HealthCheckFn, bool]] = field(default_factory=dict)
 
-    def register_check(self, name: str, check_fn: HealthCheckFn) -> None:
+    def register_check(
+        self,
+        name: str,
+        check_fn: HealthCheckFn,
+        required_for_startup: bool = False,
+    ) -> None:
         """Register a named health check function.
 
         Args:
             name: Unique name for this check (e.g. ``"sqlite"``,
                 ``"temporal"``).
             check_fn: Callable returning ``(HealthStatus, message)``.
+            required_for_startup: Marks check as required by ``startup()``.
 
         Raises:
             ValueError: When ``name`` is already registered.
+
         """
         if name in self._checks:
             raise ValueError(f"Health check '{name}' is already registered.")
-        self._checks[name] = check_fn
+        self._checks[name] = (check_fn, required_for_startup)
 
     def liveness(self) -> dict:
         """Run all checks; pass unless any reports UNHEALTHY.
@@ -99,6 +107,7 @@ class KernelHealthProbe:
         Returns:
             Dict with keys ``"component"``, ``"status"``, ``"checks"``,
             ``"timestamp_ms"``.
+
         """
         results = self._run_all()
         aggregate = (
@@ -113,6 +122,7 @@ class KernelHealthProbe:
 
         Returns:
             Dict with same shape as ``liveness()``.
+
         """
         results = self._run_all()
         statuses = {s for s, _ in results.values()}
@@ -124,15 +134,40 @@ class KernelHealthProbe:
             aggregate = HealthStatus.DEGRADED
         return self._format_response(aggregate, results)
 
+    def startup(self) -> dict:
+        """Run startup-required checks.
+
+        Startup passes only if all checks marked ``required_for_startup=True``
+        report ``HealthStatus.OK``. Optional checks are ignored.
+        """
+        required_names = [name for name, (_fn, required) in self._checks.items() if required]
+        if not required_names:
+            return self._format_response(HealthStatus.OK, {})
+
+        results = self._run_subset(required_names)
+        statuses = {status for status, _message in results.values()}
+        aggregate = HealthStatus.OK if statuses == {HealthStatus.OK} else HealthStatus.UNHEALTHY
+        return self._format_response(aggregate, results)
+
     def _run_all(self) -> dict[str, tuple[HealthStatus, str]]:
         results: dict[str, tuple[HealthStatus, str]] = {}
-        for name, check_fn in self._checks.items():
-            try:
-                results[name] = check_fn()
-            except Exception as exc:
-                logger.warning("Health check '%s' raised: %s", name, exc)
-                results[name] = (HealthStatus.UNHEALTHY, str(exc))
+        for name in self._checks:
+            results[name] = self._run_one(name)
         return results
+
+    def _run_subset(self, names: list[str]) -> dict[str, tuple[HealthStatus, str]]:
+        results: dict[str, tuple[HealthStatus, str]] = {}
+        for name in names:
+            results[name] = self._run_one(name)
+        return results
+
+    def _run_one(self, name: str) -> tuple[HealthStatus, str]:
+        check_fn = self._checks[name][0]
+        try:
+            return check_fn()
+        except Exception as exc:
+            logger.warning("Health check '%s' raised: %s", name, exc)
+            return (HealthStatus.UNHEALTHY, str(exc))
 
     def _format_response(
         self,
@@ -155,7 +190,7 @@ class KernelHealthProbe:
 
 
 def sqlite_dedupe_store_health_check(store: Any) -> HealthCheckFn:
-    """Returns a ``HealthCheckFn`` that probes a SQLite-backed DedupeStore.
+    """Return a ``HealthCheckFn`` that probes a SQLite-backed DedupeStore.
 
     The check executes a lightweight ``SELECT 1`` via the store's internal
     connection.  Register it with ``KernelHealthProbe.register_check()``.
@@ -166,6 +201,7 @@ def sqlite_dedupe_store_health_check(store: Any) -> HealthCheckFn:
 
     Returns:
         Health check callable returning ``(HealthStatus, message)``.
+
     """
 
     def _check() -> tuple[HealthStatus, str]:
@@ -179,7 +215,7 @@ def sqlite_dedupe_store_health_check(store: Any) -> HealthCheckFn:
 
 
 def event_log_health_check(event_log: Any) -> HealthCheckFn:
-    """Returns a ``HealthCheckFn`` that probes a RuntimeEventLog.
+    """Return a ``HealthCheckFn`` that probes a RuntimeEventLog.
 
     The check reads the ``events`` attribute (or calls ``list_events()`` if
     available) to verify the log is accessible.  Register it with
@@ -190,6 +226,7 @@ def event_log_health_check(event_log: Any) -> HealthCheckFn:
 
     Returns:
         Health check callable returning ``(HealthStatus, message)``.
+
     """
 
     def _check() -> tuple[HealthStatus, str]:

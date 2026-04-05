@@ -8,7 +8,7 @@ runtime callers and ensures mode/reason mapping stays deterministic.
   When a ``CompensationRegistry`` is injected, the gate validates that a
   handler exists for the failing action's ``effect_class`` before emitting a
   ``static_compensation`` decision.  If no handler is registered the gate
-  downgrades to ``abort`` and logs a warning — this prevents the kernel from
+  downgrades to ``abort`` and logs a warning 鈥?this prevents the kernel from
   emitting a compensation intent it can never fulfill.
 
 ``ReflectionPolicy`` integration:
@@ -86,7 +86,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         circuit_breaker_store: CircuitBreakerStore | None = None,
         dedupe_store: DedupeStorePort | None = None,
     ) -> None:
-        """Initializes the gate with optional planner and service dependencies.
+        """Initialize the gate with optional planner and service dependencies.
 
         Args:
             planner: Optional recovery planner instance. Uses
@@ -111,6 +111,9 @@ class PlannedRecoveryGateService(RecoveryGateService):
                 and are shared across instances (e.g. multiple workers).
                 When ``None``, falls back to in-memory state (backward-compatible
                 default).
+            dedupe_store: Optional dedupe store used to detect duplicate
+                dispatch evidence while evaluating recovery context.
+
         """
         self._planner = planner or RecoveryPlanner()
         self._compensation_registry = compensation_registry
@@ -132,8 +135,10 @@ class PlannedRecoveryGateService(RecoveryGateService):
     @property
     def compensation_registry(self) -> CompensationRegistry | None:
         """The compensation registry, if any was provided at construction.
+
         Returns:
             CompensationRegistry | None: The compensation registry, or ``None`` if not configured.
+
         """
         return self._compensation_registry
 
@@ -141,7 +146,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         self,
         recovery_input: RecoveryInput,
     ) -> RecoveryDecision:
-        """Builds one recovery decision from planner output.
+        """Build one recovery decision from planner output.
 
         When a ``CompensationRegistry`` is present and the planner selects
         ``schedule_compensation``, the gate checks whether the failing
@@ -161,6 +166,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
 
         Raises:
             ValueError: If planner returns an unsupported action.
+
         """
         # Increment failure count for this run before building the decision so
         # the count is already up-to-date when embedded in the result.
@@ -168,7 +174,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         self._failure_counts[recovery_input.run_id] = failure_count
 
         # Circuit-breaker check: if effect_class circuit is OPEN, abort immediately.
-        # Do NOT call _record_circuit_failure here — that would reset the cooldown
+        # Do NOT call _record_circuit_failure here 鈥?that would reset the cooldown
         # timer on every rejected request and prevent half-open recovery under
         # sustained load (DEF-019B).
         effect_class = recovery_input.failed_effect_class
@@ -201,7 +207,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
             ):
                 _gate_logger.warning(
                     "PlannedRecoveryGateService: no compensation handler for "
-                    "effect_class=%s run_id=%s — downgrading to abort",
+                    "effect_class=%s run_id=%s 鈥?downgrading to abort",
                     comp_effect_class,
                     recovery_input.run_id,
                 )
@@ -215,12 +221,24 @@ class PlannedRecoveryGateService(RecoveryGateService):
                 # requiring the caller to thread the dedupe_store through manually.
                 failing_action = getattr(recovery_input, "failing_action", None)
                 if failing_action is not None:
-                    with contextlib.suppress(Exception):
+                    try:
                         await self._compensation_registry.execute(
                             failing_action,
                             dedupe_store=self._dedupe_store,
                             run_id=recovery_input.run_id,
+                            raise_on_failure=True,
                         )
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        _gate_logger.warning(
+                            "PlannedRecoveryGateService: compensation exhausted "
+                            "run_id=%s effect_class=%s error=%r; degrading to human_escalation",
+                            recovery_input.run_id,
+                            comp_effect_class,
+                            exc,
+                        )
+                        mode = "human_escalation"  # type: ignore[assignment]
+                        effective_reason = f"{plan.reason}:compensation_exhausted"
+                        effective_compensation_id = None
 
         # Check if we should override with reflect_and_retry.
         if self._should_reflect(recovery_input, mode):
@@ -244,7 +262,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         return decision
 
     def on_action_success(self, effect_class: str) -> None:
-        """Resets circuit breaker failure count for the given effect class.
+        """Reset circuit breaker failure count for the given effect class.
 
         Call this after a successful dispatch so that the circuit transitions
         back to CLOSED state.  No-op when circuit breaking is disabled or when
@@ -252,6 +270,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
 
         Args:
             effect_class: The action effect class that succeeded.
+
         """
         if self._circuit_breaker_store is not None:
             self._circuit_breaker_store.reset(effect_class)
@@ -260,7 +279,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
             self._circuit_last_failure_mono.pop(effect_class, None)
 
     def _is_circuit_open(self, effect_class: str | None) -> bool:
-        """Returns ``True`` when the circuit is OPEN for this effect class.
+        """Return ``True`` when the circuit is OPEN for this effect class.
 
         OPEN means ``failure_count >= threshold`` AND the half-open cooldown
         has not elapsed.  Returns ``False`` when circuit breaking is disabled,
@@ -272,6 +291,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
 
         Returns:
             ``True`` when the request should be rejected immediately.
+
         """
         if self._circuit_breaker_policy is None or effect_class is None:
             return False
@@ -294,6 +314,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         Args:
             effect_class: The action effect class that failed.
             run_id: Run identifier for observability hook emission.
+
         """
         if self._circuit_breaker_policy is None or effect_class is None:
             return
@@ -311,7 +332,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         )
 
     def _emit_recovery(self, run_id: str, reason_code: str, mode: str) -> None:
-        """Emits on_recovery_triggered to the observability hook, if present."""
+        """Emit on_recovery_triggered to the observability hook, if present."""
         if self._observability_hook is None:
             return
         with contextlib.suppress(Exception):
@@ -324,7 +345,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
     def _emit_reflection_round(
         self, run_id: str, action_id: str, round_num: int, corrected: bool
     ) -> None:
-        """Emits on_reflection_round to the observability hook, if present."""
+        """Emit on_reflection_round to the observability hook, if present."""
         if self._observability_hook is None:
             return
         with contextlib.suppress(Exception):
@@ -338,7 +359,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
     def _emit_circuit_breaker_trip(
         self, run_id: str, effect_class: str, failure_count: int, tripped: bool
     ) -> None:
-        """Emits on_circuit_breaker_trip to the observability hook, if present."""
+        """Emit on_circuit_breaker_trip to the observability hook, if present."""
         if self._observability_hook is None:
             return
         with contextlib.suppress(Exception):
@@ -354,7 +375,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         recovery_input: RecoveryInput,
         mode: Literal["static_compensation", "human_escalation", "abort"],
     ) -> bool:
-        """Returns whether reflect_and_retry should be attempted.
+        """Return whether reflect_and_retry should be attempted.
 
         Args:
             recovery_input: Failure envelope for this decision round.
@@ -362,6 +383,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
 
         Returns:
             ``True`` when all reflection prerequisites are satisfied.
+
         """
         if self._reflection_policy is None:
             return False
@@ -383,7 +405,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         recovery_input: RecoveryInput,
         base_reason: str,
     ) -> RecoveryDecision:
-        """Runs the reasoning loop to derive a corrected action.
+        """Run the reasoning loop to derive a corrected action.
 
         Falls back to ``human_escalation`` or ``abort`` when the loop returns
         empty actions.
@@ -395,6 +417,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         Returns:
             RecoveryDecision with mode ``reflect_and_retry`` and the corrected
             action, or a fallback decision when the loop produces no actions.
+
         """
         assert self._reflection_policy is not None
         assert self._reasoning_loop is not None
@@ -433,7 +456,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
                 )
             )
 
-        # Deterministic idempotency key: same run + offset + round → same LLM call.
+        # Deterministic idempotency key: same run + offset + round 鈫?same LLM call.
         # Prevents duplicate inference charges when the gate retries reflection.
         _based_on_offset = recovery_input.projection.projected_offset
         _reflection_key = (
@@ -451,7 +474,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         except Exception:  # pylint: disable=broad-exception-caught
             _gate_logger.warning(
                 "PlannedRecoveryGateService: reasoning loop failed during "
-                "reflect_and_retry for run_id=%s — falling back",
+                "reflect_and_retry for run_id=%s 鈥?falling back",
                 recovery_input.run_id,
             )
             return self._fallback_decision(recovery_input, base_reason)
@@ -459,7 +482,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         if not result.actions:
             _gate_logger.warning(
                 "PlannedRecoveryGateService: reasoning loop returned no actions "
-                "during reflect_and_retry for run_id=%s — falling back",
+                "during reflect_and_retry for run_id=%s 鈥?falling back",
                 recovery_input.run_id,
             )
             _action_id_fb = getattr(
@@ -495,7 +518,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         recovery_input: RecoveryInput,
         base_reason: str,
     ) -> RecoveryDecision:
-        """Returns a fallback decision when reflection produces no corrected action.
+        """Return a fallback decision when reflection produces no corrected action.
 
         Args:
             recovery_input: Failure envelope for this decision round.
@@ -504,6 +527,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
         Returns:
             ``human_escalation`` when ``escalate_on_exhaustion`` is set on the
             policy; otherwise ``abort``.
+
         """
         assert self._reflection_policy is not None
         if self._reflection_policy.escalate_on_exhaustion:
@@ -520,7 +544,7 @@ class PlannedRecoveryGateService(RecoveryGateService):
 
 
 def _extract_effect_class(recovery_input: RecoveryInput) -> str | None:
-    """Attempts to extract effect_class from recovery input context.
+    """Attempt to extract effect_class from recovery input context.
 
     The ``FailureEnvelope`` (when attached to the projection) may carry a
     ``compensation_hint`` that encodes the effect class.  Falls back to
@@ -532,6 +556,7 @@ def _extract_effect_class(recovery_input: RecoveryInput) -> str | None:
 
     Returns:
         effect_class string when determinable, otherwise ``None``.
+
     """
     # Prefer compensation_hint on the projection's failure context if it
     # encodes the effect class.  This is a best-effort extraction; callers
@@ -544,7 +569,7 @@ def _extract_effect_class(recovery_input: RecoveryInput) -> str | None:
 
 
 def _build_evidence_from_input(recovery_input: RecoveryInput) -> ScriptFailureEvidence:
-    """Builds a minimal ScriptFailureEvidence from a RecoveryInput.
+    """Build a minimal ScriptFailureEvidence from a RecoveryInput.
 
     The evidence is assembled from the reason_code so that the reflection
     builder has a typed evidence object to work with.
@@ -555,6 +580,7 @@ def _build_evidence_from_input(recovery_input: RecoveryInput) -> ScriptFailureEv
     Returns:
         Minimal ``ScriptFailureEvidence`` suitable for reflection context
         assembly.
+
     """
     reason = recovery_input.reason_code
     # Map reason codes to known failure kinds where possible.
@@ -584,7 +610,7 @@ _BACKOFF_MAX_MS: int = 30_000
 
 
 def _compute_retry_after_ms(mode: str, failure_count: int) -> int | None:
-    """Returns exponential backoff delay for retryable modes.
+    """Return exponential backoff delay for retryable modes.
 
     Formula: ``base_ms * 2^(failure_count - 1)``, capped at ``max_ms``.
     Returns ``None`` for terminal modes (``abort``, ``human_escalation``).
@@ -595,6 +621,7 @@ def _compute_retry_after_ms(mode: str, failure_count: int) -> int | None:
 
     Returns:
         Milliseconds to wait before retry, or ``None`` for terminal modes.
+
     """
     if mode not in _RETRYABLE_MODES:
         return None
@@ -604,7 +631,7 @@ def _compute_retry_after_ms(mode: str, failure_count: int) -> int | None:
 
 
 def _attach_backoff(decision: RecoveryDecision, failure_count: int) -> RecoveryDecision:
-    """Returns a copy of *decision* with ``retry_after_ms`` and ``failure_count`` set.
+    """Return a copy of *decision* with ``retry_after_ms`` and ``failure_count`` set.
 
     Frozen dataclasses cannot be mutated; we use ``object.__setattr__`` via a
     ``replace``-style reconstruction instead.
@@ -615,6 +642,7 @@ def _attach_backoff(decision: RecoveryDecision, failure_count: int) -> RecoveryD
 
     Returns:
         New ``RecoveryDecision`` with backoff fields populated.
+
     """
     retry_after_ms = _compute_retry_after_ms(decision.mode, failure_count)
     return RecoveryDecision(

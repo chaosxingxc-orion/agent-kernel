@@ -1,4 +1,4 @@
-"""LocalFSMAdaptor — drives RunActorWorkflow directly in asyncio.
+"""LocalFSMAdaptor 鈥?drives RunActorWorkflow directly in asyncio.
 
 This substrate requires no external processes.  It is suitable for:
   - Local development and debugging
@@ -58,9 +58,10 @@ class LocalSubstrateConfig:
 
     Attributes:
         workflow_id_prefix: Prefix prepended to run ids when building
-            workflow ids (e.g. ``"run"`` → id ``"run:<run_id>"``).
+            workflow ids (e.g. ``"run"`` 鈫?id ``"run:<run_id>"``).
         strict_mode_enabled: When ``True``, every workflow turn must carry
             ``capability_snapshot_input`` and ``declarative_bundle_digest``.
+
     """
 
     workflow_id_prefix: str = "run"
@@ -72,15 +73,16 @@ class LocalFSMAdaptor:
 
     ``KernelRuntime`` manages this adaptor's lifecycle the same way it manages
     ``TemporalAdaptor``: ``start(deps)`` then ``stop()``.  The public API
-    presented to ``KernelFacade`` is identical — only the execution mechanism
+    presented to ``KernelFacade`` is identical 鈥?only the execution mechanism
     differs.
     """
 
     def __init__(self, config: LocalSubstrateConfig) -> None:
-        """Initialises the adaptor with local substrate configuration.
+        """Initialise the adaptor with local substrate configuration.
 
         Args:
             config: Local substrate configuration.
+
         """
         self._config = config
         self._gateway_instance: LocalWorkflowGateway | None = None
@@ -102,6 +104,7 @@ class LocalFSMAdaptor:
             deps: Kernel dependency bundle.
             temporal_client: Ignored.  Present for interface parity with
                 ``TemporalAdaptor.start()``.
+
         """
         self._deps = deps
         configure_run_actor_dependencies(deps)
@@ -109,7 +112,7 @@ class LocalFSMAdaptor:
             deps=deps,
             workflow_id_prefix=self._config.workflow_id_prefix,
         )
-        _logger.info("LocalFSMAdaptor started — no external process required")
+        _logger.info("LocalFSMAdaptor started 鈥?no external process required")
 
     async def stop(self) -> None:
         """Shuts down all in-process run tasks and clears dependency registry.
@@ -131,6 +134,7 @@ class LocalFSMAdaptor:
 
         Raises:
             RuntimeError: If accessed before ``start()`` was called.
+
         """
         if self._gateway_instance is None:
             raise RuntimeError("LocalFSMAdaptor.gateway accessed before start() was called.")
@@ -138,22 +142,24 @@ class LocalFSMAdaptor:
 
     @property
     def worker_failed(self) -> bool:
-        """Always ``False`` — no background worker task in local mode.
+        """Always ``False`` 鈥?no background worker task in local mode.
 
         Returns:
             bool: Always False.
+
         """
         return False
 
     def add_worker_done_callback(self, callback: Any) -> None:
-        """No-op in local mode — there is no background worker task.
+        """No-op in local mode 鈥?there is no background worker task.
 
         Args:
             callback: Ignored.
+
         """
 
     def check_worker(self) -> None:
-        """No-op in local mode — there is no background worker task."""
+        """No-op in local mode 鈥?there is no background worker task."""
 
     # Internal backward-compat accessor used by KernelRuntime._worker_task property
     @property
@@ -162,8 +168,9 @@ class LocalFSMAdaptor:
 
 
 class LocalWorkflowGateway:
-    """Implements ``TemporalWorkflowGateway`` by driving ``RunActorWorkflow``
-    instances directly in asyncio — no Temporal SDK required.
+    """Implement ``TemporalWorkflowGateway`` with in-process ``RunActorWorkflow``.
+
+    Instances run directly in asyncio, so no Temporal SDK is required.
 
     Signal routing, run lifecycle, and projection queries are all handled
     in-process.  The interface is identical to ``TemporalSDKWorkflowGateway``
@@ -175,11 +182,12 @@ class LocalWorkflowGateway:
         deps: RunActorDependencyBundle,
         workflow_id_prefix: str = "run",
     ) -> None:
-        """Initialises the gateway with kernel deps and optional prefix.
+        """Initialise the gateway with kernel deps and optional prefix.
 
         Args:
             deps: Kernel dependency bundle (shared with adaptor).
             workflow_id_prefix: Prefix for workflow id construction.
+
         """
         self._deps = deps
         self._workflow_id_prefix = workflow_id_prefix
@@ -191,7 +199,7 @@ class LocalWorkflowGateway:
     # ------------------------------------------------------------------
 
     async def start_workflow(self, request: StartRunRequest) -> dict[str, str]:
-        """Starts one run by initialising a ``RunActorWorkflow`` in-process.
+        """Start one run by initialising a ``RunActorWorkflow`` in-process.
 
         ``RunActorWorkflow.run()`` is awaited synchronously here to ensure the
         workflow is fully initialised (``_last_projection`` set) before this
@@ -203,12 +211,15 @@ class LocalWorkflowGateway:
 
         Returns:
             Dict with ``"run_id"`` and ``"workflow_id"`` keys.
+
         """
         run_id = self._resolve_run_id(request)
+        if run_id in self._workflows:
+            raise ValueError(f"LocalWorkflowGateway: duplicate run_id {run_id!r} is not allowed")
         workflow_id = self._workflow_id_for(run_id)
         workflow = RunActorWorkflow()
         self._workflows[run_id] = workflow
-        # Await run() to initialise projection state — it returns quickly.
+        # Await run() to initialise projection state 鈥?it returns quickly.
         task = asyncio.create_task(
             workflow.run(
                 RunInput(
@@ -225,7 +236,7 @@ class LocalWorkflowGateway:
         self._run_tasks[run_id] = task
         # Yield control so the task can execute its first steps (projection init).
         await asyncio.sleep(0)
-        _logger.debug("LocalWorkflowGateway: run started — run_id=%s", run_id)
+        _logger.debug("LocalWorkflowGateway: run started 鈥?run_id=%s", run_id)
         return {"run_id": run_id, "workflow_id": workflow_id}
 
     async def signal_workflow(
@@ -241,10 +252,11 @@ class LocalWorkflowGateway:
 
         Raises:
             KeyError: If no run with ``run_id`` is registered.
+
         """
         workflow = self._workflows.get(run_id)
         if workflow is None:
-            raise KeyError(f"LocalWorkflowGateway: run not found — run_id={run_id!r}")
+            raise KeyError(f"LocalWorkflowGateway: run not found 鈥?run_id={run_id!r}")
         await workflow.signal(
             ActorSignal(
                 signal_type=signal.signal_type,
@@ -254,16 +266,17 @@ class LocalWorkflowGateway:
         )
 
     async def cancel_workflow(self, run_id: str, reason: str) -> None:
-        """Cancels one in-process run task and removes it from the registry.
+        """Cancel one in-process run task and removes it from the registry.
 
         Args:
             run_id: Target run identifier.
             reason: Cancellation reason (logged).
+
         """
         task = self._run_tasks.get(run_id)
         if task is not None and not task.done():
             _logger.info(
-                "LocalWorkflowGateway: cancelling run — run_id=%s reason=%s",
+                "LocalWorkflowGateway: cancelling run 鈥?run_id=%s reason=%s",
                 run_id,
                 reason,
             )
@@ -274,7 +287,7 @@ class LocalWorkflowGateway:
         self._run_tasks.pop(run_id, None)
 
     async def query_projection(self, run_id: str) -> RunProjection:
-        """Returns the current projection by querying the in-process workflow.
+        """Return the current projection by querying the in-process workflow.
 
         Falls back to reading from ``DecisionProjectionService`` directly when
         the workflow instance is not yet registered (e.g. before the first
@@ -285,13 +298,14 @@ class LocalWorkflowGateway:
 
         Returns:
             Current authoritative ``RunProjection``.
+
         """
         workflow = self._workflows.get(run_id)
         if workflow is not None:
             try:
                 return workflow.query()
             except RuntimeError:
-                pass  # workflow not yet initialised — fall through to projection
+                pass  # workflow not yet initialised 鈥?fall through to projection
         return await self._deps.projection.get(run_id)
 
     async def start_child_workflow(
@@ -299,7 +313,7 @@ class LocalWorkflowGateway:
         parent_run_id: str,
         request: SpawnChildRunRequest,
     ) -> dict[str, str]:
-        """Starts one child run linked to a parent run.
+        """Start one child run linked to a parent run.
 
         Args:
             parent_run_id: Parent run identifier.
@@ -307,6 +321,7 @@ class LocalWorkflowGateway:
 
         Returns:
             Dict with ``"run_id"`` and ``"workflow_id"`` keys.
+
         """
         child_run_id = request.input_json.get("child_run_id") if request.input_json else None
         if not isinstance(child_run_id, str) or not child_run_id:
@@ -330,17 +345,18 @@ class LocalWorkflowGateway:
 
         Returns:
             Async iterator of ``RuntimeEvent`` instances.
+
         """
         return self._stream_events(run_id)
 
     async def _stream_events(self, run_id: str) -> AsyncIterator[RuntimeEvent]:
-        """Yields events for one run from the event log."""
+        """Yield events for one run from the event log."""
         events = await self._deps.event_log.load(run_id, after_offset=0)
         for event in events:
             yield event
 
     async def shutdown(self) -> None:
-        """Cancels all in-process run tasks."""
+        """Cancel all in-process run tasks."""
         for _, task in list(self._run_tasks.items()):
             if not task.done():
                 task.cancel()
@@ -354,7 +370,7 @@ class LocalWorkflowGateway:
     # ------------------------------------------------------------------
 
     def _resolve_run_id(self, request: StartRunRequest) -> str:
-        """Resolves a deterministic run id from the request fields.
+        """Resolve a deterministic run id from the request fields.
 
         Mirrors the logic in ``TemporalSDKWorkflowGateway._build_run_id()``
         so run ids are consistent across substrates.
@@ -364,6 +380,7 @@ class LocalWorkflowGateway:
 
         Returns:
             Resolved run identifier string.
+
         """
         if request.input_json and isinstance(request.input_json.get("run_id"), str):
             return request.input_json["run_id"]
@@ -374,12 +391,13 @@ class LocalWorkflowGateway:
         return request.run_kind
 
     def _workflow_id_for(self, run_id: str) -> str:
-        """Builds a local workflow id from a run id.
+        """Build a local workflow id from a run id.
 
         Args:
             run_id: Kernel run identifier.
 
         Returns:
             Local workflow id string.
+
         """
         return f"{self._workflow_id_prefix}:{run_id}"

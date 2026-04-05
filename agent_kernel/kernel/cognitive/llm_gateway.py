@@ -1,15 +1,15 @@
 """LLM Gateway implementations for the cognitive layer.
 
 Provides:
-  - ``LLMProviderError`` / ``LLMRateLimitError`` — error taxonomy.
-  - ``BaseLLMGateway`` — shared base with token-count heuristic + retry helper.
-  - ``EchoLLMGateway`` — deterministic test/PoC gateway; no external calls.
-  - ``OpenAILLMGateway`` — OpenAI API gateway (lazy import; ``openai`` optional).
-  - ``AnthropicLLMGateway`` — Anthropic API gateway (lazy import; ``anthropic`` optional).
+  - ``LLMProviderError`` / ``LLMRateLimitError`` 鈥?error taxonomy.
+  - ``BaseLLMGateway`` 鈥?shared base with token-count heuristic + retry helper.
+  - ``EchoLLMGateway`` 鈥?deterministic test/PoC gateway; no external calls.
+  - ``OpenAILLMGateway`` 鈥?OpenAI API gateway (lazy import; ``openai`` optional).
+  - ``AnthropicLLMGateway`` 鈥?Anthropic API gateway (lazy import; ``anthropic`` optional).
 
 Two retry levels must stay independent:
-  - Temporal Activity retry  → kernel-level (process crash, timeout).
-  - Gateway-internal retry   → provider-level (rate limits, 5xx).
+  - Temporal Activity retry  鈫?kernel-level (process crash, timeout).
+  - Gateway-internal retry   鈫?provider-level (rate limits, 5xx).
 """
 
 from __future__ import annotations
@@ -40,9 +40,11 @@ class LLMProviderError(Exception):
         provider: Provider name (e.g. ``"openai"``, ``"anthropic"``).
         status_code: HTTP status code from the provider response.
         message: Human-readable error message.
+
     """
 
     def __init__(self, provider: str, status_code: int, message: str) -> None:
+        """Initialize the instance with configured dependencies."""
         super().__init__(f"[{provider}] HTTP {status_code}: {message}")
         self.provider = provider
         self.status_code = status_code
@@ -58,6 +60,7 @@ class LLMRateLimitError(LLMProviderError):
     Attributes:
         retry_after_s: Server-requested wait time in seconds from the
             ``Retry-After`` response header, or ``None`` if not present.
+
     """
 
     def __init__(
@@ -67,12 +70,13 @@ class LLMRateLimitError(LLMProviderError):
         message: str,
         retry_after_s: float | None = None,
     ) -> None:
+        """Initialize the instance with configured dependencies."""
         super().__init__(provider, status_code, message)
         self.retry_after_s = retry_after_s
 
 
 def _parse_retry_after(response: Any) -> float | None:
-    """Extracts the ``Retry-After`` wait time in seconds from an HTTP response.
+    """Extract the ``Retry-After`` wait time in seconds from an HTTP response.
 
     Supports both integer-seconds and HTTP-date formats.  Returns ``None``
     when the header is absent or cannot be parsed.
@@ -82,6 +86,7 @@ def _parse_retry_after(response: Any) -> float | None:
 
     Returns:
         Wait time in seconds, or ``None``.
+
     """
     if response is None:
         return None
@@ -125,6 +130,7 @@ async def _with_rate_limit_retry(
         LLMRateLimitError: When all retries are exhausted and the last
             attempt still returns a rate-limit response.
         LLMProviderError: For non-retryable provider errors.
+
     """
     backoff = _RETRY_BASE_DELAY_S
     last_exc: LLMRateLimitError | None = None
@@ -148,7 +154,7 @@ async def _with_rate_limit_retry(
 
 
 # ---------------------------------------------------------------------------
-# BaseLLMGateway — shared token heuristic + retry helper
+# BaseLLMGateway 鈥?shared token heuristic + retry helper
 # ---------------------------------------------------------------------------
 
 
@@ -176,6 +182,7 @@ class BaseLLMGateway:
 
         Returns:
             Estimated total token count as an integer.
+
         """
         total_chars = len(context.system_instructions)
         for msg in context.history:
@@ -195,6 +202,7 @@ class BaseLLMGateway:
         Raises:
             LLMRateLimitError: When all retries are exhausted.
             LLMProviderError: For non-retryable provider errors.
+
         """
         return await _with_rate_limit_retry(coro_factory, provider)
 
@@ -218,7 +226,7 @@ class EchoLLMGateway:
         config: InferenceConfig,
         idempotency_key: str,
     ) -> ModelOutput:
-        """Produces a deterministic echo response from the context window.
+        """Produce a deterministic echo response from the context window.
 
         Args:
             context: Assembled context window.
@@ -228,6 +236,7 @@ class EchoLLMGateway:
         Returns:
             ``ModelOutput`` echoing the first tool definition if tools are
             present, otherwise a plain ``"stop"`` response.
+
         """
         estimated_input_tokens = self._estimate_tokens(context)
 
@@ -270,6 +279,7 @@ class EchoLLMGateway:
 
         Returns:
             Estimated total token count based on instruction length.
+
         """
         return self._estimate_tokens(context)
 
@@ -284,6 +294,7 @@ class EchoLLMGateway:
 
         Returns:
             Estimated token count as an integer.
+
         """
         total_chars = len(context.system_instructions)
         for msg in context.history:
@@ -309,10 +320,11 @@ class OpenAILLMGateway(BaseLLMGateway):
     Attributes:
         model_ref: Default model identifier override.  When ``None`` the
             model is taken from ``InferenceConfig.model_ref``.
+
     """
 
     def __init__(self, api_key: str, model_ref: str | None = None) -> None:
-        """Initialises the OpenAI gateway.
+        """Initialise the OpenAI gateway.
 
         Args:
             api_key: OpenAI API key.
@@ -320,6 +332,7 @@ class OpenAILLMGateway(BaseLLMGateway):
 
         Raises:
             ImportError: When the ``openai`` package is not installed.
+
         """
         try:
             import openai
@@ -338,7 +351,7 @@ class OpenAILLMGateway(BaseLLMGateway):
         config: InferenceConfig,
         idempotency_key: str,
     ) -> ModelOutput:
-        """Runs one inference call against the OpenAI API.
+        """Run one inference call against the OpenAI API.
 
         Args:
             context: Assembled context window.
@@ -351,6 +364,7 @@ class OpenAILLMGateway(BaseLLMGateway):
         Raises:
             LLMProviderError: For unrecoverable provider errors.
             LLMRateLimitError: When rate limit persists after all retries.
+
         """
         model = self._model_ref or config.model_ref
         messages = self._build_messages(context)
@@ -385,13 +399,14 @@ class OpenAILLMGateway(BaseLLMGateway):
 
     @staticmethod
     def _build_messages(context: ContextWindow) -> list[dict[str, Any]]:
-        """Converts the context window into OpenAI chat message format.
+        """Convert the context window into OpenAI chat message format.
 
         Args:
             context: Assembled context window.
 
         Returns:
             List of message dicts in OpenAI chat format.
+
         """
         messages: list[dict[str, Any]] = []
         if context.system_instructions:
@@ -401,13 +416,14 @@ class OpenAILLMGateway(BaseLLMGateway):
 
     @staticmethod
     def _build_tools(context: ContextWindow) -> list[dict[str, Any]]:
-        """Converts tool definitions to OpenAI tools format.
+        """Convert tool definitions to OpenAI tools format.
 
         Args:
             context: Assembled context window.
 
         Returns:
             List of tool dicts in OpenAI function-calling format.
+
         """
         return [
             {
@@ -431,6 +447,7 @@ class OpenAILLMGateway(BaseLLMGateway):
 
         Returns:
             Normalised ``ModelOutput``.
+
         """
         import json
 
@@ -492,10 +509,11 @@ class AnthropicLLMGateway(BaseLLMGateway):
     Attributes:
         model_ref: Default model identifier override.  When ``None`` the
             model is taken from ``InferenceConfig.model_ref``.
+
     """
 
     def __init__(self, api_key: str, model_ref: str | None = None) -> None:
-        """Initialises the Anthropic gateway.
+        """Initialise the Anthropic gateway.
 
         Args:
             api_key: Anthropic API key.
@@ -503,6 +521,7 @@ class AnthropicLLMGateway(BaseLLMGateway):
 
         Raises:
             ImportError: When the ``anthropic`` package is not installed.
+
         """
         try:
             import anthropic
@@ -521,7 +540,7 @@ class AnthropicLLMGateway(BaseLLMGateway):
         config: InferenceConfig,
         idempotency_key: str,
     ) -> ModelOutput:
-        """Runs one inference call against the Anthropic Messages API.
+        """Run one inference call against the Anthropic Messages API.
 
         Args:
             context: Assembled context window.
@@ -534,6 +553,7 @@ class AnthropicLLMGateway(BaseLLMGateway):
         Raises:
             LLMProviderError: For unrecoverable provider errors.
             LLMRateLimitError: When rate limit persists after all retries.
+
         """
         model = self._model_ref or config.model_ref
         messages = self._build_messages(context)
@@ -571,7 +591,7 @@ class AnthropicLLMGateway(BaseLLMGateway):
 
     @staticmethod
     def _build_messages(context: ContextWindow) -> list[dict[str, Any]]:
-        """Converts the context window into Anthropic Messages API format.
+        """Convert the context window into Anthropic Messages API format.
 
         Anthropic requires alternating user/assistant roles; this PoC
         wraps all history entries as user messages for simplicity.
@@ -581,6 +601,7 @@ class AnthropicLLMGateway(BaseLLMGateway):
 
         Returns:
             List of message dicts in Anthropic Messages format.
+
         """
         if not context.history:
             return [{"role": "user", "content": "Begin."}]
@@ -588,13 +609,14 @@ class AnthropicLLMGateway(BaseLLMGateway):
 
     @staticmethod
     def _build_tools(context: ContextWindow) -> list[dict[str, Any]]:
-        """Converts tool definitions to Anthropic tool format.
+        """Convert tool definitions to Anthropic tool format.
 
         Args:
             context: Assembled context window.
 
         Returns:
             List of tool dicts in Anthropic tool-use format.
+
         """
         return [
             {
@@ -615,6 +637,7 @@ class AnthropicLLMGateway(BaseLLMGateway):
 
         Returns:
             Normalised ``ModelOutput``.
+
         """
         raw_text = ""
         tool_calls: list[dict[str, Any]] = []

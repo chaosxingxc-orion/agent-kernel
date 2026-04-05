@@ -20,6 +20,7 @@ class TemporalClientConfig:
     Attributes:
         target_host: Temporal frontend endpoint, such as ``localhost:7233``.
         namespace: Temporal namespace for kernel workflows.
+
     """
 
     target_host: str = "localhost:7233"
@@ -29,7 +30,7 @@ class TemporalClientConfig:
 async def create_temporal_client(
     config: TemporalClientConfig | None = None,
 ) -> Any:
-    """Creates and returns a connected Temporal SDK client.
+    """Create and returns a connected Temporal SDK client.
 
     Args:
         config: Optional client connection configuration. Uses defaults
@@ -40,6 +41,7 @@ async def create_temporal_client(
 
     Raises:
         RuntimeError: If Temporal Python SDK is not installed.
+
     """
     active_config = config or TemporalClientConfig()
     try:

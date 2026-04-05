@@ -56,6 +56,7 @@ class ScriptRuntimeRegistry:
     """
 
     def __init__(self) -> None:
+        """Initialize the instance with configured dependencies."""
         self._runtimes: dict[str, Any] = {}
         self._descriptors: dict[str, ScriptRuntimeDescriptor] = {}
 
@@ -82,6 +83,7 @@ class ScriptRuntimeRegistry:
             description: Human-readable description (for logging/debugging).
             is_safe_for_production: False for PoC/test runtimes.
             supports_timeout: Whether the runtime enforces ``timeout_ms``.
+
         """
         self._runtimes[host_kind] = runtime
         self._descriptors[host_kind] = ScriptRuntimeDescriptor(
@@ -97,33 +99,43 @@ class ScriptRuntimeRegistry:
 
     def get(self, host_kind: str) -> Any | None:
         """Return the registered runtime for *host_kind*, or ``None``.
+
         Args:
-            host_kind:
+            host_kind: Skill runtime host key to look up.
+
         Returns:
-            Any | None:
+            Registered runtime instance, or ``None`` when not found.
+
         """
         return self._runtimes.get(host_kind)
 
     def get_descriptor(self, host_kind: str) -> ScriptRuntimeDescriptor | None:
         """Return the descriptor for *host_kind*, or ``None``.
+
         Args:
-            host_kind:
+            host_kind: Skill runtime host key to look up.
+
         Returns:
-            ScriptRuntimeDescriptor | None:
+            Host descriptor, or ``None`` when not found.
+
         """
         return self._descriptors.get(host_kind)
 
     def known_host_kinds(self) -> list[str]:
         """Return all registered host_kind strings.
+
         Returns:
             list[str]:
+
         """
         return list(self._runtimes.keys())
 
     def all_descriptors(self) -> list[ScriptRuntimeDescriptor]:
         """Return all registered descriptors.
+
         Returns:
             list[ScriptRuntimeDescriptor]:
+
         """
         return list(self._descriptors.values())
 
@@ -142,6 +154,7 @@ class ScriptRuntimeRegistry:
 
         Raises:
             KeyError: If no runtime is registered for ``input_value.host_kind``.
+
         """
         runtime = self._runtimes.get(input_value.host_kind)
         if runtime is None:
@@ -214,8 +227,9 @@ def validate_host_kind(host_kind: str, *, strict: bool = False) -> bool:
     Returns:
         True if known, False otherwise (unless *strict* raises first).
 
-        Raises:
+    Raises:
             Exception:
+
     """
     if host_kind in KERNEL_SCRIPT_RUNTIME_REGISTRY.known_host_kinds():
         return True

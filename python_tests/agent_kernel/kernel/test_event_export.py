@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock
@@ -22,6 +23,7 @@ from agent_kernel.kernel.event_export import (
     InMemoryRunTraceStore,
 )
 from agent_kernel.kernel.minimal_runtime import InMemoryKernelRuntimeEventLog
+from agent_kernel.kernel.persistence.event_schema_migration import EventSchemaMigrator
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -179,6 +181,76 @@ class TestEventExportingEventLog:
 
         events = asyncio.run(inner.load("run-6"))
         assert len(events) == 3
+
+    def test_export_applies_schema_migration_before_export(self) -> None:
+        """Export path should migrate events when migrator + target are set."""
+        inner = InMemoryKernelRuntimeEventLog()
+        export_port = AsyncMock()
+        migrator = EventSchemaMigrator()
+
+        def _migrate(event: RuntimeEvent) -> RuntimeEvent:
+            return replace(
+                event,
+                payload_json={**(event.payload_json or {}), "migrated": True},
+            )
+
+        migrator.register(
+            "1",
+            "2",
+            _migrate,
+        )
+        wrapper = EventExportingEventLog(
+            inner,
+            export_port,
+            event_schema_migrator=migrator,
+            target_event_schema_version="2",
+        )
+        commit = _make_commit("run-migrate", event_types=["run.started"])
+
+        async def _run() -> None:
+            await wrapper.append_action_commit(commit)
+            await asyncio.sleep(0)
+
+        asyncio.run(_run())
+        exported_commit = export_port.export_commit.await_args.args[0]
+        assert exported_commit.events[0].schema_version == "2"
+        assert exported_commit.events[0].payload_json is not None
+        assert exported_commit.events[0].payload_json["migrated"] is True
+
+    def test_close_cancels_pending_exports_and_awaits_inner_close(self) -> None:
+        """close() should cancel background tasks and await inner async close."""
+
+        class _Inner:
+            def __init__(self) -> None:
+                self.closed = False
+
+            async def append_action_commit(self, _commit: ActionCommit) -> str:
+                return "commit-ref-1"
+
+            async def load(self, _run_id: str, after_offset: int = 0) -> list[RuntimeEvent]:
+                del after_offset
+                return []
+
+            async def close(self) -> None:
+                self.closed = True
+
+        async def _slow_export(_commit: ActionCommit) -> None:
+            await asyncio.sleep(10)
+
+        inner = _Inner()
+        export_port = AsyncMock()
+        export_port.export_commit = _slow_export
+        wrapper = EventExportingEventLog(inner, export_port)
+        commit = _make_commit("run-close")
+
+        async def _run() -> None:
+            await wrapper.append_action_commit(commit)
+            await asyncio.sleep(0)
+            await wrapper.close()
+
+        asyncio.run(_run())
+        assert inner.closed is True
+        assert wrapper._background_tasks == set()
 
 
 # ---------------------------------------------------------------------------

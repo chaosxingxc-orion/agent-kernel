@@ -17,6 +17,7 @@ class SQLiteTurnIntentLog(TurnIntentLog):
     """Persists turn intent metadata for replay-safe recovery."""
 
     def __init__(self, database_path: str | Path = ":memory:") -> None:
+        """Initialize the instance with configured dependencies."""
         self._database_path = str(database_path)
         # check_same_thread=False + RLock: same pattern as SQLiteDedupeStore.
         self._conn = sqlite3.connect(self._database_path, check_same_thread=False)
@@ -27,16 +28,19 @@ class SQLiteTurnIntentLog(TurnIntentLog):
         self._ensure_schema()
 
     def close(self) -> None:
-        """Closes SQLite connection."""
+        """Close SQLite connection."""
         with self._lock:
             self._conn.close()
 
     async def write_intent(self, intent: TurnIntentRecord) -> None:
-        """Writes one turn intent with idempotent semantics by intent ref.
+        """Write one turn intent with idempotent semantics by intent ref.
+
         Args:
             intent: Turn intent record to persist.
+
         Raises:
             sqlite3.Error: On database write failure.
+
         """
         with self._lock:
             try:
@@ -82,11 +86,14 @@ class SQLiteTurnIntentLog(TurnIntentLog):
                 raise
 
     async def latest_for_run(self, run_id: str) -> TurnIntentRecord | None:
-        """Returns latest persisted turn intent record for one run.
+        """Return latest persisted turn intent record for one run.
+
         Args:
             run_id: Identifier of the target run.
+
         Returns:
             TurnIntentRecord | None: Latest turn intent record, or ``None`` if absent.
+
         """
         with self._lock:
             row = self._conn.execute(

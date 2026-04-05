@@ -5,12 +5,12 @@ Why heartbeat matters for long-running agents
 A kernel run can silently get stuck: an external callback never arrives,
 a tool activity hangs past the Temporal activity timeout, or the event log
 falls behind.  Temporal's activity-level heartbeat (``activity.heartbeat()``)
-covers the *activity* side.  This module covers the *run* side — whether a
+covers the *activity* side.  This module covers the *run* side 鈥?whether a
 run as a whole is still making forward progress.
 
 Two components
 --------------
-1. **``RunHeartbeatMonitor``** — per-run liveness tracker.
+1. **``RunHeartbeatMonitor``** 鈥?per-run liveness tracker.
 
    Implements ``ObservabilityHook`` so it receives every FSM state transition
    without additional wiring.  A background watchdog calls
@@ -18,7 +18,7 @@ Two components
    the canonical signal pathway; the existing Recovery authority handles the
    rest.  No new kernel authority is introduced.
 
-2. **``KernelSelfHeartbeat``** — kernel component liveness.
+2. **``KernelSelfHeartbeat``** 鈥?kernel component liveness.
 
    Verifies that event log and projection service are responsive.  Caches
    results so the sync ``HealthCheckFn`` interface (required by
@@ -30,7 +30,7 @@ Architecture invariants preserved
   re-establish heartbeat or get timed out fresh.  Persisting heartbeat
   state would create a distributed coordination problem for no safety gain.
 - On timeout a ``heartbeat_timeout`` signal is injected via the existing
-  signal path → RunActor → TurnEngine → Recovery.  The six-authority
+  signal path 鈫?RunActor 鈫?TurnEngine 鈫?Recovery.  The six-authority
   invariant is never broken.
 - ``RunHeartbeatMonitor`` is NOT a seventh authority.  It is an operational
   watchdog that observes via the hook side-channel and acts via the substrate
@@ -130,6 +130,7 @@ class HeartbeatPolicy:
             FSM cycling.
         stale_check_age_s: How old a cached ``KernelSelfHeartbeat`` result
             can be before ``is_stale()`` returns ``True``.
+
     """
 
     state_timeout_s: dict[str, int] = field(default_factory=dict)
@@ -144,6 +145,7 @@ class HeartbeatPolicy:
 
         Returns:
             Timeout in seconds, or ``None`` if the state is not monitored.
+
         """
         if lifecycle_state not in _MONITORED_STATES:
             return None
@@ -177,9 +179,11 @@ class RunHeartbeatMonitor:
 
     Args:
         policy: Heartbeat policy with per-state timeout thresholds.
+
     """
 
     def __init__(self, policy: HeartbeatPolicy | None = None) -> None:
+        """Initialize the instance with configured dependencies."""
         self._policy = policy or HeartbeatPolicy()
         self._entries: dict[str, _RunHeartbeatEntry] = {}
         self._lock = threading.Lock()
@@ -223,7 +227,7 @@ class RunHeartbeatMonitor:
         latency_ms: int,
         token_usage: Any,
     ) -> None:
-        """Record activity heartbeat on LLM call — no other action needed."""
+        """Record activity heartbeat on LLM call 鈥?no other action needed."""
         self._touch(run_id, lifecycle_state=None, timestamp_ms=_now_ms())
 
     def on_action_dispatch(
@@ -235,7 +239,7 @@ class RunHeartbeatMonitor:
         outcome_kind: str,
         latency_ms: int,
     ) -> None:
-        """Record activity heartbeat on action dispatch — no other action needed."""
+        """Record activity heartbeat on action dispatch 鈥?no other action needed."""
         self._touch(run_id, lifecycle_state=None, timestamp_ms=_now_ms())
 
     def on_recovery_triggered(
@@ -245,7 +249,7 @@ class RunHeartbeatMonitor:
         reason_code: str,
         mode: str,
     ) -> None:
-        """No-op — recovery events do not reset the heartbeat timer."""
+        """No-op 鈥?recovery events do not reset the heartbeat timer."""
 
     # ------------------------------------------------------------------
     # Public API
@@ -259,6 +263,7 @@ class RunHeartbeatMonitor:
 
         Args:
             run_id: Run to record heartbeat for.
+
         """
         self._touch(run_id, lifecycle_state=None, timestamp_ms=_now_ms())
 
@@ -270,6 +275,7 @@ class RunHeartbeatMonitor:
 
         Returns:
             ``True`` when alive or when the run is not in a monitored state.
+
         """
         with self._lock:
             entry = self._entries.get(run_id)
@@ -289,6 +295,7 @@ class RunHeartbeatMonitor:
 
         Returns:
             Age in seconds, or ``None`` when run is not tracked.
+
         """
         with self._lock:
             entry = self._entries.get(run_id)
@@ -304,6 +311,7 @@ class RunHeartbeatMonitor:
 
         Returns:
             List of run IDs to signal with ``heartbeat_timeout``.
+
         """
         now = _now_ms()
         timed_out: list[str] = []
@@ -325,6 +333,7 @@ class RunHeartbeatMonitor:
 
         Args:
             run_id: Run to clear.
+
         """
         with self._lock:
             self._entries.pop(run_id, None)
@@ -338,6 +347,7 @@ class RunHeartbeatMonitor:
 
         Args:
             gateway: Temporal workflow gateway for signal delivery.
+
         """
         from agent_kernel.kernel.contracts import SignalRunRequest
 
@@ -345,7 +355,7 @@ class RunHeartbeatMonitor:
         for run_id in timed_out:
             age_s = self.last_seen_age_s(run_id) or 0.0
             _logger.warning(
-                "Run heartbeat timeout: run_id=%s silent_s=%.1f — injecting"
+                "Run heartbeat timeout: run_id=%s silent_s=%.1f 鈥?injecting"
                 "heartbeat_timeout signal",
                 run_id,
                 age_s,
@@ -361,12 +371,12 @@ class RunHeartbeatMonitor:
                     ),
                 )
             except Exception as exc:
-                # Signal delivery failed — remove from _timed_out so the next
+                # Signal delivery failed 鈥?remove from _timed_out so the next
                 # watchdog sweep retries delivery (D-M5).
                 with self._lock:
                     self._timed_out.discard(run_id)
                 _logger.warning(
-                    "Failed to deliver heartbeat_timeout signal to run_id=%s:%s — will retry",
+                    "Failed to deliver heartbeat_timeout signal to run_id=%s:%s 鈥?will retry",
                     run_id,
                     exc,
                 )
@@ -379,7 +389,7 @@ class RunHeartbeatMonitor:
         """Start a background asyncio Task that calls ``watchdog_once`` periodically.
 
         The task runs until cancelled (e.g. on worker shutdown).  Cancellation
-        is handled gracefully — the task exits without logging an error.
+        is handled gracefully 鈥?the task exits without logging an error.
 
         Typical wiring::
 
@@ -394,6 +404,7 @@ class RunHeartbeatMonitor:
         Returns:
             The running ``asyncio.Task``.  The caller should retain a reference
             and cancel it on worker shutdown to prevent resource leaks.
+
         """
 
         async def _loop() -> None:
@@ -407,8 +418,7 @@ class RunHeartbeatMonitor:
         return asyncio.get_running_loop().create_task(_loop(), name="heartbeat_watchdog")
 
     def make_health_check_fn(self) -> HealthCheckFn:
-        """Return a sync ``HealthCheckFn`` for registration in
-        ``KernelHealthProbe``.
+        """Return a sync ``HealthCheckFn`` for ``KernelHealthProbe`` registration.
 
         Reports ``DEGRADED`` when any tracked run is within 20% of its timeout
         threshold; ``UNHEALTHY`` when any run has already timed out and the
@@ -417,6 +427,7 @@ class RunHeartbeatMonitor:
         Returns:
             Callable ``() -> (HealthStatus,
                 message)`` for ``KernelHealthProbe``.
+
         """
         monitor = self
 
@@ -493,12 +504,11 @@ class _KernelSelfHeartbeatState:
 
 
 class KernelSelfHeartbeat:
-    """Verifies that kernel components are responsive; plugs into
-    KernelHealthProbe.
+    """Verify that kernel components are responsive for ``KernelHealthProbe``.
 
     ``refresh()`` performs async I/O checks and caches the results.
     ``event_log_check()`` and ``projection_check()`` return sync
-    ``HealthCheckFn`` callables that read from the cached state — required
+    ``HealthCheckFn`` callables that read from the cached state 鈥?required
     because ``KernelHealthProbe`` (and Kubernetes probes) are synchronous.
 
     Typical usage::
@@ -521,6 +531,7 @@ class KernelSelfHeartbeat:
         Args:
             stale_age_s: Cached result age in seconds before it is considered
                 stale.  A stale check is reported as ``DEGRADED``.
+
         """
         self._stale_age_s = stale_age_s
         self._state = _KernelSelfHeartbeatState()
@@ -542,6 +553,7 @@ class KernelSelfHeartbeat:
         Args:
             event_log: Kernel event log to probe.
             projection: Decision projection service to probe.
+
         """
         ts = _now_ms()
         el_status, el_msg = await self._probe_event_log(event_log)
@@ -558,6 +570,7 @@ class KernelSelfHeartbeat:
 
         Returns:
             Callable for ``KernelHealthProbe.register_check()``.
+
         """
         state = self._state
         lock = self._lock
@@ -585,6 +598,7 @@ class KernelSelfHeartbeat:
 
         Returns:
             Callable for ``KernelHealthProbe.register_check()``.
+
         """
         state = self._state
         lock = self._lock
@@ -612,6 +626,7 @@ class KernelSelfHeartbeat:
 
         Returns:
             ``True`` when a fresh ``refresh()`` call is needed.
+
         """
         with self._lock:
             if self._state.last_refresh_at_ms == 0:
@@ -659,6 +674,7 @@ class HeartbeatWatchdog:
         monitor: The ``RunHeartbeatMonitor`` to scan on each tick.
         gateway: Temporal workflow gateway for signal delivery.
         interval_s: Scan interval in seconds (default: 30).
+
     """
 
     def __init__(
@@ -667,6 +683,7 @@ class HeartbeatWatchdog:
         gateway: TemporalWorkflowGateway,
         interval_s: int = 30,
     ) -> None:
+        """Initialize the instance with configured dependencies."""
         self._monitor = monitor
         self._gateway = gateway
         self._interval_s = interval_s
@@ -690,7 +707,7 @@ class HeartbeatWatchdog:
         _logger.info("HeartbeatWatchdog stopped.")
 
     async def _loop(self) -> None:
-        """Internal: periodic watchdog scan loop."""
+        """Run the internal periodic watchdog scan loop."""
         while True:
             await asyncio.sleep(self._interval_s)
             try:

@@ -27,6 +27,7 @@ class TemporalWorkerConfig:
         workflows: Workflow classes registered on this worker.
         activities: Optional list of activity callables to register.
         workflow_runner: Optional Temporal workflow runner override.
+
     """
 
     task_queue: str = "agent-kernel"
@@ -44,22 +45,24 @@ class TemporalKernelWorker:
         config: TemporalWorkerConfig | None = None,
         dependencies: RunActorDependencyBundle | None = None,
     ) -> None:
-        """Initializes worker with Temporal client and optional config.
+        """Initialize worker with Temporal client and optional config.
 
         Args:
             client: Temporal SDK client instance.
             config: Optional worker configuration override.
             dependencies: Optional workflow dependency bundle.
+
         """
         self._client = client
         self._config = config or TemporalWorkerConfig()
         self._dependencies = dependencies
 
     async def run(self) -> None:
-        """Runs Temporal worker loop for kernel workflows.
+        """Run Temporal worker loop for kernel workflows.
 
         Raises:
             RuntimeError: If Temporal Python SDK is not installed.
+
         """
         try:
             worker_module = import_module("temporalio.worker")

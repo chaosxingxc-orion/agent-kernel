@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from agent_kernel.kernel.persistence.sqlite_pool import SQLiteConnectionPool
+
 from agent_kernel.kernel.dedupe_store import (
     DedupeRecord,
     DedupeReservation,
@@ -25,41 +27,53 @@ class SQLiteDedupeStore:
     in-memory dedupe is not sufficient across process restarts.
     """
 
-    def __init__(self, database_path: str | Path = ":memory:") -> None:
-        """Initializes one SQLite dedupe store.
+    def __init__(
+        self,
+        database_path: str | Path = ":memory:",
+        pool: SQLiteConnectionPool | None = None,
+    ) -> None:
+        """Initialize one SQLite dedupe store.
 
         Args:
             database_path: SQLite file path. Use ``":memory:"`` for
                 in-memory mode.
+            pool: Optional shared SQLite connection pool.
+
         """
         self._database_path = str(database_path)
+        self._pool = pool
         # check_same_thread=False allows the connection to be used from multiple
         # threads.  All public methods are serialized via self._lock (RLock allows
         # re-entrant acquisition from internal helpers that call self.get()).
-        self._conn = sqlite3.connect(
-            self._database_path, isolation_level=None, check_same_thread=False
-        )
+        if self._pool is None:
+            self._conn = sqlite3.connect(
+                self._database_path, isolation_level=None, check_same_thread=False
+            )
+        else:
+            self._conn = self._pool.acquire_write()
         self._lock = threading.RLock()
         self._conn.row_factory = sqlite3.Row
-        # WAL mode allows concurrent readers while one writer is active.
-        # NORMAL sync is safe with WAL — durable on OS crash for PoC use.
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
+        if self._pool is None:
+            # WAL mode allows concurrent readers while one writer is active.
+            # NORMAL sync is safe with WAL and durable on OS crash for PoC use.
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
         self._ensure_schema()
 
     def close(self) -> None:
-        """Closes SQLite connection after checkpointing the WAL file.
+        """Close SQLite connection after checkpointing the WAL file.
 
         Checkpointing (TRUNCATE mode) ensures WAL contents are merged back
         into the main database file and the WAL file is reset to zero bytes.
         This reclaims disk space and ensures durability before process exit.
-        The checkpoint is best-effort — failures are silently suppressed so
+        The checkpoint is best-effort 鈥?failures are silently suppressed so
         that a crashed connection can still be closed.
         """
         with self._lock:
-            with contextlib.suppress(Exception):
-                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            self._conn.close()
+            if self._pool is None:
+                with contextlib.suppress(Exception):
+                    self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                self._conn.close()
 
     def reserve(self, envelope: IdempotencyEnvelope) -> DedupeReservation:
         """Reserves dispatch idempotency key if absent.
@@ -72,6 +86,7 @@ class SQLiteDedupeStore:
 
         Raises:
             DedupeStoreStateError: If the key exists in an incompatible state.
+
         """
         # BEGIN IMMEDIATE acquires a write lock upfront, preventing TOCTOU
         # between the existence check and the INSERT across concurrent processes.
@@ -122,7 +137,7 @@ class SQLiteDedupeStore:
         dispatch_idempotency_key: str,
         peer_operation_id: str | None = None,
     ) -> None:
-        """Marks record as dispatched.
+        """Mark record as dispatched.
 
         Args:
             dispatch_idempotency_key: Key to mark as dispatched.
@@ -130,6 +145,7 @@ class SQLiteDedupeStore:
 
         Raises:
             DedupeStoreStateError: If state transition is invalid.
+
         """
         with self._lock:
             try:
@@ -166,6 +182,7 @@ class SQLiteDedupeStore:
 
         Returns:
             Reservation result indicating acceptance or duplicate.
+
         """
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
@@ -212,7 +229,7 @@ class SQLiteDedupeStore:
         dispatch_idempotency_key: str,
         external_ack_ref: str | None = None,
     ) -> None:
-        """Marks record as acknowledged.
+        """Mark record as acknowledged.
 
         Args:
             dispatch_idempotency_key: Key to mark as acknowledged.
@@ -220,6 +237,7 @@ class SQLiteDedupeStore:
 
         Raises:
             DedupeStoreStateError: If state transition is invalid.
+
         """
         with self._lock:
             try:
@@ -246,7 +264,7 @@ class SQLiteDedupeStore:
         dispatch_idempotency_key: str,
         external_ack_ref: str | None = None,
     ) -> None:
-        """Marks record as succeeded — result confirmed and evidence collectible.
+        """Mark record as succeeded 鈥?result confirmed and evidence collectible.
 
         Args:
             dispatch_idempotency_key: Key to mark as succeeded.
@@ -254,6 +272,7 @@ class SQLiteDedupeStore:
 
         Raises:
             DedupeStoreStateError: If state transition is invalid.
+
         """
         with self._lock:
             try:
@@ -274,13 +293,14 @@ class SQLiteDedupeStore:
                 raise
 
     def mark_unknown_effect(self, dispatch_idempotency_key: str) -> None:
-        """Marks record as unknown_effect.
+        """Mark record as unknown_effect.
 
         Args:
             dispatch_idempotency_key: Key to mark as unknown effect.
 
         Raises:
             DedupeStoreStateError: If state transition is invalid.
+
         """
         with self._lock:
             try:
@@ -303,31 +323,47 @@ class SQLiteDedupeStore:
                 raise
 
     def get(self, dispatch_idempotency_key: str) -> DedupeRecord | None:
-        """Gets dedupe record by key.
+        """Get dedupe record by key.
 
         Args:
             dispatch_idempotency_key: Key to look up.
 
         Returns:
             Matching dedupe record, or ``None`` if not found.
+
         """
         with self._lock:
-            cursor = self._conn.cursor()
-            cursor.execute(
-                """
-                SELECT
-                  dispatch_idempotency_key,
-                  operation_fingerprint,
-                  attempt_seq,
-                  state,
-                  peer_operation_id,
-                  external_ack_ref
-                FROM dedupe_store
-                WHERE dispatch_idempotency_key = ?
-                """,
-                (dispatch_idempotency_key,),
-            )
-            row = cursor.fetchone()
+            if self._pool is not None and not self._conn.in_transaction:
+                with self._pool.read_connection() as read_conn:
+                    row = read_conn.execute(
+                        """
+                        SELECT
+                          dispatch_idempotency_key,
+                          operation_fingerprint,
+                          attempt_seq,
+                          state,
+                          peer_operation_id,
+                          external_ack_ref
+                        FROM dedupe_store
+                        WHERE dispatch_idempotency_key = ?
+                        """,
+                        (dispatch_idempotency_key,),
+                    ).fetchone()
+            else:
+                row = self._conn.execute(
+                    """
+                    SELECT
+                      dispatch_idempotency_key,
+                      operation_fingerprint,
+                      attempt_seq,
+                      state,
+                      peer_operation_id,
+                      external_ack_ref
+                    FROM dedupe_store
+                    WHERE dispatch_idempotency_key = ?
+                    """,
+                    (dispatch_idempotency_key,),
+                ).fetchone()
             if row is None:
                 return None
             return DedupeRecord(
@@ -340,7 +376,7 @@ class SQLiteDedupeStore:
             )
 
     def _get_required_record(self, dispatch_idempotency_key: str) -> DedupeRecord:
-        """Gets record by key or raises.
+        """Get record by key or raises.
 
         Args:
             dispatch_idempotency_key: Key to look up.
@@ -350,6 +386,7 @@ class SQLiteDedupeStore:
 
         Raises:
             DedupeStoreStateError: If no record exists for the key.
+
         """
         record = self.get(dispatch_idempotency_key)
         if record is None:
@@ -365,13 +402,14 @@ class SQLiteDedupeStore:
         peer_operation_id: str | None,
         external_ack_ref: str | None,
     ) -> None:
-        """Updates state and optional references for one record.
+        """Update state and optional references for one record.
 
         Args:
             dispatch_idempotency_key: Key of the record to update.
             state: New monotonic state value.
             peer_operation_id: Optional updated peer operation reference.
             external_ack_ref: Optional updated external acknowledgement.
+
         """
         cursor = self._conn.cursor()
         cursor.execute(
@@ -396,7 +434,7 @@ class SQLiteDedupeStore:
             )
 
     def _ensure_schema(self) -> None:
-        """Creates dedupe table if it does not exist."""
+        """Create dedupe table if it does not exist."""
         cursor = self._conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS dedupe_store (
@@ -408,4 +446,4 @@ class SQLiteDedupeStore:
               external_ack_ref TEXT NULL
             )
             """)
-        # isolation_level=None (autocommit) — no explicit commit needed.
+        # isolation_level=None (autocommit) 鈥?no explicit commit needed.

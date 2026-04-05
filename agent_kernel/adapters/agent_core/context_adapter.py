@@ -30,6 +30,7 @@ class AgentCoreContextInput:
             binding.
         context_json: Optional context payload for inline context
             injection.
+
     """
 
     session_id: str
@@ -48,6 +49,7 @@ class RuntimeContextBinding:
         content_hash: Stable context content hash for snapshot governance.
         workspace_rules_md_ref: Optional rules markdown reference.
         workspace_summary_md_ref: Optional summary markdown reference.
+
     """
 
     binding_ref: str
@@ -66,6 +68,7 @@ class AgentCoreContextExport:
         run_id: Run identifier that owns the exported context.
         context_ref: Context reference for the exported data.
         summary_ref: Optional summary reference for the context.
+
     """
 
     run_id: str
@@ -82,9 +85,11 @@ class AgentCoreContextAdapter:
     Attributes:
         _binding_by_run: Mapping from run_id to binding_ref.
         _context_by_binding: Mapping from binding_ref to context_ref.
+
     """
 
     def __init__(self) -> None:
+        """Initialize in-memory run/context binding indexes."""
         self._binding_by_run: dict[str, str] = {}
         self._context_by_binding: dict[str, str] = {}
 
@@ -100,6 +105,7 @@ class AgentCoreContextAdapter:
 
         Returns:
             A resolved context binding for kernel execution.
+
         """
         binding_ref = f"ctx:{input_value.session_id}"
         if input_value.context_ref is not None:
@@ -124,6 +130,7 @@ class AgentCoreContextAdapter:
         Args:
             run_id: Run identifier to bind context to.
             binding_ref: Context binding reference to associate.
+
         """
         self._binding_by_run[run_id] = binding_ref
 
@@ -138,6 +145,7 @@ class AgentCoreContextAdapter:
 
         Returns:
             The binding_ref string if found, else None.
+
         """
         return self._binding_by_run.get(run_id)
 
@@ -145,13 +153,14 @@ class AgentCoreContextAdapter:
         self,
         run_id: str,
     ) -> AgentCoreContextExport:
-        """Exports context data associated with one run.
+        """Export context data associated with one run.
 
         Args:
             run_id: Run identifier whose context should be exported.
 
         Returns:
             An exported context snapshot for the specified run.
+
         """
         binding_ref = self._binding_by_run.get(run_id, "")
         context_ref = self._context_by_binding.get(
@@ -166,7 +175,15 @@ class AgentCoreContextAdapter:
 
 
 def _build_context_content_hash(input_value: AgentCoreContextInput) -> str:
-    """Builds deterministic content hash from context input."""
+    """Build a deterministic content hash from context input.
+
+    Args:
+        input_value: Context payload that should map to one stable hash.
+
+    Returns:
+        Hex-encoded SHA256 digest for canonicalized context content.
+
+    """
     payload = {
         "session_id": input_value.session_id,
         "context_ref": input_value.context_ref,

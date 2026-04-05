@@ -33,6 +33,7 @@ class ToolBinding:
         tool_id: Stable logical tool identifier selected for execution.
         handler_ref: Runtime handler reference consumed by executor runtime.
         capability_scope: Optional scope tags used for governance checks.
+
     """
 
     tool_id: str
@@ -49,6 +50,7 @@ class MCPBinding:
         capability_id: Capability exposed by the target MCP server.
         schema_ref: Optional schema reference for payload validation.
         credential_boundary_ref: Optional credential boundary descriptor.
+
     """
 
     server_id: str
@@ -69,7 +71,7 @@ class AgentCoreToolMCPAdapter:
         action: Action,
         tool_info: Any | None = None,
     ) -> ToolBinding:
-        """Resolves a tool binding from optional metadata and action payload.
+        """Resolve a tool binding from optional metadata and action payload.
 
         Resolution order:
           1. Explicit ``tool_info`` object/dict.
@@ -82,6 +84,7 @@ class AgentCoreToolMCPAdapter:
 
         Returns:
             A normalized tool binding for downstream executor components.
+
         """
         resolved_tool_id = self._extract_tool_name(tool_info)
         if resolved_tool_id is None:
@@ -99,7 +102,7 @@ class AgentCoreToolMCPAdapter:
         action: Action,
         mcp_info: Any | None = None,
     ) -> MCPBinding:
-        """Resolves an MCP binding from optional metadata and action payload.
+        """Resolve an MCP binding from optional metadata and action payload.
 
         Resolution order:
           1. Explicit ``mcp_info`` object/dict.
@@ -112,6 +115,7 @@ class AgentCoreToolMCPAdapter:
 
         Returns:
             A normalized MCP binding object.
+
         """
         server_id = self._extract_server_name(mcp_info)
         capability_id = self._extract_capability_id(mcp_info)
@@ -158,28 +162,37 @@ class AgentCoreToolMCPAdapter:
 
     async def resolve_tool_bindings(self, action: Action) -> list[ToolBinding]:
         """CapabilityAdapter-compatible tool bindings resolver.
+
         Args:
             action: The action to evaluate or process.
+
         Returns:
             list[ToolBinding]: List of resolved tool binding descriptors.
+
         """
         return [await self.resolve_tool(action)]
 
     async def resolve_mcp_bindings(self, action: Action) -> list[MCPBinding]:
         """CapabilityAdapter-compatible MCP bindings resolver.
+
         Args:
             action: The action to evaluate or process.
+
         Returns:
             list[MCPBinding]: List of resolved MCP binding descriptors.
+
         """
         return [await self.resolve_mcp(action)]
 
     async def resolve_skill_bindings(self, action: Action) -> list[str]:
-        """Resolves skill binding references from action payload hints.
+        """Resolve skill binding references from action payload hints.
+
         Args:
             action: The action to evaluate or process.
+
         Returns:
             list[str]: List of resolved identifiers.
+
         """
         payload = action.input_json if isinstance(action.input_json, dict) else {}
         raw_bindings = payload.get("skill_bindings")
@@ -192,11 +205,14 @@ class AgentCoreToolMCPAdapter:
         return [token] if token != "" else []
 
     async def resolve_declarative_bundle(self, action: Action) -> dict[str, str] | None:
-        """Resolves declarative bundle digest payload from action input JSON.
+        """Resolve declarative bundle digest payload from action input JSON.
+
         Args:
             action: The action to evaluate or process.
+
         Returns:
             dict[str, str] | None: Key-value digest map, or ``None`` when no bundle is declared.
+
         """
         payload = action.input_json if isinstance(action.input_json, dict) else {}
         bundle = payload.get("declarative_bundle_digest")
@@ -213,13 +229,14 @@ class AgentCoreToolMCPAdapter:
 
     @staticmethod
     def _extract_tool_name(tool_info: Any | None) -> str | None:
-        """Extracts tool name from object or dict metadata.
+        """Extract tool name from object or dict metadata.
 
         Args:
             tool_info: Candidate metadata object or dictionary.
 
         Returns:
             Extracted tool name string, or ``None`` when not found.
+
         """
         if tool_info is None:
             return None
@@ -230,13 +247,14 @@ class AgentCoreToolMCPAdapter:
 
     @staticmethod
     def _extract_server_name(mcp_info: Any | None) -> str | None:
-        """Extracts MCP server name from object or dict metadata.
+        """Extract MCP server name from object or dict metadata.
 
         Args:
             mcp_info: Candidate MCP metadata object or dictionary.
 
         Returns:
             Extracted server name string, or ``None`` when not found.
+
         """
         if mcp_info is None:
             return None
@@ -247,13 +265,14 @@ class AgentCoreToolMCPAdapter:
 
     @staticmethod
     def _extract_capability_id(mcp_info: Any | None) -> str | None:
-        """Extracts MCP capability identifier from object or dict metadata.
+        """Extract MCP capability identifier from object or dict metadata.
 
         Args:
             mcp_info: Candidate MCP metadata object or dictionary.
 
         Returns:
             Extracted capability id string, or ``None`` when not found.
+
         """
         if mcp_info is None:
             return None
@@ -264,13 +283,14 @@ class AgentCoreToolMCPAdapter:
 
     @staticmethod
     def _extract_mcp_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
-        """Extracts nested MCP payload dict from action input JSON.
+        """Extract nested MCP payload dict from action input JSON.
 
         Args:
             payload: Action input JSON dictionary, may be ``None``.
 
         Returns:
             Nested MCP payload dictionary, or ``None`` when absent.
+
         """
         if payload is None:
             return None
@@ -279,7 +299,7 @@ class AgentCoreToolMCPAdapter:
 
     @staticmethod
     def _extract_capability_scope(payload: dict[str, Any] | None) -> list[str]:
-        """Extracts and normalizes capability scope from action payload.
+        """Extract and normalize capability scope from action payload.
 
         Normalization strategy:
           - Accept list-like input (list/tuple/set) or a single scalar value.
@@ -316,7 +336,7 @@ class AgentCoreToolMCPAdapter:
 
     @staticmethod
     def _extract_optional_str(mcp_info: Any | None, key: str) -> str | None:
-        """Extracts optional string fields from object or dict metadata.
+        """Extract optional string fields from object or dict metadata.
 
         Args:
             mcp_info: Candidate metadata object or dictionary.
@@ -324,6 +344,7 @@ class AgentCoreToolMCPAdapter:
 
         Returns:
             Extracted string value, or ``None`` when absent.
+
         """
         if mcp_info is None:
             return None
@@ -337,7 +358,7 @@ class AgentCoreToolMCPAdapter:
         source: Any | None,
         keys: tuple[str, ...],
     ) -> str | None:
-        """Returns the first non-empty string-like value for candidate keys.
+        """Return the first non-empty string-like value for candidate keys.
 
         The helper intentionally keeps key order significant so callers can
         preserve historical precedence for backward compatibility while adding
@@ -350,6 +371,7 @@ class AgentCoreToolMCPAdapter:
         Returns:
             First non-empty string value found, or ``None`` when all keys
             yield empty or absent values.
+
         """
         if source is None:
             return None

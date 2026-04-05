@@ -52,6 +52,7 @@ class AgentCoreChildSpawnInput:
         runner_kind: Logical child run category identifier.
         child_goal_ref: Optional child goal reference string.
         child_goal_json: Optional child goal payload dictionary.
+
     """
 
     parent_run_id: str
@@ -75,7 +76,7 @@ class AgentCoreRunnerAdapter:
         session: Any | None = None,
         context_ref: str | None = None,
     ) -> StartRunRequest:
-        """Converts an openjiuwen-style run call into ``StartRunRequest``.
+        """Convert an openjiuwen-style run call into ``StartRunRequest``.
 
         This helper aligns with common openjiuwen APIs where callers provide
         ``runner_kind + inputs + session``. The method normalizes those values
@@ -89,6 +90,7 @@ class AgentCoreRunnerAdapter:
 
         Returns:
             A kernel ``StartRunRequest`` ready for facade submission.
+
         """
         return self.from_runner_start(
             AgentCoreRunnerStartInput(
@@ -105,7 +107,7 @@ class AgentCoreRunnerAdapter:
         child_inputs: dict[str, Any] | None = None,
         parent_session: Any | None = None,
     ) -> SpawnChildRunRequest:
-        """Converts a child workflow/agent call into ``SpawnChildRunRequest``.
+        """Convert a child workflow/agent call into ``SpawnChildRunRequest``.
 
         Parent run identity extraction prefers ``workflow_id`` when available
         because child runs are usually scoped by workflow lineage. If not
@@ -121,6 +123,7 @@ class AgentCoreRunnerAdapter:
 
         Raises:
             ValueError: If parent identity cannot be extracted from input.
+
         """
         parent_run_id = self._extract_workflow_id(parent_session) or self._extract_session_id(
             parent_session
@@ -136,13 +139,14 @@ class AgentCoreRunnerAdapter:
         )
 
     def from_runner_start(self, input_value: AgentCoreRunnerStartInput) -> StartRunRequest:
-        """Converts one internal runner DTO into ``StartRunRequest``.
+        """Convert one internal runner DTO into ``StartRunRequest``.
 
         Args:
             input_value: Platform request from the runner layer.
 
         Returns:
             A kernel-safe start request.
+
         """
         return StartRunRequest(
             initiator="agent_core_runner",
@@ -156,13 +160,14 @@ class AgentCoreRunnerAdapter:
     def from_runner_child_spawn(
         self, input_value: AgentCoreChildSpawnInput
     ) -> SpawnChildRunRequest:
-        """Converts one platform child DTO into ``SpawnChildRunRequest``.
+        """Convert one platform child DTO into ``SpawnChildRunRequest``.
 
         Args:
             input_value: Platform child spawn request.
 
         Returns:
             A kernel child run request.
+
         """
         return SpawnChildRunRequest(
             parent_run_id=input_value.parent_run_id,
@@ -173,7 +178,7 @@ class AgentCoreRunnerAdapter:
 
     @staticmethod
     def _extract_session_id(session: Any | None) -> str | None:
-        """Extracts ``session_id`` from string/object inputs.
+        """Extract ``session_id`` from string/object inputs.
 
         Accepted forms:
           - plain string session id
@@ -182,6 +187,7 @@ class AgentCoreRunnerAdapter:
 
         Returns:
             Normalized session id string if available; otherwise ``None``.
+
         """
         if session is None:
             return None
@@ -197,7 +203,7 @@ class AgentCoreRunnerAdapter:
 
     @staticmethod
     def _extract_workflow_id(session: Any | None) -> str | None:
-        """Extracts ``workflow_id`` from object inputs when available.
+        """Extract ``workflow_id`` from object inputs when available.
 
         Accepted forms:
           - object with callable ``workflow_id()``
@@ -205,6 +211,7 @@ class AgentCoreRunnerAdapter:
 
         Returns:
             Normalized workflow id string if available; otherwise ``None``.
+
         """
         if session is None:
             return None

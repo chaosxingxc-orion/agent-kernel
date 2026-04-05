@@ -75,6 +75,7 @@ class RuntimeEvent:
         idempotency_key: Optional idempotency key for dedup.
         payload_ref: Optional reference to stored payload.
         payload_json: Optional inline event payload.
+
     """
 
     run_id: str
@@ -119,6 +120,7 @@ class Action:
         input_json: Optional input payload dictionary.
         policy_tags: Policy tags for dispatch routing hints.
         timeout_ms: Optional execution timeout in milliseconds.
+
     """
 
     action_id: str
@@ -132,7 +134,7 @@ class Action:
     policy_tags: list[str] = field(default_factory=list)
     timeout_ms: int | None = None
     side_effect_class: SideEffectClass | None = None
-    """Blast-radius governance dimension (TRACE §6.8).
+    """Blast-radius governance dimension (TRACE 搂6.8).
     Orthogonal to effect_class which governs idempotency/recovery."""
 
 
@@ -148,6 +150,7 @@ class SandboxGrant:
         denied_mounts: Denied mount paths.
         network_policy: Outbound network policy mode.
         allowed_hosts: Explicitly allowed outbound hosts.
+
     """
 
     grant_ref: str
@@ -188,6 +191,7 @@ class ExecutionContext:
             ``"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"``).
             When present, observability backends restore the parent span so that
             cross-service calls join the originating distributed trace.
+
     """
 
     run_id: str
@@ -221,6 +225,7 @@ class ActionCommit:
         created_at: RFC3339 UTC creation timestamp.
         action: Optional action that produced this commit.
         caused_by: Optional causal reference for provenance tracing.
+
     """
 
     run_id: str
@@ -383,6 +388,7 @@ class CircuitBreakerPolicy:
         half_open_after_ms: Milliseconds after the last failure before the
             circuit transitions to half-open and allows one probe.
             Defaults to ``30 000`` (30 s).
+
     """
 
     threshold: int = 5
@@ -413,6 +419,7 @@ class RecoveryDecision:
         failure_count: Monotonic count of consecutive failures for this
             run+action pair.  Used by callers to implement exponential backoff
             or circuit-break logic.  ``0`` when not tracked.
+
     """
 
     run_id: str
@@ -444,6 +451,7 @@ class RecoveryInput:
             When provided, RecoveryGateService uses it directly for the reasoning
             loop rather than building a new one, keeping the gate within its own
             authority boundary.
+
     """
 
     run_id: str
@@ -457,7 +465,7 @@ class RecoveryInput:
 
 
 class TraceFailureCode(StrEnum):
-    """TRACE-normalized failure taxonomy (v1.2.1 §6.9).
+    """TRACE-normalized failure taxonomy (v1.2.1 搂6.9).
 
     Used in FailureEnvelope.trace_failure_code for postmortem,
     route pruning, and evolution trigger routing.
@@ -473,9 +481,9 @@ class TraceFailureCode(StrEnum):
     CONTRADICTORY_EVIDENCE = "contradictory_evidence"
     UNSAFE_ACTION_BLOCKED = "unsafe_action_blocked"
     EXPLORATION_BUDGET_EXHAUSTED = "exploration_budget_exhausted"
-    """CTS exploration budget — hi-agent decides, kernel reports the signal."""
+    """CTS exploration budget 鈥?hi-agent decides, kernel reports the signal."""
     EXECUTION_BUDGET_EXHAUSTED = "execution_budget_exhausted"
-    """Kernel-owned execution/runtime/timeout budget — kernel reports directly."""
+    """Kernel-owned execution/runtime/timeout budget 鈥?kernel reports directly."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -537,6 +545,7 @@ class RecoveryOutcome:
         written_at: RFC3339 UTC persistence timestamp.
         operator_escalation_ref: Optional escalation channel reference.
         emitted_event_ids: Ordered list of emitted event identifiers.
+
     """
 
     run_id: str
@@ -561,6 +570,7 @@ class TurnIntentRecord:
         host_kind: Optional resolved host kind.
         outcome_kind: Turn outcome kind discriminator.
         written_at: RFC3339 UTC persistence timestamp.
+
     """
 
     run_id: str
@@ -585,6 +595,7 @@ class RemoteServiceIdempotencyContract:
             acknowledgement references.
         peer_retry_model: Remote service retry model.
         default_retry_policy: Default retry policy for the remote dispatch.
+
     """
 
     accepts_dispatch_idempotency_key: bool
@@ -614,6 +625,7 @@ class StartRunRequest:
             caller's trace context.  Injected into ``ExecutionContext`` for all
             downstream Temporal activities so the full request chain appears as
             a single distributed trace.
+
     """
 
     initiator: Literal["user", "agent_core_runner", "system"]
@@ -640,6 +652,7 @@ class StartRunResponse:
         run_id: Kernel run identifier.
         temporal_workflow_id: Temporal workflow id for the started run.
         lifecycle_state: Initial lifecycle state of the run.
+
     """
 
     run_id: str
@@ -655,6 +668,7 @@ class SignalRunRequest:
         run_id: Target run identifier.
         signal_type: Signal type discriminator.
         signal_payload: Optional signal payload dictionary.
+
     """
 
     run_id: str
@@ -745,42 +759,46 @@ class TemporalWorkflowGateway(Protocol):
     """
 
     async def start_workflow(self, request: StartRunRequest) -> dict[str, str]:
-        """Starts one durable workflow for a run.
+        """Start one durable workflow for a run.
 
         Args:
             request: Kernel-safe run start request.
 
         Returns:
             A minimal substrate response containing a workflow identifier.
+
         """
         ...
 
     async def signal_workflow(self, run_id: str, signal: SignalRunRequest) -> None:
-        """Sends one signal into a running workflow.
+        """Send one signal into a running workflow.
 
         Args:
             run_id: Run identifier mapped to the workflow.
             signal: Signal payload to deliver.
+
         """
         ...
 
     async def cancel_workflow(self, run_id: str, reason: str) -> None:
-        """Cancels one workflow by run identifier.
+        """Cancel one workflow by run identifier.
 
         Args:
             run_id: Run identifier mapped to the workflow.
             reason: Cancellation reason string.
+
         """
         ...
 
     async def query_projection(self, run_id: str) -> RunProjection:
-        """Queries the current authoritative run projection.
+        """Query the current authoritative run projection.
 
         Args:
             run_id: Run identifier to query.
 
         Returns:
             The current authoritative projection.
+
         """
         ...
 
@@ -789,7 +807,7 @@ class TemporalWorkflowGateway(Protocol):
         parent_run_id: str,
         request: SpawnChildRunRequest,
     ) -> dict[str, str]:
-        """Starts one durable child workflow.
+        """Start one durable child workflow.
 
         Args:
             parent_run_id: Parent run identifier.
@@ -797,6 +815,7 @@ class TemporalWorkflowGateway(Protocol):
 
         Returns:
             A minimal substrate response containing a workflow identifier.
+
         """
         ...
 
@@ -808,6 +827,7 @@ class TemporalWorkflowGateway(Protocol):
 
         Returns:
             Async iterator of runtime events in substrate-observed order.
+
         """
         ...
 
@@ -821,35 +841,38 @@ class TemporalActivityGateway(Protocol):
     """
 
     async def execute_admission(self, request: AdmissionActivityInput) -> AdmissionResult:
-        """Executes one admission activity.
+        """Execute one admission activity.
 
         Args:
             request: Admission activity input payload.
 
         Returns:
             Admission decision result.
+
         """
         ...
 
     async def execute_tool(self, request: ToolActivityInput) -> Any:
-        """Executes one tool activity.
+        """Execute one tool activity.
 
         Args:
             request: Tool activity input payload.
 
         Returns:
             Tool execution result.
+
         """
         ...
 
     async def execute_mcp(self, request: MCPActivityInput) -> Any:
-        """Executes one MCP activity.
+        """Execute one MCP activity.
 
         Args:
             request: MCP activity input payload.
 
         Returns:
             MCP execution result.
+
         """
         ...
 
@@ -857,46 +880,50 @@ class TemporalActivityGateway(Protocol):
         self,
         request: VerificationActivityInput,
     ) -> Any:
-        """Executes one verification activity.
+        """Execute one verification activity.
 
         Args:
             request: Verification activity input payload.
 
         Returns:
             Verification result.
+
         """
         ...
 
     async def execute_reconciliation(self, request: ReconciliationActivityInput) -> Any:
-        """Executes one reconciliation activity.
+        """Execute one reconciliation activity.
 
         Args:
             request: Reconciliation activity input payload.
 
         Returns:
             Reconciliation result.
+
         """
         ...
 
     async def execute_inference(self, request: InferenceActivityInput) -> ModelOutput:
-        """Executes one LLM inference activity.
+        """Execute one LLM inference activity.
 
         Args:
             request: Inference activity input payload.
 
         Returns:
             Normalised model output.
+
         """
         ...
 
     async def execute_skill_script(self, request: ScriptActivityInput) -> ScriptResult:
-        """Executes one skill script activity.
+        """Execute one skill script activity.
 
         Args:
             request: Script activity input payload.
 
         Returns:
             Script execution result.
+
         """
         ...
 
@@ -905,13 +932,14 @@ class KernelRuntimeEventLog(Protocol):
     """Abstracts the authoritative domain event log."""
 
     async def append_action_commit(self, commit: ActionCommit) -> str:
-        """Appends one action-level commit to the event log.
+        """Append one action-level commit to the event log.
 
         Args:
             commit: Commit to append.
 
         Returns:
             Commit reference identifier.
+
         """
         ...
 
@@ -920,7 +948,7 @@ class KernelRuntimeEventLog(Protocol):
         run_id: str,
         after_offset: int = 0,
     ) -> list[RuntimeEvent]:
-        """Loads events for a run after a given offset.
+        """Load events for a run after a given offset.
 
         Args:
             run_id: Run identifier.
@@ -928,6 +956,7 @@ class KernelRuntimeEventLog(Protocol):
 
         Returns:
             Ordered list of runtime events.
+
         """
         ...
 
@@ -944,11 +973,12 @@ class DecisionProjectionService(Protocol):
 
         Returns:
             Updated projection at or past ``through_offset``.
+
         """
         ...
 
     async def readiness(self, run_id: str, required_offset: int) -> bool:
-        """Checks whether projection has reached a required offset.
+        """Check whether projection has reached a required offset.
 
         Args:
             run_id: Run identifier to check.
@@ -956,17 +986,19 @@ class DecisionProjectionService(Protocol):
 
         Returns:
             ``True`` when projection has reached the required offset.
+
         """
         ...
 
     async def get(self, run_id: str) -> RunProjection:
-        """Gets the latest projection state for a run.
+        """Get the latest projection state for a run.
 
         Args:
             run_id: Run identifier to look up.
 
         Returns:
             Current authoritative projection for the run.
+
         """
         ...
 
@@ -985,7 +1017,7 @@ class DispatchAdmissionService(Protocol):
         action: Action,
         snapshot: CapabilitySnapshot,
     ) -> AdmissionResult:
-        """Evaluates whether an action may execute under capability snapshot.
+        """Evaluate whether an action may execute under capability snapshot.
 
         Args:
             action: Candidate action to evaluate.
@@ -993,6 +1025,7 @@ class DispatchAdmissionService(Protocol):
 
         Returns:
             Admission result with deny reason or granted admission.
+
         """
         ...
 
@@ -1005,7 +1038,7 @@ class ExecutorService(Protocol):
         action: Action,
         grant_ref: str | None = None,
     ) -> Any:
-        """Executes one admitted action.
+        """Execute one admitted action.
 
         Args:
             action: Admitted action to execute.
@@ -1013,6 +1046,7 @@ class ExecutorService(Protocol):
 
         Returns:
             Execution result from the action handler.
+
         """
         ...
 
@@ -1036,7 +1070,7 @@ class CircuitBreakerStore(Protocol):
     """
 
     def get_state(self, effect_class: str) -> tuple[int, float]:
-        """Returns ``(failure_count, last_failure_epoch_s)`` for ``effect_class``.
+        """Return ``(failure_count, last_failure_epoch_s)`` for ``effect_class``.
 
         Args:
             effect_class: The action effect class to query.
@@ -1044,6 +1078,7 @@ class CircuitBreakerStore(Protocol):
         Returns:
             A tuple of ``(failure_count, last_failure_epoch_s)`` where
             ``last_failure_epoch_s`` is a Unix epoch float (0.0 when unknown).
+
         """
         ...
 
@@ -1055,14 +1090,16 @@ class CircuitBreakerStore(Protocol):
 
         Returns:
             The new failure count after incrementing.
+
         """
         ...
 
     def reset(self, effect_class: str) -> None:
-        """Clears all failure state for ``effect_class`` after a success.
+        """Clear all failure state for ``effect_class`` after a success.
 
         Args:
             effect_class: The action effect class that just succeeded.
+
         """
         ...
 
@@ -1071,13 +1108,14 @@ class RecoveryGateService(Protocol):
     """Abstracts the recovery gate."""
 
     async def decide(self, recovery_input: RecoveryInput) -> RecoveryDecision:
-        """Selects a recovery exit for one failure envelope.
+        """Select a recovery exit for one failure envelope.
 
         Args:
             recovery_input: Failure envelope and projection context.
 
         Returns:
             Recovery decision with mode and optional compensation or escalation.
+
         """
         ...
 
@@ -1086,21 +1124,23 @@ class RecoveryOutcomeStore(Protocol):
     """Abstracts persistence for recovery outcomes."""
 
     async def write_outcome(self, outcome: RecoveryOutcome) -> None:
-        """Persists one recovery outcome record.
+        """Persist one recovery outcome record.
 
         Args:
             outcome: Recovery outcome to persist.
+
         """
         ...
 
     async def latest_for_run(self, run_id: str) -> RecoveryOutcome | None:
-        """Returns latest recovery outcome for one run.
+        """Return latest recovery outcome for one run.
 
         Args:
             run_id: Run identifier to look up.
 
         Returns:
             Latest recovery outcome, or ``None`` if no outcome exists.
+
         """
         ...
 
@@ -1109,21 +1149,23 @@ class TurnIntentLog(Protocol):
     """Abstracts persistence of turn intent commit metadata."""
 
     async def write_intent(self, intent: TurnIntentRecord) -> None:
-        """Persists one turn intent record.
+        """Persist one turn intent record.
 
         Args:
             intent: Turn intent metadata to persist.
+
         """
         ...
 
     async def latest_for_run(self, run_id: str) -> TurnIntentRecord | None:
-        """Returns latest turn intent for one run.
+        """Return latest turn intent for one run.
 
         Args:
             run_id: Run identifier to query.
 
         Returns:
             Most recent turn intent record, or ``None`` when absent.
+
         """
         ...
 
@@ -1132,29 +1174,38 @@ class IngressAdapter(Protocol):
     """Abstracts ingress translation from platform events into kernel DTOs."""
 
     def from_runner_start(self, input_value: Any) -> StartRunRequest:
-        """Builds start-run request from runner-originated input.
+        """Build start-run request from runner-originated input.
+
         Args:
             input_value: Platform-specific input payload.
+
         Returns:
             StartRunRequest: A ``StartRunRequest`` ready for kernel submission.
+
         """
         ...
 
     def from_session_signal(self, input_value: Any) -> SignalRunRequest:
-        """Builds signal request from session-level input.
+        """Build signal request from session-level input.
+
         Args:
             input_value: Platform-specific input payload.
+
         Returns:
             SignalRunRequest: A ``SignalRunRequest`` ready for kernel signal dispatch.
+
         """
         ...
 
     def from_callback(self, input_value: Any) -> SignalRunRequest:
-        """Builds signal request from callback input.
+        """Build signal request from callback input.
+
         Args:
             input_value: Platform-specific input payload.
+
         Returns:
             SignalRunRequest: A ``SignalRunRequest`` ready for kernel signal dispatch.
+
         """
         ...
 
@@ -1163,11 +1214,14 @@ class ContextBindingPort(Protocol):
     """Abstracts context binding at kernel boundary."""
 
     def bind_context(self, input_value: Any) -> Any:
-        """Resolves runtime context binding from platform input.
+        """Resolve runtime context binding from platform input.
+
         Args:
             input_value: Platform-specific input payload.
+
         Returns:
             Any: Platform-specific context or result object.
+
         """
         ...
 
@@ -1176,20 +1230,26 @@ class CheckpointResumePort(Protocol):
     """Abstracts checkpoint export and resume import at kernel boundary."""
 
     async def export_checkpoint(self, run_id: str) -> Any:
-        """Exports platform-facing checkpoint view for one run.
+        """Export platform-facing checkpoint view for one run.
+
         Args:
             run_id: Identifier of the target run.
+
         Returns:
             Any: Platform-specific context or result object.
+
         """
         ...
 
     async def import_resume(self, input_value: Any) -> Any:
-        """Imports platform resume payload into kernel-safe request.
+        """Import platform resume payload into kernel-safe request.
+
         Args:
             input_value: Platform-specific input payload.
+
         Returns:
             Any: Platform-specific context or result object.
+
         """
         ...
 
@@ -1198,46 +1258,50 @@ class CapabilityAdapter(Protocol):
     """Abstracts capability bindings resolution from platform metadata."""
 
     async def resolve_tool_bindings(self, action: Action) -> list[Any]:
-        """Resolves tool bindings for one action.
+        """Resolve tool bindings for one action.
 
         Args:
             action: The action whose tool bindings are being resolved.
 
         Returns:
             List of resolved tool binding descriptors.
+
         """
         ...
 
     async def resolve_mcp_bindings(self, action: Action) -> list[Any]:
-        """Resolves MCP bindings for one action.
+        """Resolve MCP bindings for one action.
 
         Args:
             action: The action whose MCP bindings are being resolved.
 
         Returns:
             List of resolved MCP binding descriptors.
+
         """
         ...
 
     async def resolve_skill_bindings(self, action: Action) -> list[str]:
-        """Resolves skill bindings for one action.
+        """Resolve skill bindings for one action.
 
         Args:
             action: The action whose skill bindings are being resolved.
 
         Returns:
             List of resolved skill identifiers.
+
         """
         ...
 
     async def resolve_declarative_bundle(self, action: Action) -> dict[str, str] | None:
-        """Resolves declarative bundle digest payload for one action.
+        """Resolve declarative bundle digest payload for one action.
 
         Args:
             action: The action whose declarative bundle is being resolved.
 
         Returns:
             Key-value digest map, or ``None`` when no bundle is declared.
+
         """
         ...
 
@@ -1252,21 +1316,23 @@ class DecisionDeduper(Protocol):
     """
 
     async def seen(self, fingerprint: str) -> bool:
-        """Returns whether a decision fingerprint has already been processed.
+        """Return whether a decision fingerprint has already been processed.
 
         Args:
             fingerprint: Decision fingerprint to check.
 
         Returns:
             ``True`` if the fingerprint was previously marked.
+
         """
         ...
 
     async def mark(self, fingerprint: str) -> None:
-        """Marks a decision fingerprint as processed.
+        """Mark a decision fingerprint as processed.
 
         Args:
             fingerprint: Decision fingerprint to mark as seen.
+
         """
         ...
 
@@ -1283,8 +1349,8 @@ class EventExportPort(Protocol):
       needs without coupling to kernel internals.
 
     Design boundary:
-      - Kernel operational log (correctness) → ``KernelRuntimeEventLog``
-      - Platform evolution store (analytics/training) → ``EventExportPort``
+      - Kernel operational log (correctness) 鈫?``KernelRuntimeEventLog``
+      - Platform evolution store (analytics/training) 鈫?``EventExportPort``
 
     Implementations must not raise.  Use ``InMemoryRunTraceStore`` for
     development and integration tests.
@@ -1297,6 +1363,7 @@ class EventExportPort(Protocol):
             commit: The ``ActionCommit`` that was just appended to the
                 kernel event log.  The commit is immutable and safe to
                 retain across async boundaries.
+
         """
         ...
 
@@ -1305,7 +1372,7 @@ class ObservabilityHook(Protocol):
     """Receives FSM state transition events for observability purposes.
 
     Implementations must be synchronous and fast. The hook is called
-    on the hot path of every FSM state transition — slow or blocking
+    on the hot path of every FSM state transition 鈥?slow or blocking
     implementations will add latency to every turn.
 
     Use ``CompositeObservabilityHook`` to fan-out to multiple backends.
@@ -1322,7 +1389,7 @@ class ObservabilityHook(Protocol):
         turn_offset: int,
         timestamp_ms: int,
     ) -> None:
-        """Called on every TurnEngine FSM state transition.
+        """Call on every TurnEngine FSM state transition.
 
         Args:
             run_id: Run identifier.
@@ -1331,6 +1398,7 @@ class ObservabilityHook(Protocol):
             to_state: New FSM state.
             turn_offset: Monotonic turn offset.
             timestamp_ms: UTC epoch milliseconds.
+
         """
         ...
 
@@ -1342,13 +1410,14 @@ class ObservabilityHook(Protocol):
         to_state: str,
         timestamp_ms: int,
     ) -> None:
-        """Called on every run lifecycle state transition.
+        """Call on every run lifecycle state transition.
 
         Args:
             run_id: Run identifier.
             from_state: Previous lifecycle state.
             to_state: New lifecycle state.
             timestamp_ms: UTC epoch milliseconds.
+
         """
         ...
 
@@ -1360,7 +1429,7 @@ class ObservabilityHook(Protocol):
         latency_ms: int,
         token_usage: TokenUsage | None,
     ) -> None:
-        """Called after each LLM inference call completes.
+        """Call after each LLM inference call completes.
 
         Implementations should record latency histograms and token counters.
 
@@ -1369,6 +1438,7 @@ class ObservabilityHook(Protocol):
             model_ref: Provider-qualified model identifier.
             latency_ms: Wall-clock latency of the inference call in milliseconds.
             token_usage: Typed token consumption, or ``None`` when unavailable.
+
         """
         ...
 
@@ -1381,7 +1451,7 @@ class ObservabilityHook(Protocol):
         outcome_kind: str,
         latency_ms: int,
     ) -> None:
-        """Called after each action dispatch attempt completes.
+        """Call after each action dispatch attempt completes.
 
         Implementations should record dispatch counters and latency histograms.
 
@@ -1392,6 +1462,7 @@ class ObservabilityHook(Protocol):
             outcome_kind: Outcome label (e.g. ``"dispatched"``, ``"blocked"``,
                 ``"error"``).
             latency_ms: Wall-clock latency of the dispatch call.
+
         """
         ...
 
@@ -1402,7 +1473,7 @@ class ObservabilityHook(Protocol):
         reason_code: str,
         mode: str,
     ) -> None:
-        """Called each time a recovery decision is triggered.
+        """Call each time a recovery decision is triggered.
 
         Implementations should increment a recovery counter keyed by mode.
 
@@ -1411,6 +1482,7 @@ class ObservabilityHook(Protocol):
             reason_code: Failure reason code that triggered recovery.
             mode: Recovery mode selected (e.g. ``"abort"``,
                 ``"static_compensation"``, ``"reflect_and_retry"``).
+
         """
         ...
 
@@ -1422,7 +1494,7 @@ class ObservabilityHook(Protocol):
         admitted: bool,
         latency_ms: int,
     ) -> None:
-        """Called after the admission gate evaluates an action.
+        """Call after the admission gate evaluates an action.
 
         Implementations may record a sub-span or counter for the admission step.
 
@@ -1431,6 +1503,7 @@ class ObservabilityHook(Protocol):
             action_id: Action being admitted or rejected.
             admitted: ``True`` when admission was granted, ``False`` when blocked.
             latency_ms: Wall-clock duration of the admission check.
+
         """
         ...
 
@@ -1442,7 +1515,7 @@ class ObservabilityHook(Protocol):
         dedupe_outcome: str,
         latency_ms: int,
     ) -> None:
-        """Called after the DedupeStore reservation and executor dispatch.
+        """Call after the DedupeStore reservation and executor dispatch.
 
         Implementations may record a sub-span or counter for the dispatch step.
 
@@ -1452,6 +1525,7 @@ class ObservabilityHook(Protocol):
             dedupe_outcome: Outcome of the dedupe reservation (e.g.
                 ``"accepted"``, ``"duplicate"``, ``"degraded"``).
             latency_ms: Wall-clock duration from reservation to executor return.
+
         """
         ...
 
@@ -1464,7 +1538,7 @@ class ObservabilityHook(Protocol):
         outcome: str,
         failure_code: str | None = None,
     ) -> None:
-        """Called for each branch in a parallel group when the branch completes.
+        """Call for each branch in a parallel group when the branch completes.
 
         Implementations may record per-branch counters or update a metric
         labelled by outcome (``"acknowledged"``, ``"failed"``, ``"timeout"``).
@@ -1476,6 +1550,7 @@ class ObservabilityHook(Protocol):
             outcome: Branch outcome label.
             failure_code: Exception type or failure discriminator when the
                 branch failed.  ``None`` for successful branches.
+
         """
         ...
 
@@ -1486,7 +1561,7 @@ class ObservabilityHook(Protocol):
         action_id: str,
         outcome: str,
     ) -> None:
-        """Called after a DedupeStore reservation attempt.
+        """Call after a DedupeStore reservation attempt.
 
         Implementations should increment a counter keyed by *outcome* so
         operators can distinguish fresh dispatches from replayed duplicates.
@@ -1495,7 +1570,8 @@ class ObservabilityHook(Protocol):
             run_id: Run identifier.
             action_id: Action being dispatched.
             outcome: Reservation result: ``"accepted"``, ``"duplicate"``, or
-                ``"degraded"`` (store unavailable — fallback dispatch).
+                ``"degraded"`` (store unavailable 鈥?fallback dispatch).
+
         """
         ...
 
@@ -1507,7 +1583,7 @@ class ObservabilityHook(Protocol):
         round_num: int,
         corrected: bool,
     ) -> None:
-        """Called each time the reflection loop completes one round.
+        """Call each time the reflection loop completes one round.
 
         Implementations should record a counter to track how often the LLM
         self-corrects during recovery and whether it produces a valid action.
@@ -1518,6 +1594,7 @@ class ObservabilityHook(Protocol):
             round_num: Zero-based reflection round index.
             corrected: ``True`` when the reasoning loop produced a corrected
                 action; ``False`` when it returned an empty or invalid result.
+
         """
         ...
 
@@ -1529,7 +1606,7 @@ class ObservabilityHook(Protocol):
         failure_count: int,
         tripped: bool,
     ) -> None:
-        """Called when the circuit breaker records a failure or resets.
+        """Call when the circuit breaker records a failure or resets.
 
         Implementations should maintain a gauge of open circuits and a counter
         of trips to help operators detect cascading failures.
@@ -1540,6 +1617,7 @@ class ObservabilityHook(Protocol):
             failure_count: Current failure count after this update.
             tripped: ``True`` when the circuit transitioned to OPEN (or
                 stayed OPEN); ``False`` when failure count was reset (CLOSED).
+
         """
         ...
 
@@ -1551,7 +1629,7 @@ class ObservabilityHook(Protocol):
         action_id: str,
         join_strategy: str,
     ) -> None:
-        """Called for each succeeded branch when the group join fails.
+        """Call for each succeeded branch when the group join fails.
 
         This hook records rollback intent so operators can observe and trigger
         compensating transactions.  It does NOT perform the rollback itself.
@@ -1561,6 +1639,7 @@ class ObservabilityHook(Protocol):
             group_idempotency_key: Stable key for the parallel group.
             action_id: Identifier of the succeeded branch that needs rollback.
             join_strategy: Join strategy that was not satisfied (e.g. ``"all"``).
+
         """
         ...
 
@@ -1572,7 +1651,7 @@ class ObservabilityHook(Protocol):
         phase_name: str,
         elapsed_ms: int,
     ) -> None:
-        """Called after each TurnEngine phase completes.
+        """Call after each TurnEngine phase completes.
 
         Implementations may create sub-spans or record per-phase histograms
         to provide fine-grained FSM observability.
@@ -1583,12 +1662,13 @@ class ObservabilityHook(Protocol):
                 reasoning phase when no action has been derived yet.
             phase_name: Internal phase method name (e.g. ``"_phase_snapshot"``).
             elapsed_ms: Wall-clock duration of the phase in milliseconds.
+
         """
         ...
 
 
 # ---------------------------------------------------------------------------
-# Phase 1 — Cognitive Foundation
+# Phase 1 鈥?Cognitive Foundation
 # ---------------------------------------------------------------------------
 
 
@@ -1600,6 +1680,7 @@ class TokenBudget:
         max_input: Maximum input tokens for context window.
         max_output: Maximum output tokens for model response.
         reasoning_budget: Optional extended thinking budget (provider-specific).
+
     """
 
     max_input: int = 32_768
@@ -1621,6 +1702,7 @@ class InferenceConfig:
         stop_sequences: Optional stop sequences for response termination.
         turn_kind_overrides: Per-turn-kind token budget overrides.
             Keys are turn kind labels (``"reasoning"``, ``"tool_selection"``).
+
     """
 
     model_ref: str
@@ -1638,6 +1720,7 @@ class ToolDefinition:
         name: Tool name as presented to the model.
         description: Human-readable description of the tool's purpose.
         input_schema: JSON Schema dict for tool input validation.
+
     """
 
     name: str
@@ -1654,6 +1737,7 @@ class SkillSummary:
         description: Human-readable description.
         script_ids: Ordered list of script identifiers within the skill.
         input_schema: Optional JSON Schema for skill invocation.
+
     """
 
     skill_id: str
@@ -1680,6 +1764,7 @@ class ContextWindow:
         recovery_context: Optional structured recovery context when
             assembling for a reflect_and_retry turn.
         inference_config: Inference configuration governing this context.
+
     """
 
     system_instructions: str
@@ -1701,6 +1786,7 @@ class TokenUsage:
         output_tokens: Tokens produced in the model response.
         reasoning_tokens: Extended-thinking tokens (provider-specific; 0 when
             not applicable).
+
     """
 
     input_tokens: int = 0
@@ -1722,6 +1808,7 @@ class ModelOutput:
             Zero when not measured.
         token_usage: Typed token consumption.  When set, supersedes ``usage``
             for metrics purposes.
+
     """
 
     raw_text: str
@@ -1743,6 +1830,7 @@ class InferenceActivityInput:
         config: Inference configuration for this call.
         idempotency_key: Stable key for Temporal Activity-level dedup.
             Prevents double-billing on Temporal retry.
+
     """
 
     run_id: str
@@ -1758,8 +1846,8 @@ class LLMGateway(Protocol):
     Positioned below the Temporal Activity boundary. The Activity
     provides durability; the Gateway provides provider abstraction.
     Two independent retry levels must not be merged:
-      - Temporal Activity retry  → kernel-level (process crash, timeout)
-      - Gateway-internal retry   → provider-level (rate limits, 5xx)
+      - Temporal Activity retry  鈫?kernel-level (process crash, timeout)
+      - Gateway-internal retry   鈫?provider-level (rate limits, 5xx)
 
     Implementations must never raise on provider-level errors directly;
     they must classify errors into ``ModelOutput(finish_reason="error")``
@@ -1772,7 +1860,7 @@ class LLMGateway(Protocol):
         config: InferenceConfig,
         idempotency_key: str,
     ) -> ModelOutput:
-        """Runs one synchronous inference call.
+        """Run one synchronous inference call.
 
         Args:
             context: Assembled context window.
@@ -1781,6 +1869,7 @@ class LLMGateway(Protocol):
 
         Returns:
             Normalised model output.
+
         """
         ...
 
@@ -1797,6 +1886,7 @@ class LLMGateway(Protocol):
 
         Returns:
             Estimated total token count.
+
         """
         ...
 
@@ -1831,6 +1921,7 @@ class ContextPort(Protocol):
 
         Returns:
             Immutable context window ready for model inference.
+
         """
         ...
 
@@ -1839,8 +1930,8 @@ class OutputParser(Protocol):
     """Parses raw model output into kernel-executable Actions or ExecutionPlans.
 
     The parser bridges the cognitive layer (model output) and the
-    execution layer (kernel Actions). It must not embed business logic —
-    only structural translation from model output format to kernel DTOs.
+    execution layer (kernel Actions). It must not embed business logic, only
+    structural translation from model output format to kernel DTOs.
     """
 
     def parse(
@@ -1848,7 +1939,7 @@ class OutputParser(Protocol):
         output: ModelOutput,
         run_id: str,
     ) -> list[Action]:
-        """Parses model output into a flat list of Actions.
+        """Parse model output into a flat list of Actions.
 
         Args:
             output: Normalised model output.
@@ -1856,6 +1947,7 @@ class OutputParser(Protocol):
 
         Returns:
             Ordered list of kernel Actions for sequential execution.
+
         """
         ...
 
@@ -1864,20 +1956,21 @@ class OutputParser(Protocol):
         output: ModelOutput,
         run_id: str,
     ) -> ExecutionPlan:
-        """Parses model output into an ExecutionPlan (serial or parallel).
+        """Parse model output into an ExecutionPlan (serial or parallel).
 
         Args:
             output: Normalised model output.
             run_id: Run identifier for action construction.
 
         Returns:
-            ExecutionPlan — either SequentialPlan or ParallelPlan.
+            ExecutionPlan 鈥?either SequentialPlan or ParallelPlan.
+
         """
         ...
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 — Parallel Execution
+# Phase 3 鈥?Parallel Execution
 # ---------------------------------------------------------------------------
 
 
@@ -1888,12 +1981,13 @@ class ParallelGroup:
     Attributes:
         actions: Actions to execute concurrently in this group.
         join_strategy: Barrier semantics for the group.
-            ``"all"`` — all must succeed (any failure → RecoveryGate).
-            ``"any"`` — first success unblocks continuation.
-            ``"n_of_m"`` — at least ``n`` must succeed.
+            ``"all"`` 鈥?all must succeed (any failure 鈫?RecoveryGate).
+            ``"any"`` 鈥?first success unblocks continuation.
+            ``"n_of_m"`` 鈥?at least ``n`` must succeed.
         n: Required success count when ``join_strategy="n_of_m"``.
         timeout_ms: Optional group-level execution timeout.
         group_idempotency_key: Stable key for group-level dedup on retry.
+
     """
 
     actions: tuple[Action, ...]
@@ -1907,11 +2001,11 @@ class ParallelGroup:
 class SequentialPlan:
     """An ordered list of Actions for sequential execution.
 
-    The current TurnEngine handles SequentialPlan natively —
-    each Action is a separate Turn.
+    The current TurnEngine handles SequentialPlan natively 鈥?    each Action is a separate Turn.
 
     Attributes:
         steps: Ordered Actions for one-at-a-time execution.
+
     """
 
     steps: tuple[Action, ...]
@@ -1924,6 +2018,7 @@ class ParallelPlan:
     Attributes:
         groups: Ordered parallel groups. Groups execute sequentially;
             Actions within each group execute concurrently.
+
     """
 
     groups: tuple[ParallelGroup, ...]
@@ -1937,10 +2032,11 @@ class ConditionalBranch:
         trigger_outcomes: Turn outcome kinds that activate this branch.
             e.g. ``("dispatched",)`` or ``("blocked", "recovery_pending")``.
         plan: Sub-plan to execute when this branch is selected.
+
     """
 
     trigger_outcomes: tuple[str, ...]
-    plan: Any  # ExecutionPlan — forward ref resolved at runtime
+    plan: Any  # ExecutionPlan 鈥?forward ref resolved at runtime
 
 
 @dataclass(frozen=True, slots=True)
@@ -1952,13 +2048,14 @@ class ConditionalPlan:
     outcome kind is selected. ``default_plan`` is used when no branch matches.
 
     Side-effect governance invariant: the gating action itself goes through
-    the full TurnEngine → DispatchAdmissionService chain before branching.
+    the full TurnEngine 鈫?DispatchAdmissionService chain before branching.
 
     Attributes:
         gating_action: Action whose turn outcome determines the branch.
         branches: Ordered candidate branches, evaluated left to right.
         default_plan: Fallback plan executed when no branch matches.
             ``None`` means the plan resolves as ``completed_noop``.
+
     """
 
     gating_action: Action
@@ -1972,10 +2069,11 @@ class DependencyNode:
 
     Attributes:
         node_id: Stable unique identifier within the graph. Used as sort key
-            for Temporal replay determinism — must be consistent across runs.
+            for Temporal replay determinism 鈥?must be consistent across runs.
         action: Action to execute for this node.
         depends_on: Ids of nodes that must complete before this node is
             scheduled. Empty tuple means no prerequisites.
+
     """
 
     node_id: str
@@ -1997,6 +2095,7 @@ class DependencyGraph:
 
     Attributes:
         nodes: All nodes in the graph. ``node_id`` values must be unique.
+
     """
 
     nodes: tuple[DependencyNode, ...]
@@ -2010,10 +2109,11 @@ class SpeculativeCandidate:
         candidate_id: Unique identifier for this candidate. The platform layer
             references this id when calling ``commit_speculation``.
         plan: Plan to execute as a speculative Child Workflow.
+
     """
 
     candidate_id: str
-    plan: Any  # ExecutionPlan — forward ref resolved at runtime
+    plan: Any  # ExecutionPlan 鈥?forward ref resolved at runtime
 
 
 @dataclass(frozen=True, slots=True)
@@ -2021,7 +2121,7 @@ class SpeculativePlan:
     """Multiple candidate plans executed speculatively via Child Workflow pattern.
 
     Each candidate is launched as an independent Child Workflow so that each
-    has its own Temporal History — avoiding the History bloat problem that
+    has its own Temporal History 鈥?avoiding the History bloat problem that
     arises from parallel Task execution inside one Workflow.
 
     The kernel gates all ``compensatable_write`` and ``irreversible_write``
@@ -2035,6 +2135,7 @@ class SpeculativePlan:
         speculation_timeout_ms: Optional wall-clock timeout. On expiry all
             candidates are cancelled and the plan resolves as
             ``recovery_pending``.
+
     """
 
     candidates: tuple[SpeculativeCandidate, ...]
@@ -2052,6 +2153,7 @@ class BranchResult:
         action_id: Action identifier for this branch.
         output_json: Optional structured output from the branch.
         acknowledged: Whether the action was positively acknowledged.
+
     """
 
     action_id: str
@@ -2068,6 +2170,7 @@ class BranchFailure:
         failure_kind: Failure category for recovery routing.
         failure_code: Specific failure code.
         evidence: Optional FailureEnvelope for detailed evidence.
+
     """
 
     action_id: str
@@ -2085,6 +2188,7 @@ class ParallelJoinResult:
         successes: List of successful branch results.
         failures: List of failed branch results.
         join_satisfied: Whether the join_strategy was satisfied.
+
     """
 
     group_idempotency_key: str
@@ -2094,7 +2198,7 @@ class ParallelJoinResult:
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 — Script Execution Infrastructure
+# Phase 4 鈥?Script Execution Infrastructure
 # ---------------------------------------------------------------------------
 
 
@@ -2109,6 +2213,7 @@ class ScriptResult:
         stderr: Captured standard error.
         output_json: Optional structured JSON output parsed from stdout.
         execution_ms: Actual execution duration in milliseconds.
+
     """
 
     script_id: str
@@ -2133,6 +2238,7 @@ class ScriptActivityInput:
         parameters: Runtime parameters injected into the script.
         timeout_ms: Maximum execution time before heartbeat_timeout.
         heartbeat_interval_ms: How often the Activity sends heartbeats.
+
     """
 
     run_id: str
@@ -2157,12 +2263,13 @@ class ScriptFailureEvidence:
         script_id: Script identifier.
         failure_kind: Failure category.
         budget_consumed_ratio: Fraction of timeout budget consumed (0.0-1.0).
-            Value ≈ 1.0 with ``output_produced=False`` → suspected dead loop.
+            Value 鈮?1.0 with ``output_produced=False`` 鈫?suspected dead loop.
         output_produced: Whether any stdout output was produced before failure.
         suspected_cause: Optional human-readable root cause hypothesis.
         partial_output: Partial stdout captured before timeout/failure.
         original_script: Original script content for model inspection.
         stderr_tail: Last N lines of stderr for model inspection.
+
     """
 
     script_id: str
@@ -2185,22 +2292,23 @@ class ScriptRuntime(Protocol):
     """Southbound abstraction for script execution environments.
 
     Routes execution to the correct host based on ``host_kind``:
-    - ``local_process``   → subprocess with stdout/stderr capture
-    - ``in_process_python`` → exec() in isolated namespace
-    - ``remote_service``  → HTTP/gRPC call to remote executor
+    - ``local_process``   鈫?subprocess with stdout/stderr capture
+    - ``in_process_python`` 鈫?exec() in isolated namespace
+    - ``remote_service``  鈫?HTTP/gRPC call to remote executor
     """
 
     async def execute_script(
         self,
         input_value: ScriptActivityInput,
     ) -> ScriptResult:
-        """Executes one script and returns a result.
+        """Execute one script and returns a result.
 
         Args:
             input_value: Script execution payload with content and parameters.
 
         Returns:
             Script result with exit code and captured output.
+
         """
         ...
 
@@ -2209,7 +2317,7 @@ class ScriptRuntime(Protocol):
         script_content: str,
         host_kind: str,
     ) -> bool:
-        """Validates that a script is safe to execute.
+        """Validate that a script is safe to execute.
 
         Args:
             script_content: Script source to validate.
@@ -2217,12 +2325,13 @@ class ScriptRuntime(Protocol):
 
         Returns:
             ``True`` when validation passes.
+
         """
         ...
 
 
 # ---------------------------------------------------------------------------
-# Phase 5 — Reflection Loop
+# Phase 5 鈥?Reflection Loop
 # ---------------------------------------------------------------------------
 
 
@@ -2242,6 +2351,7 @@ class ReflectionPolicy:
             reflection (go directly to human_escalation or abort).
         escalate_on_exhaustion: When ``True`` and ``max_rounds`` is reached,
             fall back to ``human_escalation`` instead of ``abort``.
+
     """
 
     max_rounds: int = 3
@@ -2266,13 +2376,14 @@ class ReflectionPolicy:
     escalate_on_exhaustion: bool = True
 
     def is_reflectable(self, failure_kind: str) -> bool:
-        """Returns whether a failure kind is eligible for reflection.
+        """Return whether a failure kind is eligible for reflection.
 
         Args:
             failure_kind: Failure kind string to check.
 
         Returns:
             ``True`` when the failure kind should trigger reflection.
+
         """
         if failure_kind in self.non_reflectable_failure_kinds:
             return False
@@ -2280,7 +2391,7 @@ class ReflectionPolicy:
 
 
 # ---------------------------------------------------------------------------
-# Facade DTOs — platform-facing request/response contracts
+# Facade DTOs 鈥?platform-facing request/response contracts
 # ---------------------------------------------------------------------------
 
 
@@ -2296,6 +2407,7 @@ class ApprovalRequest:
         reviewer_id: Identifier of the human reviewer.
         reason: Optional human-readable reason for the decision.
         caused_by: Optional provenance marker for observability.
+
     """
 
     run_id: str
@@ -2315,6 +2427,7 @@ class PlanSubmissionResponse:
         plan_type: Discriminator string of the submitted plan type.
         accepted: Whether the kernel accepted the plan for execution.
         rejection_reason: Human-readable reason when ``accepted`` is ``False``.
+
     """
 
     run_id: str
@@ -2329,8 +2442,8 @@ class KernelManifest:
 
     Aggregates all kernel registries into a single frozen snapshot that
     platform integrators query at startup to detect supported features.
-    Pattern inspired by LSP ServerCapabilities initialization handshake —
-    the server declares capabilities once; clients adapt accordingly.
+    Pattern inspired by the LSP ServerCapabilities initialization handshake:
+    the server declares capabilities once and clients adapt accordingly.
 
     Attributes:
         kernel_version: Semantic version of the kernel implementation.
@@ -2352,6 +2465,7 @@ class KernelManifest:
             e.g. ``"temporal"`` or ``"local_fsm"``.
         capability_snapshot_schema_version: CapabilitySnapshot schema version
             required by this kernel (``"2"`` for model/memory/session bindings).
+
     """
 
     kernel_version: str
@@ -2443,7 +2557,7 @@ class TaskViewRecord:
     each model invocation.  agent-kernel stores the references and policy
     versions so the decision can be replayed and attributed during postmortem.
 
-    agent-kernel stores REFERENCES only — content lives in agent-core / storage.
+    agent-kernel stores REFERENCES only 鈥?content lives in agent-core / storage.
     """
 
     task_view_id: str

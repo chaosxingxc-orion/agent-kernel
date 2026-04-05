@@ -27,7 +27,7 @@ class InMemoryContextPort:
     Assembles a minimal ``ContextWindow`` from a capability snapshot and
     event history.  Does NOT call external services.
 
-    The assembled window is deliberately minimal — it is designed to keep
+    The assembled window is deliberately minimal 鈥?it is designed to keep
     tests hermetic and fast, not to produce production-quality prompts.
     """
 
@@ -51,6 +51,7 @@ class InMemoryContextPort:
 
         Returns:
             Immutable ``ContextWindow`` ready for model inference.
+
         """
         system_instructions = self._build_system_instructions(snapshot)
         tool_definitions = self._build_tool_definitions(snapshot)
@@ -76,7 +77,7 @@ class InMemoryContextPort:
 
     @staticmethod
     def _build_system_instructions(snapshot: CapabilitySnapshot) -> str:
-        """Builds system instructions string from snapshot feature flags.
+        """Build system instructions string from snapshot feature flags.
 
         Uses ``feature_flags`` as a PoC stand-in for capability scope
         directives.  Production implementations should replace this with
@@ -88,6 +89,7 @@ class InMemoryContextPort:
         Returns:
             Newline-joined instruction string, or an empty string when no
             feature flags are present.
+
         """
         if not snapshot.feature_flags:
             return ""
@@ -95,7 +97,7 @@ class InMemoryContextPort:
 
     @staticmethod
     def _build_tool_definitions(snapshot: CapabilitySnapshot) -> tuple[ToolDefinition, ...]:
-        """Builds a tuple of ToolDefinition objects from snapshot tool_bindings.
+        """Build a tuple of ToolDefinition objects from snapshot tool_bindings.
 
         Each tool binding name is converted into a minimal ``ToolDefinition``
         with an empty schema so the model can be made aware of available tools
@@ -106,6 +108,7 @@ class InMemoryContextPort:
 
         Returns:
             Tuple of ``ToolDefinition`` objects (may be empty).
+
         """
         return tuple(
             ToolDefinition(
@@ -118,7 +121,7 @@ class InMemoryContextPort:
 
     @staticmethod
     def _build_skill_definitions(snapshot: CapabilitySnapshot) -> tuple[SkillSummary, ...]:
-        """Builds a tuple of SkillSummary objects from snapshot skill_bindings.
+        """Build a tuple of SkillSummary objects from snapshot skill_bindings.
 
         Each skill binding reference is converted into a minimal
         ``SkillSummary``.
@@ -128,6 +131,7 @@ class InMemoryContextPort:
 
         Returns:
             Tuple of ``SkillSummary`` objects (may be empty).
+
         """
         return tuple(
             SkillSummary(

@@ -139,6 +139,16 @@ class TestAttemptTracking:
         # Should not raise
         reg.complete_attempt("no-such", "r1", "completed")
 
+    def test_complete_attempt_wrong_run_id_does_not_transition_state(self) -> None:
+        reg = TaskRegistry()
+        reg.register(_make_descriptor())
+        reg.start_attempt(_make_attempt())
+        reg.complete_attempt("t1", "wrong-run", "completed")
+        health = reg.get_health("t1")
+        assert health is not None
+        assert health.lifecycle_state == "running"
+        assert health.current_run_id == "r1"
+
     def test_get_attempts_empty_for_new_task(self) -> None:
         reg = TaskRegistry()
         reg.register(_make_descriptor())
@@ -231,6 +241,16 @@ class TestHeartbeat:
         reg.register(_make_descriptor(heartbeat_timeout_ms=1))
         reg.start_attempt(_make_attempt())
         # Force last_heartbeat_ms to be very old
+        entry = reg._tasks["t1"]
+        entry.last_heartbeat_ms = int(time.monotonic() * 1000) - 10_000
+        stalled = reg.get_stalled_tasks()
+        assert any(h.task_id == "t1" for h in stalled)
+
+    def test_stall_detection_includes_restarting_state(self) -> None:
+        reg = TaskRegistry()
+        reg.register(_make_descriptor(heartbeat_timeout_ms=1))
+        reg.start_attempt(_make_attempt())
+        reg.update_state("t1", "restarting")
         entry = reg._tasks["t1"]
         entry.last_heartbeat_ms = int(time.monotonic() * 1000) - 10_000
         stalled = reg.get_stalled_tasks()

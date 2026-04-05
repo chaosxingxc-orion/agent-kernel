@@ -23,6 +23,7 @@ class RemoteDispatchPolicyDecision:
         can_claim_guaranteed: Whether the dispatch can claim guaranteed
             idempotency.
         reason: Human-readable reason for the policy evaluation outcome.
+
     """
 
     effective_idempotency_level: ExternalIdempotencyLevel
@@ -36,7 +37,7 @@ def evaluate_remote_service_policy(
     external_level: ExternalIdempotencyLevel | None,
     contract: RemoteServiceIdempotencyContract | None,
 ) -> RemoteDispatchPolicyDecision:
-    """Evaluates remote-service policy with conservative v6.4 defaults.
+    """Evaluate remote-service policy with conservative v6.4 defaults.
 
     Policy rules:
       - Missing contract => ``no_auto_retry`` + cannot claim guaranteed.
@@ -49,6 +50,7 @@ def evaluate_remote_service_policy(
 
     Returns:
         Conservative dispatch policy decision for remote-side execution.
+
     """
     normalized_level = external_level or "unknown"
     if contract is None:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -29,6 +29,7 @@ class RestartDecision:
         action: What the engine decided to do next.
         next_attempt_seq: Sequence number for the next attempt (retry only).
         reason: Human-readable explanation.
+
     """
 
     task_id: str
@@ -45,6 +46,7 @@ class RestartPolicyEngine:
         facade: KernelFacade-compatible object with start_run() for launching
             new run attempts.  Typed as Any to avoid circular imports; must
             implement async start_run(StartRunRequest) -> StartRunResponse.
+
     """
 
     def __init__(
@@ -63,6 +65,7 @@ class RestartPolicyEngine:
                 ``action="reflect"`` decisions.  When None, the task is
                 transitioned to ``"reflecting"`` state and the caller is
                 responsible for driving the reflection cycle.
+
         """
         self._registry = registry
         self._facade = facade
@@ -97,6 +100,7 @@ class RestartPolicyEngine:
 
         Returns:
             RestartDecision describing what was done.
+
         """
         descriptor = self._registry.get(task_id)
         if descriptor is None:
@@ -108,16 +112,24 @@ class RestartPolicyEngine:
                 reason="task_id not found in registry",
             )
 
-        self._registry.complete_attempt(task_id, failed_run_id, "failed")
+        self._registry.complete_attempt(task_id, failed_run_id, "failed", failure=failure)
         attempts = self._registry.get_attempts(task_id)
         attempt_seq = len(attempts)
         policy = descriptor.restart_policy
 
         decision = self._decide(policy, attempt_seq, failure)
 
+        effective_decision = decision
         if decision.action == "retry":
             self._registry.update_state(task_id, "restarting")
-            await self._launch_retry(descriptor, attempt_seq + 1)
+            launched = await self._launch_retry(descriptor, attempt_seq + 1)
+            if not launched:
+                effective_decision = replace(
+                    decision,
+                    action="abort",
+                    next_attempt_seq=None,
+                    reason=(f"{decision.reason}; retry launch failed and task moved to aborted"),
+                )
         elif decision.action == "reflect":
             self._registry.update_state(task_id, "reflecting")
             if self._reflection_orchestrator is not None and reflection_run_context is not None:
@@ -154,15 +166,15 @@ class RestartPolicyEngine:
         _logger.info(
             "task.restart_decision task_id=%s action=%s attempt_seq=%d/%d",
             task_id,
-            decision.action,
+            effective_decision.action,
             attempt_seq,
             policy.max_attempts,
         )
         return RestartDecision(
             task_id=task_id,
-            action=decision.action,
-            next_attempt_seq=decision.next_attempt_seq,
-            reason=decision.reason,
+            action=effective_decision.action,
+            next_attempt_seq=effective_decision.next_attempt_seq,
+            reason=effective_decision.reason,
         )
 
     def _decide(
@@ -180,6 +192,7 @@ class RestartPolicyEngine:
 
         Returns:
             RestartDecision with action and reason.
+
         """
         # Check if failure is non-retryable
         retryability = getattr(failure, "retryability", "unknown") if failure else "unknown"
@@ -213,12 +226,13 @@ class RestartPolicyEngine:
             ),
         )
 
-    async def _launch_retry(self, descriptor: Any, next_seq: int) -> None:
+    async def _launch_retry(self, descriptor: Any, next_seq: int) -> bool:
         """Launch a new Run attempt for this task.
 
         Args:
             descriptor: TaskDescriptor of the task.
             next_seq: Attempt sequence number for the new attempt.
+
         """
         import datetime
 
@@ -226,11 +240,12 @@ class RestartPolicyEngine:
             from agent_kernel.kernel.contracts import StartRunRequest
         except ImportError:
             _logger.error("task_manager: cannot import StartRunRequest; retry aborted")
-            return
+            return False
 
         new_run_id = f"task-retry-{descriptor.task_id}-{next_seq}-{uuid.uuid4().hex[:8]}"
-        backoff_base = getattr(descriptor, "backoff_base_ms", 1000)
-        max_backoff = getattr(descriptor, "max_backoff_ms", 30_000)
+        restart_policy = getattr(descriptor, "restart_policy", None)
+        backoff_base = getattr(restart_policy, "backoff_base_ms", 1000)
+        max_backoff = getattr(restart_policy, "max_backoff_ms", 30_000)
         delay_ms = min(backoff_base * (2 ** max(0, next_seq - 2)), max_backoff)
         if delay_ms > 0:
             import asyncio as _asyncio
@@ -253,7 +268,7 @@ class RestartPolicyEngine:
                 exc,
             )
             self._registry.update_state(descriptor.task_id, "aborted")
-            return
+            return False
 
         from agent_kernel.kernel.task_manager.contracts import TaskAttempt
 
@@ -265,9 +280,8 @@ class RestartPolicyEngine:
             started_at=datetime.datetime.now(datetime.UTC).isoformat(),
         )
         self._registry.start_attempt(attempt)
-        # start_attempt transitions state to "running"; re-assert "restarting"
-        # so callers that inspect state immediately after handle_failure() see
-        # the correct intermediate state.
+        # Keep explicit restarting state for callers that gate on this
+        # intermediate transition while the new run is warming up.
         self._registry.update_state(descriptor.task_id, "restarting")
         _logger.info(
             "task.attempt_started task_id=%s seq=%d run_id=%s",
@@ -275,3 +289,4 @@ class RestartPolicyEngine:
             next_seq,
             actual_run_id,
         )
+        return True

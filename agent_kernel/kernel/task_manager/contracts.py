@@ -41,6 +41,7 @@ class TaskRestartPolicy:
             "abort" terminates the task immediately.
         heartbeat_timeout_ms: How long a task may stay in "running" without
             a state transition before TaskWatchdog considers it stalled.
+
     """
 
     max_attempts: int = 3
@@ -71,6 +72,7 @@ class TaskDescriptor:
             may start (for DependencyGraph plans).
         restart_policy: Restart and exhaustion policy for this task.
         metadata: Optional caller-defined key/value metadata.
+
     """
 
     task_id: str
@@ -107,6 +109,7 @@ class TaskAttempt:
         failure: FailureEnvelope if this attempt failed, else None.
         reflection_output: Model decision text if this attempt was
             started as a result of reflect_and_replace, else None.
+
     """
 
     attempt_id: str
@@ -133,6 +136,7 @@ class TaskHealthStatus:
         last_heartbeat_ms: Epoch-ms of last observed activity, or None.
         consecutive_missed_beats: Number of watchdog sweeps with no activity.
         is_stalled: True when watchdog considers this task timed out.
+
     """
 
     task_id: str

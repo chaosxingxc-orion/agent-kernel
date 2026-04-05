@@ -32,7 +32,7 @@ __all__ = [
 class TaskEventAppender(Protocol):
     """Write-side of task event persistence.
 
-    Implementations must be **thread-safe** — TaskRegistry holds its internal
+    Implementations must be **thread-safe** 鈥?TaskRegistry holds its internal
     lock while calling these methods.
     """
 
@@ -42,6 +42,7 @@ class TaskEventAppender(Protocol):
         Args:
             event_type: Registered event_type string (e.g. ``"task.registered"``).
             payload: JSON-serializable event payload.
+
         """
         ...
 
@@ -50,6 +51,7 @@ class TaskEventAppender(Protocol):
 
         Returns:
             List of ``{"event_type": str, "payload": dict}`` records.
+
         """
         ...
 
@@ -63,11 +65,13 @@ class InMemoryTaskEventLog:
     Args:
         max_events: Maximum number of events retained before oldest events are
             evicted (sliding window).  Prevents unbounded memory growth.
+
     """
 
     _MAX_EVENTS_DEFAULT = 100_000
 
     def __init__(self, max_events: int = _MAX_EVENTS_DEFAULT) -> None:
+        """Initialize the instance with configured dependencies."""
         self._events: list[dict[str, Any]] = []
         self._lock = threading.Lock()
         self._max_events = max_events
@@ -107,6 +111,7 @@ class InMemoryTaskEventLog:
 
         Returns:
             Number of events successfully replayed.
+
         """
         from agent_kernel.kernel.task_manager.contracts import (
             TaskAttempt,
@@ -135,6 +140,14 @@ class InMemoryTaskEventLog:
                         registry.register(descriptor)
                 elif event_type == "task.attempt_started":
                     attempt = TaskAttempt(**payload)
+                    existing_attempts = registry.get_attempts(attempt.task_id)
+                    if any(
+                        a.attempt_id == attempt.attempt_id
+                        or (a.run_id == attempt.run_id and a.attempt_seq == attempt.attempt_seq)
+                        for a in existing_attempts
+                    ):
+                        replayed += 1
+                        continue
                     # start_attempt raises KeyError if task not registered;
                     # skip if that happens (event ordering issue).
                     with contextlib.suppress(KeyError):

@@ -171,11 +171,21 @@ class TestHandleFailure:
         facade.start_run = AsyncMock(side_effect=RuntimeError("gateway down"))
         engine = RestartPolicyEngine(registry=reg, facade=facade)
         decision = await engine.handle_failure("t1", "r1")
-        assert decision.action == "retry"
+        assert decision.action == "abort"
         # After launch failure the state should be aborted
         health = reg.get_health("t1")
         assert health is not None
         assert health.lifecycle_state == "aborted"
+
+    @pytest.mark.asyncio
+    async def test_failure_context_is_persisted_on_failed_attempt(self) -> None:
+        reg = _make_registry_with_task(max_attempts=1, on_exhausted="abort")
+        engine = _make_engine(reg)
+        failure = MagicMock()
+        failure.failure_code = "TIMEOUT"
+        await engine.handle_failure("t1", "r1", failure=failure)
+        attempts = reg.get_attempts("t1")
+        assert attempts[0].failure is failure
 
     @pytest.mark.asyncio
     async def test_restart_decision_is_frozen_dataclass(self) -> None:

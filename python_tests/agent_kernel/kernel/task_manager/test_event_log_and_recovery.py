@@ -220,12 +220,16 @@ class TestReplayIntoRegistry:
         reg, log = _registry_with_log()
         desc = _descriptor("task-replay-idem")
         reg.register(desc)
+        reg.start_attempt(_attempt("task-replay-idem", seq=1, run_id="run-idem-1"))
 
         fresh = TaskRegistry()
         log.replay_into_registry(fresh)
         # Second replay should not raise or duplicate
         log.replay_into_registry(fresh)
         assert fresh.get("task-replay-idem") is not None
+        attempts = fresh.get_attempts("task-replay-idem")
+        assert len(attempts) == 1
+        assert attempts[0].run_id == "run-idem-1"
 
     def test_replay_multiple_tasks(self) -> None:
         reg, log = _registry_with_log()

@@ -61,6 +61,7 @@ def is_peer_run_authorized(
 
     Returns:
         ``True`` when *peer_run_id* is authorized; ``False`` otherwise.
+
     """
     bindings: list[str] = getattr(snapshot, "peer_run_bindings", [])
     if bindings:

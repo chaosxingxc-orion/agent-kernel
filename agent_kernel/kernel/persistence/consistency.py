@@ -30,6 +30,7 @@ class ConsistencyViolation:
         dedupe_state: Current dedupe record state, or ``None`` when absent.
         event_count: Number of matching events found in the log, or ``None``.
         detail: Human-readable explanation of the violation.
+
     """
 
     kind: str
@@ -48,6 +49,7 @@ class ConsistencyReport:
         violations: All detected consistency violations (empty when clean).
         events_checked: Total number of events examined in the log.
         dedupe_keys_checked: Total number of dedupe keys examined.
+
     """
 
     run_id: str
@@ -58,8 +60,10 @@ class ConsistencyReport:
     @property
     def is_consistent(self) -> bool:
         """``True`` when no violations were detected.
+
         Returns:
             bool:
+
         """
         return len(self.violations) == 0
 
@@ -73,12 +77,12 @@ def verify_event_dedupe_consistency(
 
     Looks for two classes of drift:
 
-    1. **Orphaned dedupe key** — a key exists in the dedupe store for this run
+    1. **Orphaned dedupe key** 鈥?a key exists in the dedupe store for this run
        but no event with a matching ``idempotency_key`` exists in the log.
        This indicates a crash after ``reserve()`` but before the event append,
        or a store that was populated outside the normal TurnEngine path.
 
-    2. **Unknown-effect without log evidence** — a dedupe record is in state
+    2. **Unknown-effect without log evidence** 鈥?a dedupe record is in state
        ``"unknown_effect"`` (executor crashed mid-flight) but the event log
        contains no ``turn.effect_unknown`` or ``turn.dispatched`` event for
        that key.  The executor outcome truly cannot be determined and human
@@ -100,6 +104,7 @@ def verify_event_dedupe_consistency(
 
     Returns:
         ConsistencyReport describing all detected violations.
+
     """
     report = ConsistencyReport(run_id=run_id)
 
@@ -120,7 +125,7 @@ def verify_event_dedupe_consistency(
         except Exception as exc:
             _load_error = exc
     else:
-        # Try the async load() — only when no event loop is running.
+        # Try the async load() 鈥?only when no event loop is running.
         # asyncio.run() raises RuntimeError inside an existing event loop
         # (the entire production async path), so guard before calling it.
         try:
@@ -239,6 +244,7 @@ async def averify_event_dedupe_consistency(
 
     Returns:
         ConsistencyReport describing all detected violations.
+
     """
     report = ConsistencyReport(run_id=run_id)
 
@@ -316,7 +322,7 @@ async def averify_event_dedupe_consistency(
 
 
 def _collect_dedupe_keys(dedupe_store: Any, run_id: str) -> list[str]:
-    """Collects all dedupe keys that belong to ``run_id``.
+    """Collect all dedupe keys that belong to ``run_id``.
 
     Uses multiple strategies to enumerate keys from different store
     implementations, falling back gracefully when private internals are absent:
@@ -332,8 +338,9 @@ def _collect_dedupe_keys(dedupe_store: Any, run_id: str) -> list[str]:
 
     Returns:
         List of matching dispatch idempotency keys.
+
     """
-    # Strategy 1: SQLite connection present — query directly.
+    # Strategy 1: SQLite connection present 鈥?query directly.
     conn = getattr(dedupe_store, "_conn", None)
     if conn is not None:
         try:
@@ -361,5 +368,5 @@ def _collect_dedupe_keys(dedupe_store: Any, run_id: str) -> list[str]:
             except Exception:
                 pass
 
-    # Strategy 3: No known structure — return empty (best-effort).
+    # Strategy 3: No known structure 鈥?return empty (best-effort).
     return []

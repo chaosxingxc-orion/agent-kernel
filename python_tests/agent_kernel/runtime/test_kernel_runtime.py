@@ -20,6 +20,7 @@ from agent_kernel.runtime.kernel_runtime import (
     KernelRuntime,
     KernelRuntimeConfig,
     _build_services,
+    _collect_closeables,
 )
 from agent_kernel.substrate.temporal.run_actor_workflow import (
     RunActorDependencyBundle,
@@ -56,6 +57,38 @@ def test_build_services_sqlite_returns_sqlite_event_log() -> None:
     event_log, _projection, *_ = _build_services(config)
 
     assert isinstance(event_log, SQLiteKernelRuntimeEventLog)
+
+
+def test_build_services_postgresql_requires_dsn() -> None:
+    """PostgreSQL backend must fail fast when DSN is missing."""
+    config = KernelRuntimeConfig(persistence_backend="postgresql", pg_dsn=None)
+    with pytest.raises(ValueError, match="pg_dsn is required"):
+        _build_services(config)
+
+
+def test_collect_closeables_includes_bundle_under_wrapped_event_log() -> None:
+    """Wrapped event log should not hide underlying colocated bundle."""
+
+    class _Closable:
+        def close(self) -> None:
+            return None
+
+    class _Wrapper(_Closable):
+        def __init__(self, inner: Any) -> None:
+            self._inner = inner
+
+    bundle = _Closable()
+    base_event_log = _Closable()
+    base_event_log._kernel_colocated_bundle = bundle  # type: ignore[attr-defined]
+    wrapped = _Wrapper(base_event_log)
+    dedupe_store = _Closable()
+
+    closeables = _collect_closeables(event_log=wrapped, dedupe_store=dedupe_store)
+
+    assert wrapped in closeables
+    assert base_event_log in closeables
+    assert bundle in closeables
+    assert dedupe_store in closeables
 
 
 # ---------------------------------------------------------------------------

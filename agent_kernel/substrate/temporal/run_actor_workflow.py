@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 import threading
 from contextvars import ContextVar
@@ -26,20 +27,25 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-_logger = logging.getLogger(__name__)
-
 from agent_kernel.kernel.capability_snapshot import CapabilitySnapshotBuilder
 from agent_kernel.kernel.capability_snapshot_resolver import (
     ActionPayloadCapabilitySnapshotInputResolver,
 )
 from agent_kernel.kernel.contracts import (
+    Action,
     ActionCommit,
+    ConditionalBranch,
+    ConditionalPlan,
     DecisionDeduper,
     DecisionProjectionService,
+    DependencyGraph,
+    DependencyNode,
     DispatchAdmissionService,
     ExecutorService,
     KernelRuntimeEventLog,
     ObservabilityHook,
+    ParallelGroup,
+    ParallelPlan,
     RecoveryDecision,
     RecoveryGateService,
     RecoveryInput,
@@ -48,6 +54,9 @@ from agent_kernel.kernel.contracts import (
     RunPolicyVersions,
     RunProjection,
     RuntimeEvent,
+    SequentialPlan,
+    SpeculativeCandidate,
+    SpeculativePlan,
     TurnIntentLog,
     TurnIntentRecord,
 )
@@ -69,6 +78,8 @@ except ImportError:  # pragma: no cover - optional dependency in CI
     TemporalError = RuntimeError
     temporal_workflow = None
 
+_logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True, slots=True)
 class RunInput:
@@ -80,6 +91,7 @@ class RunInput:
         pending_signals: Serialized ActorSignal dicts carried over from the
             previous continue_as_new instance (D-H3).  Restored at startup so
             signals are not lost across History resets.
+
     """
 
     run_id: str
@@ -119,6 +131,7 @@ class RunActorStrictModeConfig:
             Prevents the 50 000-event default History limit from being hit
             during long-running agent runs.  Only effective inside a live
             Temporal workflow context; no-op in tests and LocalFSM substrate.
+
     """
 
     enabled: bool = True
@@ -146,7 +159,7 @@ class RunActorDependencyBundle:
     output_parser: Any | None = None  # OutputParser Protocol
     reflection_policy: Any | None = None  # ReflectionPolicy
     reflection_builder: Any | None = None  # ReflectionContextBuilder
-    plan_executor: Any | None = None  # PlanExecutor — avoids circular import
+    plan_executor: Any | None = None  # PlanExecutor 鈥?avoids circular import
 
 
 _RUN_ACTOR_CONFIG: ContextVar[RunActorDependencyBundle | None] = ContextVar(
@@ -160,19 +173,20 @@ _RUN_ACTOR_CONFIG_FALLBACK_LOCK = threading.Lock()
 def configure_run_actor_dependencies(
     dependencies: RunActorDependencyBundle | None,
 ) -> RunActorDependencyBundle | None:
-    """Configures default dependencies for workflow construction.
+    """Configure default dependencies for workflow construction.
 
     Temporal workers may execute workflow code in runtime contexts that do not
     preserve ``ContextVar`` bindings from test or bootstrap call sites.
     Maintain both context-local and process-level fallback bindings so workflow
     tests and local workers receive the same configured services deterministically.
 
+    Args:
+        dependencies: Optional dependency bundle to set as process defaults.
+
     Returns:
         The ``dependencies`` argument, allowing callers to use the return value
         as an identity token for a scoped ``clear_run_actor_dependencies`` call.
 
-        Args:
-            dependencies:
     """
     if dependencies is not None:
         missing = [
@@ -191,7 +205,7 @@ def configure_run_actor_dependencies(
 def clear_run_actor_dependencies(
     token: RunActorDependencyBundle | None,
 ) -> None:
-    """Clears process-level dependencies only when they match ``token``.
+    """Clear process-level dependencies only when they match ``token``.
 
     Safe to call concurrently: if another ``KernelRuntime`` has already
     registered its own bundle, this call is a no-op and the new runtime's
@@ -200,6 +214,7 @@ def clear_run_actor_dependencies(
     Args:
         token: The bundle reference returned by ``configure_run_actor_dependencies``
             at start time.  Only clears if the current global matches this token.
+
     """
     with _RUN_ACTOR_CONFIG_FALLBACK_LOCK:
         if _RUN_ACTOR_CONFIG_FALLBACK.get("dependencies") is token:
@@ -217,6 +232,7 @@ class RunActorWorkflow:
         executor: Executor service for action side effects.
         recovery: Recovery gate for all execution failures.
         deduper: Fingerprint deduper used to suppress duplicate decisions.
+
     """
 
     def __init__(
@@ -233,6 +249,7 @@ class RunActorWorkflow:
         strict_mode: RunActorStrictModeConfig | None = None,
         turn_engine: TurnEngine | None = None,
     ) -> None:
+        """Initialize the instance with configured dependencies."""
         dependencies = _resolve_run_actor_dependencies(
             event_log=event_log,
             projection=projection,
@@ -285,6 +302,7 @@ class RunActorWorkflow:
             observability_hook=dependencies.observability_hook,
         )
         self._plan_executor: Any | None = dependencies.plan_executor
+        self._workflow_id_prefix = dependencies.workflow_id_prefix
         self._run_id: str | None = None
         self._session_id: str | None = None
         self._parent_run_id: str | None = None
@@ -300,13 +318,14 @@ class RunActorWorkflow:
         self._history_event_count: int = 0
 
     async def run(self, input_value: RunInput) -> dict[str, Any]:
-        """Starts the workflow loop for one run.
+        """Start the workflow loop for one run.
 
         Args:
             input_value: Workflow start payload.
 
         Returns:
             A workflow completion payload.
+
         """
         self._run_id = input_value.run_id
         self._session_id = input_value.session_id
@@ -355,6 +374,17 @@ class RunActorWorkflow:
             for pending_signal in pending_signals:
                 await self._handle_signal(pending_signal)
 
+        # Keep Temporal workflow executions alive to receive later signals.
+        # In non-Temporal contexts (unit tests/local direct invocation), return
+        # immediately for backward compatibility.
+        if _is_temporal_workflow_context() and temporal_workflow is not None:
+            wait_condition = getattr(temporal_workflow, "wait_condition", None)
+            if callable(wait_condition):
+                maybe_awaitable = wait_condition(self._is_run_terminal)
+                if inspect.isawaitable(maybe_awaitable):
+                    await maybe_awaitable
+                    self._last_projection = await self._projection.get(input_value.run_id)
+
         # agent_kernel keeps lifecycle authority in projection state. The workflow-level
         # result only mirrors terminal intent and does not invent new state.
         final_state = (
@@ -380,13 +410,17 @@ class RunActorWorkflow:
 
         Args:
             parent_run_id: Parent run identifier from workflow start input.
+
         """
         if not parent_run_id or not self._run_id:
             return
         if temporal_workflow is None or not _is_temporal_workflow_context():
             return
 
-        parent_workflow_id = _workflow_id_for_parent_run(parent_run_id)
+        parent_workflow_id = _workflow_id_for_parent_run(
+            parent_run_id,
+            workflow_id_prefix=self._workflow_id_prefix,
+        )
         child_signal_payload = {
             "signal_type": "child_completed",
             "signal_payload": {"child_run_id": self._run_id},
@@ -401,10 +435,11 @@ class RunActorWorkflow:
             return
 
     async def signal(self, input_value: ActorSignal) -> None:
-        """Handles one signal routed into the workflow.
+        """Handle one signal routed into the workflow.
 
         Args:
             input_value: Signal payload for the run actor.
+
         """
         if not self._run_id:
             # Temporal can deliver signals before ``run()`` initializes local
@@ -415,7 +450,7 @@ class RunActorWorkflow:
         await self._handle_signal(input_value)
 
     async def _handle_signal(self, input_value: ActorSignal) -> None:
-        """Applies one signal to authoritative commit+decision chain."""
+        """Apply one signal to authoritative commit+decision chain."""
         if not self._run_id:
             raise RuntimeError("RunActorWorkflow.run must be called first.")
 
@@ -519,6 +554,29 @@ class RunActorWorkflow:
                         self._plan_executor.commit_speculation(winner_id)
                     )
                     del _commit_task  # reference kept by event loop; local var avoids RUF006
+        elif input_value.signal_type == "plan_submitted":
+            if self._plan_executor is None:
+                _logger.warning(
+                    "plan_submitted signal received but plan_executor is not configured; run_id=%s",
+                    self._run_id,
+                )
+            else:
+                serialized_plan = (input_value.signal_payload or {}).get("plan")
+                if serialized_plan is None:
+                    _logger.warning(
+                        "plan_submitted signal missing plan payload; run_id=%s",
+                        self._run_id,
+                    )
+                else:
+                    try:
+                        plan = _deserialize_execution_plan(serialized_plan)
+                        await self._plan_executor.execute_plan(plan, self._run_id)
+                    except Exception as exc:
+                        _logger.warning(
+                            "plan_submitted execution failed run_id=%s error=%s",
+                            self._run_id,
+                            exc,
+                        )
 
         # History safety: count rounds and continue_as_new when threshold hit.
         self._history_event_count += 1
@@ -526,7 +584,7 @@ class RunActorWorkflow:
             self._trigger_continue_as_new()
 
     def _should_continue_as_new(self) -> bool:
-        """Returns True when the workflow should reset its Temporal History.
+        """Return True when the workflow should reset its Temporal History.
 
         Only triggers inside a live Temporal workflow context. No-op in tests
         and LocalFSM substrate. Does not trigger for terminal lifecycle states
@@ -534,6 +592,7 @@ class RunActorWorkflow:
 
         Returns:
             ``True`` when ``continue_as_new`` should be called.
+
         """
         if not _is_temporal_workflow_context() or temporal_workflow is None:
             return False
@@ -547,8 +606,14 @@ class RunActorWorkflow:
             return False
         return self._last_projection.lifecycle_state not in ("completed", "aborted")
 
+    def _is_run_terminal(self) -> bool:
+        """Return whether the latest projection is in a terminal lifecycle state."""
+        if self._last_projection is None:
+            return False
+        return self._last_projection.lifecycle_state in ("completed", "aborted")
+
     def _trigger_continue_as_new(self) -> None:
-        """Calls Temporal continue_as_new to reset History for this run.
+        """Call Temporal continue_as_new to reset History for this run.
 
         Preserves ``run_id``, ``session_id``, ``parent_run_id``, and any
         buffered pending signals so the new workflow instance resumes
@@ -557,7 +622,7 @@ class RunActorWorkflow:
         and DecisionProjectionService, so no additional state needs carrying.
         """
         if temporal_workflow is None or self._run_id is None:
-            return  # pragma: no cover — guarded by _should_continue_as_new
+            return  # pragma: no cover 鈥?guarded by _should_continue_as_new
         serialized: list[dict[str, Any]] = [
             {
                 "signal_type": s.signal_type,
@@ -578,7 +643,7 @@ class RunActorWorkflow:
         )
 
     def query(self) -> RunProjection:
-        """Returns the current authoritative projection for the run.
+        """Return the current authoritative projection for the run.
 
         Temporal deprecates asynchronous workflow query handlers. Query methods
         should be synchronous and side-effect free so they can run safely during
@@ -596,6 +661,7 @@ class RunActorWorkflow:
 
         Raises:
             RuntimeError: If ``run()`` has not established workflow identity.
+
         """
         if not self._run_id:
             raise RuntimeError("RunActorWorkflow.run must be called first.")
@@ -604,7 +670,7 @@ class RunActorWorkflow:
         return self._last_projection
 
     async def process_action_commit(self, commit: ActionCommit) -> None:
-        """Processes one action commit through the workflow decision chain.
+        """Process one action commit through the workflow decision chain.
 
         Args:
             commit: Action-level commit that should trigger one authoritative
@@ -613,6 +679,7 @@ class RunActorWorkflow:
 
         Raises:
             Exception:
+
         """
         _assert_no_derived_diagnostic_authority_input(commit)
         projection = await self._projection.catch_up(
@@ -747,7 +814,7 @@ class RunActorWorkflow:
         turn_result: TurnResult,
         caused_by: str | None,
     ) -> int:
-        """Appends one authoritative commit that records TurnEngine outcome.
+        """Append one authoritative commit that records TurnEngine outcome.
 
         ``TurnResult`` is an in-memory workflow artifact unless persisted to the
         runtime event log. This helper ensures canonical turn outcomes are
@@ -761,6 +828,7 @@ class RunActorWorkflow:
 
         Returns:
             The next offset value after this commit.
+
         """
         event = RuntimeEvent(
             run_id=run_id,
@@ -801,7 +869,7 @@ class RunActorWorkflow:
             )
         except Exception:
             _logger.error(
-                "Failed to append turn outcome commit run=%s offset=%d outcome=%s — "
+                "Failed to append turn outcome commit run=%s offset=%d outcome=%s 鈥?"
                 "event log is now inconsistent with executed side-effects",
                 run_id,
                 offset,
@@ -817,12 +885,12 @@ class RunActorWorkflow:
         recovery_decision: RecoveryDecision,
         caused_by: str | None,
     ) -> int:
-        """Appends one recovery decision event to authoritative runtime log.
+        """Append one recovery decision event to authoritative runtime log.
 
         Emits two events in the same commit:
-          1. ``recovery.plan_selected`` (derived_diagnostic) — the planner
+          1. ``recovery.plan_selected`` (derived_diagnostic) 鈥?the planner
              decision is always auditable even if execution fails later.
-          2. The authoritative recovery fact (authoritative_fact) — the
+          2. The authoritative recovery fact (authoritative_fact) 鈥?the
              durable lifecycle state change consumed by projection replay.
         """
         event_type = _recovery_event_type(recovery_decision.mode)
@@ -877,7 +945,7 @@ class RunActorWorkflow:
             )
         except Exception:
             _logger.error(
-                "Failed to append recovery event run=%s offset=%d mode=%s — "
+                "Failed to append recovery event run=%s offset=%d mode=%s 鈥?"
                 "recovery outcome is not durable",
                 run_id,
                 offset,
@@ -906,10 +974,11 @@ class _TurnEngineExecutorAdapter:
     """Adapts workflow ExecutorService to TurnEngine executor port."""
 
     def __init__(self, executor: ExecutorService) -> None:
-        """Initializes adapter with executor service.
+        """Initialize adapter with executor service.
 
         Args:
             executor: Executor service to delegate action execution.
+
         """
         self._executor = executor
 
@@ -920,15 +989,18 @@ class _TurnEngineExecutorAdapter:
         _envelope: Any,
         execution_context: Any | None = None,
     ) -> dict[str, Any]:
-        """Executes action through existing executor and normalizes ack payload.
+        """Execute action through existing executor and normalizes ack payload.
 
         Args:
             action: Admitted action to execute.
             _snapshot: Capability snapshot, accepted but unused.
             _envelope: Idempotency envelope, accepted but unused.
 
+            execution_context: Parameter from function signature.
+
         Returns:
             Normalized acknowledgement dictionary.
+
         """
         del execution_context
         result = await self._executor.execute(action, grant_ref=None)
@@ -938,19 +1010,21 @@ class _TurnEngineExecutorAdapter:
 
 
 def _utc_now_iso() -> str:
-    """Returns an RFC3339 UTC timestamp for kernel event envelopes.
+    """Return an RFC3339 UTC timestamp for kernel event envelopes.
 
     Returns:
         UTC timestamp string in ``YYYY-MM-DDTHH:MM:SSZ`` format.
+
     """
     return datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
 
 
 def _is_temporal_workflow_context() -> bool:
-    """Returns whether code is currently running inside Temporal workflow loop.
+    """Return whether code is currently running inside Temporal workflow loop.
 
     Returns:
         ``True`` when running inside a Temporal workflow context.
+
     """
     if temporal_workflow is None:
         return False
@@ -970,22 +1044,26 @@ def _is_temporal_workflow_context() -> bool:
     return True
 
 
-def _workflow_id_for_parent_run(parent_run_id: str) -> str:
-    """Builds parent workflow id from run id using gateway default prefix.
+def _workflow_id_for_parent_run(parent_run_id: str, workflow_id_prefix: str = "run") -> str:
+    """Build parent workflow id from run id using gateway default prefix.
 
     Args:
         parent_run_id: Parent run identifier.
 
+        workflow_id_prefix: Parameter from function signature.
+
     Returns:
         Temporal workflow id string for the parent run.
+
     """
-    if parent_run_id.startswith("run:"):
+    prefix = f"{workflow_id_prefix}:"
+    if parent_run_id.startswith(prefix):
         return parent_run_id
-    return f"run:{parent_run_id}"
+    return f"{prefix}{parent_run_id}"
 
 
 def _signal_event_type(signal_type: str) -> str:
-    """Maps signal types to authoritative runtime event taxonomy.
+    """Map signal types to authoritative runtime event taxonomy.
 
     Signal names are transport-level inputs. Lifecycle authority still belongs
     to runtime event projection, so this mapping upgrades selected signals to
@@ -996,6 +1074,7 @@ def _signal_event_type(signal_type: str) -> str:
 
     Returns:
         Mapped authoritative runtime event type string.
+
     """
     mapped_event_type = _SIGNAL_EVENT_TYPE_MAP.get(signal_type)
     if mapped_event_type is not None:
@@ -1007,7 +1086,7 @@ def _normalize_signal_payload(
     signal_type: str,
     signal_payload: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    """Normalizes signal payloads for deterministic replay and projection semantics.
+    """Normalize signal payloads for deterministic replay and projection semantics.
 
     Args:
         signal_type: Signal type discriminator for normalization rules.
@@ -1015,6 +1094,7 @@ def _normalize_signal_payload(
 
     Returns:
         Normalized signal payload, or ``None`` when empty after normalization.
+
     """
     if signal_payload is None:
         normalized_payload: dict[str, Any] = {}
@@ -1044,7 +1124,7 @@ _SIGNAL_EVENT_TYPE_MAP: dict[str, str] = {
     "timeout": "run.waiting_external",
     "recovery_succeeded": "run.recovery_succeeded",
     "recovery_aborted": "run.recovery_aborted",
-    # Plan / approval / speculation signals — recorded as authoritative facts
+    # Plan / approval / speculation signals 鈥?recorded as authoritative facts
     # so that the event log captures the full lifecycle intent, even when the
     # execution engine has not yet processed the plan.
     "plan_submitted": "run.plan_submitted",
@@ -1054,13 +1134,14 @@ _SIGNAL_EVENT_TYPE_MAP: dict[str, str] = {
 
 
 def _build_turn_outcome_payload(turn_result: TurnResult) -> dict[str, Any]:
-    """Builds replay-safe payload for persisted turn outcome runtime events.
+    """Build replay-safe payload for persisted turn outcome runtime events.
 
     Args:
         turn_result: Deterministic turn result to serialize.
 
     Returns:
         Normalized payload dictionary for event persistence.
+
     """
     payload: dict[str, Any] = {
         "state": turn_result.state,
@@ -1095,13 +1176,14 @@ def _build_turn_outcome_payload(turn_result: TurnResult) -> dict[str, Any]:
 def _build_remote_policy_decision_payload(
     turn_result: TurnResult,
 ) -> dict[str, Any] | None:
-    """Builds optional remote policy decision payload from ``TurnResult``.
+    """Build optional remote policy decision payload from ``TurnResult``.
 
     Args:
         turn_result: Turn result with optional remote policy decision.
 
     Returns:
         Remote policy decision dictionary, or ``None`` when absent.
+
     """
     remote_policy_decision = turn_result.remote_policy_decision
     if remote_policy_decision is None:
@@ -1118,13 +1200,14 @@ def _build_remote_policy_decision_payload(
 def _extract_turn_emitted_states(
     emitted_events: list[Any],
 ) -> list[str]:
-    """Extracts ordered ``state`` markers from TurnEngine emitted events.
+    """Extract ordered ``state`` markers from TurnEngine emitted events.
 
     Args:
         emitted_events: List of TurnStateEvent objects.
 
     Returns:
         Ordered list of non-empty state string values.
+
     """
     emitted_states: list[str] = []
     for emitted_event in emitted_events:
@@ -1135,13 +1218,14 @@ def _extract_turn_emitted_states(
 
 
 def _build_recovery_input_payload(turn_result: TurnResult) -> dict[str, Any]:
-    """Builds normalized recovery evidence payload from ``TurnResult``.
+    """Build normalized recovery evidence payload from ``TurnResult``.
 
     Args:
         turn_result: Turn result with optional recovery input.
 
     Returns:
         Recovery evidence dictionary, or empty dict when absent.
+
     """
     recovery_input = turn_result.recovery_input
     if recovery_input is None:
@@ -1157,7 +1241,7 @@ def _build_recovery_input_payload(turn_result: TurnResult) -> dict[str, Any]:
 
 
 def _turn_outcome_event_type(outcome_kind: str) -> str:
-    """Maps TurnEngine outcome kind to canonical authoritative ``run.*`` event.
+    """Map TurnEngine outcome kind to canonical authoritative ``run.*`` event.
 
     Args:
         outcome_kind: Turn outcome kind discriminator.
@@ -1167,6 +1251,7 @@ def _turn_outcome_event_type(outcome_kind: str) -> str:
 
     Raises:
         ValueError: If ``outcome_kind`` is not recognized.
+
     """
     if outcome_kind == "dispatched":
         return "run.dispatching"
@@ -1181,13 +1266,14 @@ def _turn_outcome_event_type(outcome_kind: str) -> str:
 
 
 def _recovery_event_type(mode: str) -> str:
-    """Maps recovery decision mode to runtime event type.
+    """Map recovery decision mode to runtime event type.
 
     Args:
         mode: Recovery decision mode string.
 
     Returns:
         Canonical recovery runtime event type string.
+
     """
     if mode == "abort":
         return "run.recovery_aborted"
@@ -1199,13 +1285,14 @@ def _recovery_event_type(mode: str) -> str:
 def _recovery_outcome_state(
     mode: str,
 ) -> str:
-    """Maps recovery mode to minimal persisted recovery outcome state.
+    """Map recovery mode to minimal persisted recovery outcome state.
 
     Args:
         mode: Recovery decision mode string.
 
     Returns:
         Persisted recovery outcome state string.
+
     """
     if mode == "abort":
         return "aborted"
@@ -1215,7 +1302,7 @@ def _recovery_outcome_state(
 
 
 async def _latest_run_offset(event_log: KernelRuntimeEventLog, run_id: str) -> int:
-    """Returns latest commit offset observed for run from authoritative event log."""
+    """Return latest commit offset observed for run from authoritative event log."""
     events = await event_log.load(run_id, after_offset=0)
     if not isinstance(events, list) or not events:
         return 0
@@ -1230,14 +1317,14 @@ def _assert_no_derived_diagnostic_authority_input(commit: ActionCommit) -> None:
 
 
 def _assert_single_dispatch_attempt_in_turn(turn_result: TurnResult) -> None:
-    """Ensures one turn contains at most one authoritative dispatch state."""
+    """Ensure one turn contains at most one authoritative dispatch state."""
     dispatch_count = sum(1 for event in turn_result.emitted_events if event.state == "dispatched")
     if dispatch_count > 1:
         raise RuntimeError("Single turn must not contain multiple authoritative dispatch attempts.")
 
 
 def _assert_recovery_gate_is_read_only(before_offset: int, after_offset: int) -> None:
-    """Ensures recovery gate does not mutate lifecycle/event truth directly."""
+    """Ensure recovery gate does not mutate lifecycle/event truth directly."""
     if after_offset != before_offset:
         raise RuntimeError(
             "Recovery gate must be read-only and cannot append runtime events directly."
@@ -1245,7 +1332,7 @@ def _assert_recovery_gate_is_read_only(before_offset: int, after_offset: int) ->
 
 
 def _assert_recovery_event_type_allowed(event_type: str) -> None:
-    """Ensures recovery append path emits only recovery-class event types."""
+    """Ensure recovery append path emits only recovery-class event types."""
     if event_type not in ("run.recovering", "run.waiting_external", "run.recovery_aborted"):
         raise RuntimeError(f"Recovery event type is not allowed for lifecycle safety: {event_type}")
 
@@ -1262,7 +1349,7 @@ def _resolve_run_actor_dependencies(
     dedupe_store: DedupeStorePort | None,
     strict_mode: RunActorStrictModeConfig | None,
 ) -> RunActorDependencyBundle:
-    """Resolves workflow dependencies from explicit args, config, or defaults.
+    """Resolve workflow dependencies from explicit args, config, or defaults.
 
     Args:
         event_log: Optional explicit event log service.
@@ -1278,6 +1365,7 @@ def _resolve_run_actor_dependencies(
 
     Returns:
         Fully resolved dependency bundle for workflow construction.
+
     """
     if all(
         dependency is not None
@@ -1301,6 +1389,7 @@ def _resolve_run_actor_dependencies(
             turn_intent_log=turn_intent_log,
             deduper=deduper,
             strict_mode=strict_mode or RunActorStrictModeConfig(),
+            workflow_id_prefix="run",
         )
 
     configured_dependencies = _RUN_ACTOR_CONFIG.get()
@@ -1328,6 +1417,14 @@ def _resolve_run_actor_dependencies(
             strict_mode=(
                 strict_mode if strict_mode is not None else configured_dependencies.strict_mode
             ),
+            workflow_id_prefix=configured_dependencies.workflow_id_prefix,
+            observability_hook=configured_dependencies.observability_hook,
+            context_port=configured_dependencies.context_port,
+            llm_gateway=configured_dependencies.llm_gateway,
+            output_parser=configured_dependencies.output_parser,
+            reflection_policy=configured_dependencies.reflection_policy,
+            reflection_builder=configured_dependencies.reflection_builder,
+            plan_executor=configured_dependencies.plan_executor,
         )
     with _RUN_ACTOR_CONFIG_FALLBACK_LOCK:
         fallback_dependencies = _RUN_ACTOR_CONFIG_FALLBACK["dependencies"]
@@ -1355,6 +1452,14 @@ def _resolve_run_actor_dependencies(
             strict_mode=(
                 strict_mode if strict_mode is not None else fallback_dependencies.strict_mode
             ),
+            workflow_id_prefix=fallback_dependencies.workflow_id_prefix,
+            observability_hook=fallback_dependencies.observability_hook,
+            context_port=fallback_dependencies.context_port,
+            llm_gateway=fallback_dependencies.llm_gateway,
+            output_parser=fallback_dependencies.output_parser,
+            reflection_policy=fallback_dependencies.reflection_policy,
+            reflection_builder=fallback_dependencies.reflection_builder,
+            plan_executor=fallback_dependencies.plan_executor,
         )
 
     default_event_log = InMemoryKernelRuntimeEventLog()
@@ -1370,3 +1475,89 @@ def _resolve_run_actor_dependencies(
         deduper=InMemoryDecisionDeduper(),
         strict_mode=strict_mode or RunActorStrictModeConfig(),
     )
+
+
+def _deserialize_action(payload: dict[str, Any]) -> Action:
+    """Deserialize one Action from a signal-safe payload dictionary."""
+    return Action(
+        action_id=str(payload["action_id"]),
+        run_id=str(payload["run_id"]),
+        action_type=str(payload["action_type"]),
+        effect_class=payload["effect_class"],
+        external_idempotency_level=payload.get("external_idempotency_level"),
+        interaction_target=payload.get("interaction_target"),
+        input_ref=payload.get("input_ref"),
+        input_json=payload.get("input_json"),
+        policy_tags=list(payload.get("policy_tags", [])),
+        timeout_ms=payload.get("timeout_ms"),
+        side_effect_class=payload.get("side_effect_class"),
+    )
+
+
+def _deserialize_execution_plan(payload: dict[str, Any]) -> Any:
+    """Deserialize a plan payload produced by KernelFacade.submit_plan()."""
+    plan_type = payload.get("plan_type")
+    if plan_type == "sequential":
+        return SequentialPlan(
+            steps=tuple(_deserialize_action(step) for step in payload.get("steps", []))
+        )
+    if plan_type == "parallel":
+        groups = []
+        for group in payload.get("groups", []):
+            groups.append(
+                ParallelGroup(
+                    actions=tuple(
+                        _deserialize_action(action) for action in group.get("actions", [])
+                    ),
+                    join_strategy=group.get("join_strategy", "all"),
+                    n=group.get("n"),
+                    timeout_ms=group.get("timeout_ms"),
+                    group_idempotency_key=group.get("group_idempotency_key", ""),
+                )
+            )
+        return ParallelPlan(groups=tuple(groups))
+    if plan_type == "conditional":
+        branches = []
+        for branch in payload.get("branches", []):
+            branches.append(
+                ConditionalBranch(
+                    trigger_outcomes=tuple(branch.get("trigger_outcomes", [])),
+                    plan=_deserialize_execution_plan(branch["plan"]),
+                )
+            )
+        default_payload = payload.get("default_plan")
+        default_plan = (
+            _deserialize_execution_plan(default_payload)
+            if isinstance(default_payload, dict)
+            else None
+        )
+        return ConditionalPlan(
+            gating_action=_deserialize_action(payload["gating_action"]),
+            branches=tuple(branches),
+            default_plan=default_plan,
+        )
+    if plan_type == "dependency_graph":
+        nodes = []
+        for node in payload.get("nodes", []):
+            nodes.append(
+                DependencyNode(
+                    node_id=str(node["node_id"]),
+                    action=_deserialize_action(node["action"]),
+                    depends_on=tuple(node.get("depends_on", [])),
+                )
+            )
+        return DependencyGraph(nodes=tuple(nodes))
+    if plan_type == "speculative":
+        candidates = []
+        for candidate in payload.get("candidates", []):
+            candidates.append(
+                SpeculativeCandidate(
+                    candidate_id=str(candidate["candidate_id"]),
+                    plan=_deserialize_execution_plan(candidate["plan"]),
+                )
+            )
+        return SpeculativePlan(
+            candidates=tuple(candidates),
+            speculation_timeout_ms=payload.get("speculation_timeout_ms"),
+        )
+    raise ValueError(f"Unsupported plan_type in payload: {plan_type!r}")

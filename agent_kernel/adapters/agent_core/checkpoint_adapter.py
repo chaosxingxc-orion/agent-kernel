@@ -23,6 +23,7 @@ class AgentCoreCheckpointView:
         snapshot_id: Optional snapshot identity string.
         projected_offset: Offset of the projected state.
         lifecycle_state: Current lifecycle state of the run.
+
     """
 
     run_id: str
@@ -38,6 +39,7 @@ class AgentCoreResumeInput:
     Attributes:
         run_id: Kernel run identifier to resume.
         snapshot_id: Optional snapshot identity for offset targeting.
+
     """
 
     run_id: str
@@ -52,6 +54,7 @@ class KernelResumeRequest:
         run_id: Kernel run identifier to resume.
         snapshot_id: Optional snapshot identity for offset targeting.
         snapshot_offset: Optional parsed offset from snapshot identity.
+
     """
 
     run_id: str
@@ -63,6 +66,7 @@ class AgentCoreCheckpointAdapter:
     """Maps checkpoint and resume data between platform and kernel contracts."""
 
     def __init__(self) -> None:
+        """Initialize in-memory projection storage keyed by ``run_id``."""
         self._projection_by_run: dict[str, RunProjection] = {}
 
     def bind_projection(self, projection: RunProjection) -> None:
@@ -70,17 +74,19 @@ class AgentCoreCheckpointAdapter:
 
         Args:
             projection: Current run projection to bind.
+
         """
         self._projection_by_run[projection.run_id] = projection
 
     async def export_checkpoint_view(self, run_id: str) -> AgentCoreCheckpointView:
-        """Exports checkpoint summary from bound projection state.
+        """Export checkpoint summary from bound projection state.
 
         Args:
             run_id: Run identifier to export checkpoint for.
 
         Returns:
             Platform-facing checkpoint view with lifecycle state.
+
         """
         projection = self._projection_by_run.get(run_id)
         if projection is None:
@@ -99,17 +105,23 @@ class AgentCoreCheckpointAdapter:
         )
 
     async def export_checkpoint(self, run_id: str) -> AgentCoreCheckpointView:
-        """CheckpointResumePort-compatible alias.
+        """Export checkpoint view using ``CheckpointResumePort`` naming.
+
+        This method is a compatibility alias for callers that still use the
+        older ``export_checkpoint`` entrypoint name.
+
         Args:
             run_id: Identifier of the target run.
+
         Returns:
-            AgentCoreCheckpointView: Platform-specific checkpoint view object.
+            Platform-specific checkpoint view object.
+
         """
         return await self.export_checkpoint_view(run_id)
 
     @staticmethod
     def parse_snapshot_id(snapshot_id: str) -> tuple[str, int]:
-        """Parses adapter-level snapshot identity into run and offset.
+        """Parse adapter-level snapshot identity into run and offset.
 
         This parser only validates the transport format used by the adapter
         boundary (`snapshot:<run_id>:<offset>`). It is intentionally *not* the
@@ -124,6 +136,7 @@ class AgentCoreCheckpointAdapter:
 
         Raises:
             ValueError: If `snapshot_id` does not match the expected format.
+
         """
         if not snapshot_id.startswith("snapshot:"):
             raise ValueError("Invalid snapshot_id format. Expected 'snapshot:<run_id>:<offset>'.")
@@ -145,7 +158,7 @@ class AgentCoreCheckpointAdapter:
         self,
         input_value: AgentCoreResumeInput,
     ) -> KernelResumeRequest:
-        """Maps platform resume payload into kernel-safe resume request.
+        """Map platform resume payload into kernel-safe resume request.
 
         The adapter performs minimal, deterministic validation for the
         `snapshot_id` transport format and run identity consistency. This is a
@@ -161,6 +174,7 @@ class AgentCoreCheckpointAdapter:
         Raises:
             ValueError: If `snapshot_id` cannot be parsed, or if the parsed
                 run identifier does not match `input_value.run_id`.
+
         """
         snapshot_offset: int | None = None
         if input_value.snapshot_id is not None:
@@ -175,10 +189,16 @@ class AgentCoreCheckpointAdapter:
         )
 
     async def import_resume(self, input_value: AgentCoreResumeInput) -> KernelResumeRequest:
-        """CheckpointResumePort-compatible alias.
+        """Import resume input using ``CheckpointResumePort`` naming.
+
+        This method is a compatibility alias for callers that still use the
+        older ``import_resume`` entrypoint name.
+
         Args:
             input_value: Platform-specific input payload.
+
         Returns:
-            KernelResumeRequest: Kernel-safe resume request object.
+            Kernel-safe resume request object.
+
         """
         return await self.import_resume_request(input_value)

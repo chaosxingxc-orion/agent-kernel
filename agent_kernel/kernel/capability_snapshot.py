@@ -31,6 +31,7 @@ class DeclarativeBundleDigest:
         semantics_version: Semantic contract version of the bundle.
         content_hash: Canonical content hash before compilation.
         compile_hash: Compiler-output hash to pin compiled semantics.
+
     """
 
     bundle_ref: str
@@ -59,6 +60,7 @@ class CapabilitySnapshotInput:
         session_mode: Optional session mode discriminator.
         approval_state: Optional approval gate state.
         declarative_bundle_digest: Optional compiled rule bundle signature.
+
     """
 
     run_id: str
@@ -109,6 +111,7 @@ class CapabilitySnapshot:
         approval_state: Optional approval state.
         declarative_bundle_digest: Optional rule bundle signature.
         created_at: RFC3339 UTC creation timestamp.
+
     """
 
     snapshot_ref: str
@@ -135,7 +138,7 @@ class CapabilitySnapshot:
 
 
 _CURRENT_SNAPSHOT_SCHEMA_VERSION = "1"
-"""Current canonical schema version — see ``assert_snapshot_compatible`` for details."""
+"""Current canonical schema version 鈥?see ``assert_snapshot_compatible`` for details."""
 
 
 class CapabilitySnapshotBuilder:
@@ -148,7 +151,7 @@ class CapabilitySnapshotBuilder:
     """
 
     def build(self, input_value: CapabilitySnapshotInput) -> CapabilitySnapshot:
-        """Builds one canonical snapshot from declared input fields.
+        """Build one canonical snapshot from declared input fields.
 
         Args:
             input_value: Snapshot input from capability assembly pipeline.
@@ -164,8 +167,9 @@ class CapabilitySnapshotBuilder:
             If the same ``CapabilitySnapshotInput`` instance is reused across
             multiple ``build()`` calls with intervening mutations to its list
             fields, the resulting hashes will differ even though the object
-            reference appears identical — use ``dataclasses.replace()`` to
+            reference appears identical 鈥?use ``dataclasses.replace()`` to
             produce a new instance before mutating.
+
         """
         input_value = copy.deepcopy(input_value)
         self._validate_input(input_value)
@@ -224,7 +228,7 @@ class CapabilitySnapshotBuilder:
         )
 
     def _validate_input(self, input_value: CapabilitySnapshotInput) -> None:
-        """Validates mandatory fields for deterministic and safe snapshot builds.
+        """Validate mandatory fields for deterministic and safe snapshot builds.
 
         Args:
             input_value: Snapshot input to validate.
@@ -232,6 +236,7 @@ class CapabilitySnapshotBuilder:
         Raises:
             CapabilitySnapshotBuildError: If required fields are missing
                 or inconsistent.
+
         """
         if not input_value.run_id:
             raise CapabilitySnapshotBuildError("run_id is required.")
@@ -250,13 +255,14 @@ class CapabilitySnapshotBuilder:
 def _normalize_bundle_digest(
     digest: DeclarativeBundleDigest | None,
 ) -> dict[str, str] | None:
-    """Normalizes bundle digest into stable dict form for canonical hashing.
+    """Normalize bundle digest into stable dict form for canonical hashing.
 
     Args:
         digest: Optional declarative bundle digest to normalize.
 
     Returns:
         Dictionary with bundle fields, or ``None`` when input is ``None``.
+
     """
     if digest is None:
         return None
@@ -269,20 +275,21 @@ def _normalize_bundle_digest(
 
 
 def _normalize_string_list(values: list[str]) -> list[str]:
-    """Returns deterministic deduped and sorted string list.
+    """Return deterministic deduped and sorted string list.
 
     Args:
         values: Raw string list that may contain duplicates or empty strings.
 
     Returns:
         Sorted list with duplicates and empty strings removed.
+
     """
     unique_values = {value for value in values if value}
     return sorted(unique_values)
 
 
 def _build_stable_sha256(payload: dict[str, object]) -> str:
-    """Builds SHA256 from canonical JSON representation.
+    """Build SHA256 from canonical JSON representation.
 
     Canonicalization strategy:
       - ``sort_keys=True`` to stabilize object field ordering.
@@ -294,6 +301,7 @@ def _build_stable_sha256(payload: dict[str, object]) -> str:
 
     Returns:
         Hex-encoded SHA256 digest string.
+
     """
     canonical_json = json.dumps(
         payload,
@@ -305,10 +313,11 @@ def _build_stable_sha256(payload: dict[str, object]) -> str:
 
 
 def _utc_now_iso() -> str:
-    """Returns RFC3339 UTC timestamp for snapshot creation time.
+    """Return RFC3339 UTC timestamp for snapshot creation time.
 
     Returns:
         UTC timestamp string in ``YYYY-MM-DDTHH:MM:SSZ`` format.
+
     """
     return datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
 
@@ -319,7 +328,7 @@ def _utc_now_iso() -> str:
 
 
 def assert_snapshot_compatible(snapshot: CapabilitySnapshot) -> None:
-    """Raises ``ValueError`` if the snapshot was built with an unknown schema version.
+    """Raise ``ValueError`` if the snapshot was built with an unknown schema version.
 
     Call this at any point where a persisted or received snapshot is loaded
     back into the running kernel, to catch version mismatches early rather
@@ -331,6 +340,7 @@ def assert_snapshot_compatible(snapshot: CapabilitySnapshot) -> None:
     Raises:
         ValueError: When ``snapshot.snapshot_schema_version`` differs from
             the current kernel schema version.
+
     """
     if snapshot.snapshot_schema_version != _CURRENT_SNAPSHOT_SCHEMA_VERSION:
         raise ValueError(

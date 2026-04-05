@@ -38,6 +38,7 @@ class RecoveryPlan:
         compensation_action_id: Optional action id for compensation scheduling.
         escalation_channel_ref: Optional escalation channel for human
             notification.
+
     """
 
     run_id: str
@@ -99,6 +100,7 @@ class PlannerHeuristicPolicy:
 
         Returns:
             One classification used by planner action strategy.
+
         """
         normalized_reason = reason_code.strip().lower()
         if _has_prefix(normalized_reason, self.human_reason_prefixes):
@@ -114,13 +116,14 @@ class PlannerHeuristicPolicy:
         self,
         classification: ReasonClassification,
     ) -> RecoveryPlanAction:
-        """Maps one classification to its configured planner action.
+        """Map one classification to its configured planner action.
 
         Args:
             classification: Heuristic reason classification.
 
         Returns:
             Configured recovery plan action for the classification.
+
         """
         if classification == "human":
             return self.human_action
@@ -143,11 +146,12 @@ class RecoveryPlanner:
         self,
         policy: PlannerHeuristicPolicy | None = None,
     ) -> None:
-        """Initializes the planner with an optional policy.
+        """Initialize the planner with an optional policy.
 
         Args:
             policy: Optional heuristic policy for classification.
                 Uses default if not provided.
+
         """
         self._policy = policy or PlannerHeuristicPolicy()
 
@@ -156,7 +160,7 @@ class RecoveryPlanner:
         decision: RecoveryDecision,
         projection: RunProjection,
     ) -> RecoveryPlan:
-        """Builds one plan for the given decision and current projection.
+        """Build one plan for the given decision and current projection.
 
         Args:
             decision: Authoritative recovery decision.
@@ -167,6 +171,7 @@ class RecoveryPlanner:
 
         Raises:
             ValueError: If decision run_id mismatches projection run_id.
+
         """
         if decision.run_id != projection.run_id:
             raise ValueError("recovery decision run_id must match projection run_id.")
@@ -192,7 +197,7 @@ class RecoveryPlanner:
         )
 
     def build_plan_from_input(self, recovery_input: RecoveryInput) -> RecoveryPlan:
-        """Builds a deterministic plan from the failure envelope.
+        """Build a deterministic plan from the failure envelope.
 
         Design boundary:
         The planner never infers additional domain facts. It only uses the
@@ -207,6 +212,7 @@ class RecoveryPlanner:
 
         Raises:
             ValueError: If recovery_input run_id mismatches projection run_id.
+
         """
         projection = recovery_input.projection
         if recovery_input.run_id != projection.run_id:
@@ -257,7 +263,7 @@ class RecoveryPlanner:
 
 
 def _has_prefix(value: str, prefixes: tuple[str, ...]) -> bool:
-    """Returns whether ``value`` starts with any configured prefix.
+    """Return whether ``value`` starts with any configured prefix.
 
     Args:
         value: Normalized string to check.
@@ -265,5 +271,6 @@ def _has_prefix(value: str, prefixes: tuple[str, ...]) -> bool:
 
     Returns:
         ``True`` when ``value`` starts with at least one prefix.
+
     """
     return any(value.startswith(prefix) for prefix in prefixes)

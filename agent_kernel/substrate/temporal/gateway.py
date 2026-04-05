@@ -51,6 +51,7 @@ class TemporalGatewayConfig:
         query_method_name: Workflow query method name used by handles.
         event_stream_query_method_name: Optional workflow query method used to
             fetch runtime event stream payloads.
+
     """
 
     task_queue: str = "agent-kernel"
@@ -75,21 +76,25 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         temporal_client: Any,
         config: TemporalGatewayConfig | None = None,
     ) -> None:
-        """Initializes gateway with Temporal client and optional config.
+        """Initialize gateway with Temporal client and optional config.
 
         Args:
             temporal_client: Temporal SDK client instance.
             config: Configuration for workflow id composition and task routing.
+
         """
         self._client = temporal_client
         self._config = config or TemporalGatewayConfig()
 
     async def start_workflow(self, request: StartRunRequest) -> dict[str, str]:
-        """Starts one run workflow and returns a facade-safe workflow id.
+        """Start one run workflow and returns a facade-safe workflow id.
+
         Args:
             request: The incoming request object.
+
         Returns:
             dict[str, str]: Mapping with ``workflow_id`` and ``run_id`` keys.
+
         """
         run_id = self._build_run_id(request)
         workflow_id = self._workflow_id_for_run(run_id)
@@ -117,9 +122,11 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         signal: SignalRunRequest,
     ) -> None:
         """Routes one kernel signal into the Temporal workflow.
+
         Args:
             run_id: Identifier of the target run.
             signal: Kernel signal request to dispatch.
+
         """
         handle = self._client.get_workflow_handle(
             self._workflow_id_for_run(run_id),
@@ -138,7 +145,7 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         run_id: str,
         reason: str,
     ) -> None:
-        """Cancels one run workflow.
+        """Cancel one run workflow.
 
         Compatibility note:
         Some Temporal Python SDK versions accept
@@ -149,6 +156,7 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         Args:
             run_id: Identifier of the target run.
             reason: Cancellation reason forwarded to Temporal.
+
         """
         handle = self._client.get_workflow_handle(
             self._workflow_id_for_run(run_id),
@@ -159,7 +167,7 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
             await handle.cancel()
 
     async def query_projection(self, run_id: str) -> RunProjection:
-        """Queries projection from workflow and normalizes result shape.
+        """Query projection from workflow and normalizes result shape.
 
         Args:
             run_id: Target run identifier.
@@ -169,6 +177,7 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
 
         Raises:
             ValueError: If the query response shape is unexpected.
+
         """
         handle = self._client.get_workflow_handle(
             self._workflow_id_for_run(run_id),
@@ -237,12 +246,15 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         parent_run_id: str,
         request: SpawnChildRunRequest,
     ) -> dict[str, str]:
-        """Starts one child run workflow linked to parent run id.
+        """Start one child run workflow linked to parent run id.
+
         Args:
             parent_run_id: Identifier of the parent run that spawns the child.
             request: The incoming request object.
+
         Returns:
             dict[str, str]: Mapping with ``workflow_id`` and ``run_id`` keys.
+
         """
         child_run_id = request.input_json.get("child_run_id") if request.input_json else None
         if not isinstance(child_run_id, str) or not child_run_id:
@@ -265,13 +277,14 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         self,
         request: StartRunRequest,
     ) -> str:
-        """Resolves deterministic run id from request inputs.
+        """Resolve deterministic run id from request inputs.
 
         Args:
             request: Start run request with identity hints.
 
         Returns:
             Resolved run identifier string.
+
         """
         if request.input_json and isinstance(
             request.input_json.get("run_id"),
@@ -285,13 +298,14 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         return request.run_kind
 
     def _workflow_id_for_run(self, run_id: str) -> str:
-        """Builds Temporal workflow id from run id.
+        """Build Temporal workflow id from run id.
 
         Args:
             run_id: Kernel run identifier.
 
         Returns:
             Temporal workflow id string with configured prefix.
+
         """
         return f"{self._config.workflow_id_prefix}:{run_id}"
 
@@ -314,11 +328,12 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
 
         Returns:
             Async iterator of ``RuntimeEvent`` instances.
+
         """
         return self._stream_run_events(run_id)
 
     async def _stream_run_events(self, run_id: str) -> AsyncIterator[RuntimeEvent]:
-        """Yields runtime events returned by configured workflow query hook.
+        """Yield runtime events returned by configured workflow query hook.
 
         If no stream query method is configured, the stream is empty.
         """
@@ -337,7 +352,7 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         run_id: str,
         stream_payload: Any,
     ) -> list[RuntimeEvent]:
-        """Normalizes stream query payload into ``RuntimeEvent`` objects."""
+        """Normalize stream query payload into ``RuntimeEvent`` objects."""
         if stream_payload is None:
             return []
         if isinstance(stream_payload, dict):

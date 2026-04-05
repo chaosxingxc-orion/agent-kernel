@@ -71,11 +71,12 @@ class ActivityHandlerNotRegisteredError(LookupError):
         route: str,
         identifier: str,
     ) -> None:
-        """Initializes the error with route and identifier.
+        """Initialize the error with route and identifier.
 
         Args:
             route: Activity route type (e.g. "tool" or "mcp").
             identifier: Handler identifier that was not found.
+
         """
         super().__init__(
             f"No registered {route} activity handler for"
@@ -97,6 +98,7 @@ class TemporalActivityBindings:
             outcomes.
         reconciliation_activity: Callable that reconciles state
             divergence.
+
     """
 
     admission_activity: AdmissionActivityCallable
@@ -123,12 +125,13 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         tool_handlers: (Mapping[str, ToolActivityCallable] | None) = None,
         mcp_handlers: (Mapping[MCPHandlerKey, MCPActivityCallable] | None) = None,
     ) -> None:
-        """Initializes the gateway with bindings and explicit handlers.
+        """Initialize the gateway with bindings and explicit handlers.
 
         Args:
             bindings: Default activity callable bindings.
             tool_handlers: Optional explicit tool handler map.
             mcp_handlers: Optional explicit MCP handler map.
+
         """
         self._bindings = bindings
         self._tool_handlers: dict[str, ToolActivityCallable] = dict(tool_handlers or {})
@@ -139,11 +142,12 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         tool_name: str,
         handler: ToolActivityCallable,
     ) -> None:
-        """Registers one tool handler by ``tool_name``.
+        """Register one tool handler by ``tool_name``.
 
         Args:
             tool_name: Tool identifier for handler registration.
             handler: Callable to execute when tool is invoked.
+
         """
         self._tool_handlers[tool_name] = handler
 
@@ -151,7 +155,7 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         self,
         tool_name: str,
     ) -> ToolActivityCallable:
-        """Gets one registered tool handler by ``tool_name``.
+        """Get one registered tool handler by ``tool_name``.
 
         Args:
             tool_name: Tool identifier to look up.
@@ -162,6 +166,7 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         Raises:
             ActivityHandlerNotRegisteredError: If the tool handler
                 is missing.
+
         """
         handler = self._tool_handlers.get(tool_name)
         if handler is None:
@@ -177,12 +182,13 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         capability: str,
         handler: MCPActivityCallable,
     ) -> None:
-        """Registers one MCP handler by ``server_name/capability``.
+        """Register one MCP handler by ``server_name/capability``.
 
         Args:
             server_name: MCP server name.
             capability: MCP capability identifier.
             handler: Callable to execute when MCP is invoked.
+
         """
         self._mcp_handlers[(server_name, capability)] = handler
 
@@ -191,7 +197,7 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         server_name: str,
         capability: str,
     ) -> MCPActivityCallable:
-        """Gets one registered MCP handler by ``server_name/capability``.
+        """Get one registered MCP handler by ``server_name/capability``.
 
         Args:
             server_name: MCP server name.
@@ -203,6 +209,7 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         Raises:
             ActivityHandlerNotRegisteredError: If the MCP handler
                 is missing.
+
         """
         key = (server_name, capability)
         handler = self._mcp_handlers.get(key)
@@ -217,13 +224,14 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         self,
         request: AdmissionActivityInput,
     ) -> AdmissionResult:
-        """Executes the injected admission activity callable.
+        """Execute the injected admission activity callable.
 
         Args:
             request: Admission activity input payload.
 
         Returns:
             Admission decision result from the activity.
+
         """
         return await self._invoke(
             self._bindings.admission_activity,
@@ -234,13 +242,14 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         self,
         request: ToolActivityInput,
     ) -> Any:
-        """Executes one explicitly registered tool handler.
+        """Execute one explicitly registered tool handler.
 
         Args:
             request: Tool activity input payload.
 
         Returns:
             Tool execution result from the handler.
+
         """
         return await self._invoke(
             self.get_tool_handler(request.tool_name),
@@ -251,13 +260,14 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         self,
         request: MCPActivityInput,
     ) -> Any:
-        """Executes one explicitly registered MCP handler.
+        """Execute one explicitly registered MCP handler.
 
         Args:
             request: MCP activity input payload.
 
         Returns:
             MCP execution result from the handler.
+
         """
         return await self._invoke(
             self.get_mcp_handler(
@@ -271,13 +281,14 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         self,
         request: VerificationActivityInput,
     ) -> Any:
-        """Executes the injected verification activity callable.
+        """Execute the injected verification activity callable.
 
         Args:
             request: Verification activity input payload.
 
         Returns:
             Verification result from the activity.
+
         """
         return await self._invoke(
             self._bindings.verification_activity,
@@ -288,13 +299,14 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         self,
         request: ReconciliationActivityInput,
     ) -> Any:
-        """Executes the injected reconciliation activity callable.
+        """Execute the injected reconciliation activity callable.
 
         Args:
             request: Reconciliation activity input payload.
 
         Returns:
             Reconciliation result from the activity.
+
         """
         return await self._invoke(
             self._bindings.reconciliation_activity,
@@ -305,7 +317,7 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         self,
         request: InferenceActivityInput,
     ) -> ModelOutput:
-        """Executes the injected inference activity callable.
+        """Execute the injected inference activity callable.
 
         Args:
             request: Inference activity input payload.
@@ -315,6 +327,7 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
 
         Raises:
             RuntimeError: If no inference_activity callable is registered.
+
         """
         if self._bindings.inference_activity is None:
             raise RuntimeError(
@@ -326,7 +339,7 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         self,
         request: ScriptActivityInput,
     ) -> ScriptResult:
-        """Executes the injected script activity callable.
+        """Execute the injected script activity callable.
 
         Args:
             request: Script activity input payload.
@@ -336,6 +349,7 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
 
         Raises:
             RuntimeError: If no script_activity callable is registered.
+
         """
         if self._bindings.script_activity is None:
             raise RuntimeError(
@@ -348,7 +362,7 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         activity_callable: Callable[[Any], Any],
         request: Any,
     ) -> Any:
-        """Invokes one activity callable and awaits awaitable results.
+        """Invoke one activity callable and awaits awaitable results.
 
         Args:
             activity_callable: Injected activity function for one
@@ -358,6 +372,7 @@ class TemporalSDKActivityGateway(TemporalActivityGateway):
         Returns:
             The callable result, preserving payload type from the
             activity.
+
         """
         result = activity_callable(request)
         if inspect.isawaitable(result):

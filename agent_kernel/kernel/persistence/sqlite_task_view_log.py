@@ -22,6 +22,7 @@ class SQLiteTaskViewLog:
     """
 
     def __init__(self, database_path: str | Path = ":memory:") -> None:
+        """Initialize the instance with configured dependencies."""
         self._database_path = str(database_path)
         self._conn = sqlite3.connect(self._database_path, check_same_thread=False)
         self._lock = threading.RLock()
@@ -31,7 +32,7 @@ class SQLiteTaskViewLog:
         self._ensure_schema()
 
     def close(self) -> None:
-        """Closes the SQLite connection after checkpointing the WAL file."""
+        """Close the SQLite connection after checkpointing the WAL file."""
         with self._lock:
             with contextlib.suppress(Exception):
                 self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -113,6 +114,7 @@ class SQLiteTaskViewLog:
         Args:
             task_view_id: Identifier of the record to update.
             decision_ref: Decision reference to bind (TurnIntentRecord.intent_commit_ref).
+
         """
         with self._lock:
             try:

@@ -167,6 +167,22 @@ async def test_gateway_start_workflow_explicit_run_id_in_input_json() -> None:
 
 
 @pytest.mark.asyncio
+async def test_gateway_start_workflow_duplicate_run_id_raises() -> None:
+    """Starting the same run_id twice must fail to prevent state overwrite."""
+    deps = _make_deps()
+    configure_run_actor_dependencies(deps)
+    gw = LocalWorkflowGateway(deps)
+    request = StartRunRequest(
+        run_kind="task",
+        initiator="test",
+        input_json={"run_id": "dup-run"},
+    )
+    await gw.start_workflow(request)
+    with pytest.raises(ValueError, match="duplicate run_id"):
+        await gw.start_workflow(request)
+
+
+@pytest.mark.asyncio
 async def test_gateway_query_projection_returns_run_projection() -> None:
     """query_projection must return a RunProjection for a started run."""
     deps = _make_deps()
@@ -293,6 +309,10 @@ async def test_kernel_runtime_local_substrate_start_stop() -> None:
         assert kernel.gateway is not None
         assert kernel.health is not None
         assert kernel.worker_failed is False
+        assert kernel.facade.get_manifest().substrate_type == "local_fsm"
+        readiness = kernel.facade.get_health_readiness()
+        assert readiness["status"] == "ok"
+        assert "event_log" in readiness["checks"]
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-"""TemporalAdaptor — Temporal integrated as a managed kernel substrate.
+"""TemporalAdaptor 鈥?Temporal integrated as a managed kernel substrate.
 
 Design principles:
   - The kernel *owns* this adaptor's lifecycle.  ``KernelRuntime.start()``
@@ -6,10 +6,10 @@ Design principles:
     ``TemporalAdaptor.stop()``.  Temporal is a managed component, not a
     dependency the kernel passively connects to.
   - Two connection modes are supported via ``TemporalSubstrateConfig.mode``:
-      ``"sdk"``  — connects to an external Temporal cluster via
+      ``"sdk"``  鈥?connects to an external Temporal cluster via
                    ``temporalio.client.Client.connect()``.  Suitable for
                    production deployments with a managed Temporal service.
-      ``"host"`` — starts an embedded Temporal dev-server via
+      ``"host"`` 鈥?starts an embedded Temporal dev-server via
                    ``WorkflowEnvironment.start_local()`` (requires the
                    ``temporalio[testing]`` extra).  Suitable for local
                    development and self-contained single-machine deployments.
@@ -64,7 +64,7 @@ class TemporalSubstrateConfig:
             Used in ``"sdk"`` mode only.
         task_queue: Temporal task queue that kernel workflow workers poll.
         workflow_id_prefix: Prefix prepended to run ids when building
-            Temporal workflow ids (e.g. ``"run"`` → workflow id
+            Temporal workflow ids (e.g. ``"run"`` 鈫?workflow id
             ``"run:<run_id>"``).
         strict_mode_enabled: When ``True``, every workflow turn must carry a
             ``capability_snapshot_input`` and ``declarative_bundle_digest``.
@@ -76,6 +76,7 @@ class TemporalSubstrateConfig:
         host_ui_port: Port for the Temporal Web UI bundled with the
             dev-server.  ``None`` disables the UI.
             Used in ``"host"`` mode only.
+
     """
 
     mode: Literal["sdk", "host"] = "sdk"
@@ -92,7 +93,7 @@ class TemporalSubstrateConfig:
 class TemporalAdaptor:
     """Integrates Temporal as a managed component within the kernel runtime.
 
-    The adaptor encapsulates all Temporal SDK concerns — client connection,
+    The adaptor encapsulates all Temporal SDK concerns 鈥?client connection,
     worker registration, workflow gateway wiring, and (in host mode) the
     embedded dev-server lifecycle.  ``KernelRuntime`` delegates substrate
     operations to this class and never imports ``temporalio`` directly.
@@ -113,11 +114,12 @@ class TemporalAdaptor:
     """
 
     def __init__(self, config: TemporalSubstrateConfig) -> None:
-        """Initialises the adaptor with substrate configuration.
+        """Initialise the adaptor with substrate configuration.
 
         Args:
             config: Temporal substrate configuration controlling connection
                 mode, addressing, and worker settings.
+
         """
         self._config = config
         self._client: Any = None
@@ -137,7 +139,7 @@ class TemporalAdaptor:
         *,
         temporal_client: Any | None = None,
     ) -> None:
-        """Starts the Temporal connection and kernel worker.
+        """Start the Temporal connection and kernel worker.
 
         Acquires a Temporal client (injected, sdk-connected, or host-embedded),
         wires the workflow gateway, and launches the Temporal worker as a
@@ -149,6 +151,7 @@ class TemporalAdaptor:
                 ``mode``, ``address``, and ``namespace`` fields are ignored.
                 Intended for test harnesses that supply a
                 ``WorkflowEnvironment`` client.
+
         """
         if temporal_client is not None:
             self._client = temporal_client
@@ -182,7 +185,7 @@ class TemporalAdaptor:
         )
         self._worker_task.add_done_callback(self._on_worker_done)
         _logger.info(
-            "TemporalAdaptor started — mode=%s task_queue=%s worker_task=%s",
+            "TemporalAdaptor started 鈥?mode=%s task_queue=%s worker_task=%s",
             self._config.mode,
             self._config.task_queue,
             self._worker_task.get_name(),
@@ -196,7 +199,7 @@ class TemporalAdaptor:
         """
         if self._worker_task is not None and not self._worker_task.done():
             _logger.info(
-                "TemporalAdaptor stopping — cancelling worker task %s",
+                "TemporalAdaptor stopping 鈥?cancelling worker task %s",
                 self._worker_task.get_name(),
             )
             self._worker_task.cancel()
@@ -221,6 +224,7 @@ class TemporalAdaptor:
 
         Raises:
             RuntimeError: If accessed before ``start()`` has been called.
+
         """
         if self._gateway_instance is None:
             raise RuntimeError("TemporalAdaptor.gateway accessed before start() was called.")
@@ -232,6 +236,7 @@ class TemporalAdaptor:
 
         Returns:
             bool: Worker failure state.
+
         """
         return (
             self._worker_task is not None
@@ -241,25 +246,27 @@ class TemporalAdaptor:
         )
 
     def add_worker_done_callback(self, callback: Any) -> None:
-        """Registers a callback invoked when the worker background task exits.
+        """Register a callback invoked when the worker background task exits.
 
         Callbacks receive the completed ``asyncio.Task`` as their only
         argument.  Exceptions raised in callbacks are swallowed.
 
         Args:
             callback: Callable that accepts one ``asyncio.Task`` argument.
+
         """
         # Callbacks are stored and dispatched via _on_worker_done, which is the
         # single task done callback.  Do NOT add the user callback directly to
-        # the task — that would fire it twice (once from _on_worker_done and
+        # the task 鈥?that would fire it twice (once from _on_worker_done and
         # once from the direct task callback).
         self._worker_done_callbacks.append(callback)
 
     def check_worker(self) -> None:
-        """Raises the worker exception if the background task has failed.
+        """Raise the worker exception if the background task has failed.
 
         Raises:
             Exception: The exception that caused the worker to exit.
+
         """
         if self.worker_failed:
             raise self._worker_task.exception()  # type: ignore[misc]
@@ -269,13 +276,14 @@ class TemporalAdaptor:
     # ------------------------------------------------------------------
 
     async def _connect_sdk(self) -> Any:
-        """Connects to an external Temporal cluster via the Python SDK.
+        """Connect to an external Temporal cluster via the Python SDK.
 
         Returns:
             Connected ``temporalio.client.Client`` instance.
 
         Raises:
             RuntimeError: If ``temporalio`` is not installed.
+
         """
         try:
             client_module = import_module("temporalio.client")
@@ -289,7 +297,7 @@ class TemporalAdaptor:
         )
 
     async def _connect_host(self) -> tuple[Any, Any]:
-        """Starts an embedded Temporal dev-server and returns ``(client, env)``.
+        """Start an embedded Temporal dev-server and returns ``(client, env)``.
 
         Uses ``WorkflowEnvironment.start_local()`` from the testing extras.
         The dev-server binary is downloaded automatically on first run.
@@ -299,6 +307,7 @@ class TemporalAdaptor:
 
         Raises:
             RuntimeError: If ``temporalio[testing]`` is not installed.
+
         """
         try:
             testing_module = import_module("temporalio.testing")
@@ -316,24 +325,24 @@ class TemporalAdaptor:
             start_kwargs["ui_port"] = self._config.host_ui_port
         env = await testing_module.WorkflowEnvironment.start_local(**start_kwargs)
         _logger.info(
-            "TemporalAdaptor host mode: embedded dev-server started — db=%s",
+            "TemporalAdaptor host mode: embedded dev-server started 鈥?db=%s",
             self._config.host_db_filename or "<ephemeral>",
         )
         return env.client, env
 
     def _on_worker_done(self, task: asyncio.Task[Any]) -> None:
-        """Internal done callback — logs worker exit."""
+        """Handle worker task completion and log exit details."""
         if task.cancelled():
-            _logger.info("TemporalAdaptor worker task cancelled — task=%s", task.get_name())
+            _logger.info("TemporalAdaptor worker task cancelled 鈥?task=%s", task.get_name())
         elif task.exception() is not None:
             _logger.critical(
-                "TemporalAdaptor worker task FAILED — task=%s error=%r",
+                "TemporalAdaptor worker task FAILED 鈥?task=%s error=%r",
                 task.get_name(),
                 task.exception(),
             )
         else:
             _logger.info(
-                "TemporalAdaptor worker task completed cleanly — task=%s",
+                "TemporalAdaptor worker task completed cleanly 鈥?task=%s",
                 task.get_name(),
             )
         for cb in self._worker_done_callbacks:

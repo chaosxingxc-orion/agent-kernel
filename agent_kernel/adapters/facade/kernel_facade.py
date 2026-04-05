@@ -7,8 +7,11 @@ Temporal-specific substrate details.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
+import json
 import threading
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -22,22 +25,28 @@ from agent_kernel.adapters.agent_core.checkpoint_adapter import AgentCoreResumeI
 from agent_kernel.adapters.agent_core.context_adapter import AgentCoreContextInput
 from agent_kernel.kernel.action_type_registry import KERNEL_ACTION_TYPE_REGISTRY
 from agent_kernel.kernel.contracts import (
+    Action,
     ApprovalRequest,
     BranchStateUpdateRequest,
     CancelRunRequest,
+    ConditionalPlan,
+    DependencyGraph,
     ExecutionPlan,
     HumanGateRequest,
     KernelManifest,
     OpenBranchRequest,
+    ParallelPlan,
     PlanSubmissionResponse,
     QueryRunDashboardResponse,
     QueryRunRequest,
     QueryRunResponse,
     ResumeRunRequest,
     RuntimeEvent,
+    SequentialPlan,
     SignalRunRequest,
     SpawnChildRunRequest,
     SpawnChildRunResponse,
+    SpeculativePlan,
     StartRunRequest,
     StartRunResponse,
     TaskViewRecord,
@@ -98,6 +107,7 @@ def _substrate_limitations(substrate_type: str) -> frozenset[str]:
 
     Returns:
         Frozenset of limitation tokens, empty when no limitations apply.
+
     """
     return _SUBSTRATE_LIMITATIONS.get(substrate_type, frozenset())
 
@@ -107,6 +117,7 @@ class KernelFacade:
 
     Args:
         workflow_gateway: Gateway that speaks to the Temporal substrate.
+
     """
 
     def __init__(
@@ -120,8 +131,9 @@ class KernelFacade:
         task_registry: TaskRegistry | None = None,
         task_view_log: Any | None = None,
         dedupe_store: Any | None = None,
+        drain_coordinator: Any | None = None,
     ) -> None:
-        """Initializes facade with substrate gateway and optional adapters.
+        """Initialize facade with substrate gateway and optional adapters.
 
         Args:
             workflow_gateway: Gateway that speaks to the Temporal substrate.
@@ -146,6 +158,9 @@ class KernelFacade:
                 ``get_task_view_by_decision()``.
             dedupe_store: Optional dedupe store for ``get_action_state()``.
                 When ``None``, ``get_action_state()`` always returns ``None``.
+            drain_coordinator: Optional in-flight tracking coordinator used for
+                graceful runtime draining.
+
         """
         self._workflow_gateway = workflow_gateway
         self._context_adapter = context_adapter
@@ -156,11 +171,13 @@ class KernelFacade:
         self._task_registry = task_registry
         self._task_view_log = task_view_log
         self._dedupe_store = dedupe_store
-        # In-memory branch registry: run_id → {branch_id: TraceBranchView}.
+        self._drain_coordinator = drain_coordinator
+        self._draining = False
+        # In-memory branch registry: run_id 鈫?{branch_id: TraceBranchView}.
         # Branch lifecycle events are also forwarded to the workflow as signals.
         self._branch_registry: dict[str, dict[str, TraceBranchView]] = {}
         self._branch_lock = threading.Lock()
-        # In-memory stage registry: run_id → {stage_id: TraceStageView}.
+        # In-memory stage registry: run_id 鈫?{stage_id: TraceStageView}.
         # Stage lifecycle events are also forwarded to the workflow as signals.
         self._stage_registry: dict[str, dict[str, TraceStageView]] = {}
         self._stage_lock = threading.Lock()
@@ -168,15 +185,37 @@ class KernelFacade:
         # that have already been forwarded to the substrate.  Prevents duplicate
         # approval signals from the same facade instance (e.g. accidental double
         # submit from a UI).  Note: this is an in-memory gate scoped to one
-        # facade instance — cross-process dedup lives in the event log.
+        # facade instance 鈥?cross-process dedup lives in the event log.
         self._submitted_approvals: set[tuple[str, str]] = set()
         self._approvals_lock = threading.Lock()
-        # Human gate registry: run_id → set of gate_refs opened via
+        # Human gate registry: run_id 鈫?set of gate_refs opened via
         # open_human_gate().  Used to derive review_state in query_trace_runtime().
         # "_resolved" suffix tracks gate_refs resolved by submit_approval().
         self._open_human_gates: dict[str, set[str]] = {}
         self._resolved_human_gates: dict[str, set[str]] = {}
         self._human_gate_lock = threading.Lock()
+
+    @property
+    def is_draining(self) -> bool:
+        """Return whether facade is rejecting new mutation requests."""
+        return self._draining
+
+    def set_draining(self, draining: bool) -> None:
+        """Set draining mode for mutation request acceptance."""
+        self._draining = draining
+
+    @asynccontextmanager
+    async def _guard_write_operation(self, operation: str) -> Any:
+        """Guard write operations during draining and track in-flight work."""
+        if self._draining:
+            raise RuntimeError(f"Kernel is draining; '{operation}' is temporarily unavailable.")
+        if self._drain_coordinator is not None:
+            await self._drain_coordinator.enter()
+        try:
+            yield
+        finally:
+            if self._drain_coordinator is not None:
+                await self._drain_coordinator.exit()
 
     @staticmethod
     def _build_signal_observability(
@@ -185,7 +224,7 @@ class KernelFacade:
         run_id: str,
         caused_by: str | None,
     ) -> dict[str, str]:
-        """Builds stable observability fields for facade-originated signals.
+        """Build stable observability fields for facade-originated signals.
 
         Args:
             operation: Logical facade operation name emitting the signal.
@@ -194,6 +233,7 @@ class KernelFacade:
 
         Returns:
             A payload fragment with ``correlation_id`` and ``event_ref``.
+
         """
         correlation_id = caused_by or f"{operation}:{run_id}"
         return {
@@ -203,13 +243,14 @@ class KernelFacade:
 
     @staticmethod
     def _build_dashboard_correlation_hint(response: QueryRunResponse) -> str:
-        """Builds a stable dashboard correlation hint from run query output.
+        """Build a stable dashboard correlation hint from run query output.
 
         Args:
             response: Canonical run projection view returned by ``query_run``.
 
         Returns:
             A best-effort hint string for dashboard correlation and grouping.
+
         """
         if response.current_action_id:
             return f"action:{response.current_action_id}"
@@ -223,13 +264,14 @@ class KernelFacade:
         self,
         request: StartRunRequest,
     ) -> StartRunResponse:
-        """Starts one run through the substrate gateway.
+        """Start one run through the substrate gateway.
 
         Args:
             request: Platform-safe run start request.
 
         Returns:
             A facade-safe start response.
+
         """
         request_for_gateway = request
         binding_ref: str | None = None
@@ -269,7 +311,7 @@ class KernelFacade:
         event: RuntimeEvent,
         include_derived_diagnostic: bool,
     ) -> bool:
-        """Returns whether one runtime event is exposed by facade stream contract.
+        """Return whether one runtime event is exposed by facade stream contract.
 
         Contract policy:
           - Always expose authoritative lifecycle facts.
@@ -283,6 +325,7 @@ class KernelFacade:
 
         Returns:
             True when event should be emitted through ``stream_run_events``.
+
         """
         return event.event_authority == "authoritative_fact" or (
             include_derived_diagnostic and event.event_authority == "derived_diagnostic"
@@ -305,6 +348,7 @@ class KernelFacade:
 
         Returns:
             AsyncGenerator[RuntimeEvent]: Async generator of runtime events.
+
         """
         async for event in self._workflow_gateway.stream_run_events(run_id):
             if self._is_stream_event_exposed(
@@ -317,7 +361,7 @@ class KernelFacade:
         self,
         request: CancelRunRequest,
     ) -> None:
-        """Cancels one run through the substrate gateway.
+        """Cancel one run through the substrate gateway.
 
         The facade emits a replayable cancellation intent signal
         before forwarding Temporal workflow cancellation.
@@ -332,6 +376,7 @@ class KernelFacade:
 
         Raises:
             Exception:
+
         """
         await self._workflow_gateway.signal_workflow(
             request.run_id,
@@ -365,7 +410,8 @@ class KernelFacade:
             RuntimeError: If checkpoint adapter is not configured.
 
         Args:
-            request:
+            request: Resume request carrying run and optional snapshot identity.
+
         """
         if self._checkpoint_adapter is None:
             raise RuntimeError("checkpoint_adapter is required for resume_run.")
@@ -408,6 +454,7 @@ class KernelFacade:
             run_id: Target run identifier.
             reason: Human-readable escalation reason.
             caused_by: Optional provenance marker for observability.
+
         """
         await self._workflow_gateway.signal_workflow(
             run_id,
@@ -427,7 +474,7 @@ class KernelFacade:
         )
 
     async def query_run(self, request: QueryRunRequest) -> QueryRunResponse:
-        """Queries one run projection without exposing substrate internals.
+        """Query one run projection without exposing substrate internals.
 
         Args:
             request: Projection query request.
@@ -453,13 +500,14 @@ class KernelFacade:
         )
 
     async def query_run_dashboard(self, run_id: str) -> QueryRunDashboardResponse:
-        """Queries one run and returns a dashboard-friendly read model.
+        """Query one run and returns a dashboard-friendly read model.
 
         Args:
             run_id: Run identifier to query.
 
         Returns:
             A dashboard-oriented read model with aggregation-focused fields.
+
         """
         query_response = await self.query_run(QueryRunRequest(run_id=run_id))
         return QueryRunDashboardResponse(
@@ -474,7 +522,7 @@ class KernelFacade:
         )
 
     async def spawn_child_run(self, request: SpawnChildRunRequest) -> SpawnChildRunResponse:
-        """Creates one child run through the substrate gateway.
+        """Create one child run through the substrate gateway.
 
         Args:
             request: Child run creation request.
@@ -536,7 +584,7 @@ class KernelFacade:
         return "created"
 
     def get_manifest(self) -> KernelManifest:
-        """Returns a frozen capability declaration for this kernel instance.
+        """Return a frozen capability declaration for this kernel instance.
 
         Aggregates ``KERNEL_ACTION_TYPE_REGISTRY``, ``KERNEL_EVENT_REGISTRY``,
         ``KERNEL_RECOVERY_MODE_REGISTRY``, and ``KERNEL_PLAN_TYPE_REGISTRY``
@@ -545,6 +593,7 @@ class KernelFacade:
 
         Returns:
             Immutable ``KernelManifest`` describing kernel capabilities.
+
         """
         return KernelManifest(
             kernel_version=self._kernel_version,
@@ -578,7 +627,7 @@ class KernelFacade:
         run_id: str,
         plan: ExecutionPlan,
     ) -> PlanSubmissionResponse:
-        """Submits a typed ExecutionPlan to an active run.
+        """Submit a typed ExecutionPlan to an active run.
 
         Validates the plan type against ``KERNEL_PLAN_TYPE_REGISTRY`` before
         signalling the workflow.  Unknown plan types are rejected immediately
@@ -590,50 +639,54 @@ class KernelFacade:
 
         Returns:
             ``PlanSubmissionResponse`` indicating acceptance or rejection.
+
         """
-        # Normalise class name → registry key (e.g. ConditionalPlan → conditional)
-        _type_map = {
-            "sequentialplan": "sequential",
-            "parallelplan": "parallel",
-            "conditionalplan": "conditional",
-            "dependencygraph": "dependency_graph",
-            "speculativeplan": "speculative",
-        }
-        plan_type_key = _type_map.get(type(plan).__name__.lower(), type(plan).__name__)
-        descriptor = KERNEL_PLAN_TYPE_REGISTRY.get(plan_type_key)
-        if descriptor is None:
+        async with self._guard_write_operation("submit_plan"):
+            # Normalise class name -> registry key (e.g. ConditionalPlan -> conditional)
+            _type_map = {
+                "sequentialplan": "sequential",
+                "parallelplan": "parallel",
+                "conditionalplan": "conditional",
+                "dependencygraph": "dependency_graph",
+                "speculativeplan": "speculative",
+            }
+            plan_type_key = _type_map.get(type(plan).__name__.lower(), type(plan).__name__)
+            descriptor = KERNEL_PLAN_TYPE_REGISTRY.get(plan_type_key)
+            if descriptor is None:
+                return PlanSubmissionResponse(
+                    run_id=run_id,
+                    plan_type=plan_type_key,
+                    accepted=False,
+                    rejection_reason=(
+                        f"Plan type '{plan_type_key}' is not registered in "
+                        "KERNEL_PLAN_TYPE_REGISTRY."
+                    ),
+                )
+            await self._workflow_gateway.signal_workflow(
+                run_id,
+                SignalRunRequest(
+                    run_id=run_id,
+                    signal_type="plan_submitted",
+                    signal_payload={
+                        "plan_type": plan_type_key,
+                        "plan": _serialize_execution_plan(plan, plan_type=plan_type_key),
+                        **self._build_signal_observability(
+                            operation="submit_plan",
+                            run_id=run_id,
+                            caused_by=None,
+                        ),
+                    },
+                    caused_by=_plan_submission_ref(run_id, plan),
+                ),
+            )
             return PlanSubmissionResponse(
                 run_id=run_id,
                 plan_type=plan_type_key,
-                accepted=False,
-                rejection_reason=(
-                    f"Plan type '{plan_type_key}' is not registered in KERNEL_PLAN_TYPE_REGISTRY."
-                ),
+                accepted=True,
             )
-        await self._workflow_gateway.signal_workflow(
-            run_id,
-            SignalRunRequest(
-                run_id=run_id,
-                signal_type="plan_submitted",
-                signal_payload={
-                    "plan_type": plan_type_key,
-                    **self._build_signal_observability(
-                        operation="submit_plan",
-                        run_id=run_id,
-                        caused_by=None,
-                    ),
-                },
-                caused_by="kernel_facade.submit_plan",
-            ),
-        )
-        return PlanSubmissionResponse(
-            run_id=run_id,
-            plan_type=plan_type_key,
-            accepted=True,
-        )
 
     async def submit_approval(self, request: ApprovalRequest) -> None:
-        """Submits a human actor approval decision for a gated action.
+        """Submit a human actor approval decision for a gated action.
 
         Routes the approval through the standard signal pathway so it is
         recorded as a replayable authoritative fact in the event log.
@@ -644,35 +697,39 @@ class KernelFacade:
 
         Args:
             request: Typed approval request from the human review interface.
+
         """
-        dedup_key = (request.run_id, request.approval_ref)
-        with self._approvals_lock:
-            if dedup_key in self._submitted_approvals:
-                return
-            self._submitted_approvals.add(dedup_key)
-        # Mark the gate as resolved so query_trace_runtime() can derive
-        # review_state = "completed" instead of "pending".
-        with self._human_gate_lock:
-            self._resolved_human_gates.setdefault(request.run_id, set()).add(request.approval_ref)
-        await self._workflow_gateway.signal_workflow(
-            request.run_id,
-            SignalRunRequest(
-                run_id=request.run_id,
-                signal_type="approval_submitted",
-                signal_payload={
-                    "approval_ref": request.approval_ref,
-                    "approved": request.approved,
-                    "reviewer_id": request.reviewer_id,
-                    "reason": request.reason,
-                    **self._build_signal_observability(
-                        operation="submit_approval",
-                        run_id=request.run_id,
-                        caused_by=request.caused_by,
-                    ),
-                },
-                caused_by=request.caused_by or f"approval:{request.approval_ref}",
-            ),
-        )
+        async with self._guard_write_operation("submit_approval"):
+            dedup_key = (request.run_id, request.approval_ref)
+            with self._approvals_lock:
+                if dedup_key in self._submitted_approvals:
+                    return
+                self._submitted_approvals.add(dedup_key)
+            # Mark the gate as resolved so query_trace_runtime() can derive
+            # review_state = "completed" instead of "pending".
+            with self._human_gate_lock:
+                self._resolved_human_gates.setdefault(request.run_id, set()).add(
+                    request.approval_ref
+                )
+            await self._workflow_gateway.signal_workflow(
+                request.run_id,
+                SignalRunRequest(
+                    run_id=request.run_id,
+                    signal_type="approval_submitted",
+                    signal_payload={
+                        "approval_ref": request.approval_ref,
+                        "approved": request.approved,
+                        "reviewer_id": request.reviewer_id,
+                        "reason": request.reason,
+                        **self._build_signal_observability(
+                            operation="submit_approval",
+                            run_id=request.run_id,
+                            caused_by=request.caused_by,
+                        ),
+                    },
+                    caused_by=request.caused_by or f"approval:{request.approval_ref}",
+                ),
+            )
 
     async def commit_speculation(
         self,
@@ -688,6 +745,7 @@ class KernelFacade:
             run_id: The run executing the ``SpeculativePlan``.
             winner_candidate_id: ``candidate_id`` of the winning
                 ``SpeculativeCandidate``.
+
         """
         await self._workflow_gateway.signal_workflow(
             run_id,
@@ -707,7 +765,7 @@ class KernelFacade:
         )
 
     def get_health(self) -> dict[str, Any]:
-        """Returns a liveness health status for this kernel instance.
+        """Return a liveness health status for this kernel instance.
 
         Delegates to the injected ``KernelHealthProbe`` when available.
         Returns a minimal static ``{"status": "ok"}`` payload otherwise,
@@ -716,6 +774,7 @@ class KernelFacade:
 
         Returns:
             Dict with at minimum ``{"status": "ok" | "degraded" | "unhealthy"}``.
+
         """
         if self._health_probe is not None:
             probe_result = getattr(self._health_probe, "liveness", None)
@@ -729,7 +788,7 @@ class KernelFacade:
         return {"status": "ok", "substrate": self._substrate_type}
 
     def get_health_readiness(self) -> dict[str, Any]:
-        """Returns a readiness health status for this kernel instance.
+        """Return a readiness health status for this kernel instance.
 
         Readiness is a stricter gate than liveness: the kernel is ready only
         when all backing stores (event log, dedupe store) are available and
@@ -737,11 +796,12 @@ class KernelFacade:
 
         Delegates to the injected ``KernelHealthProbe.readiness()`` when
         available.  Falls back to the same minimal static response as
-        ``get_health()`` when no probe is injected — callers should treat
+        ``get_health()`` when no probe is injected 鈥?callers should treat
         the absence of a probe as ``"ready"`` for PoC/test environments.
 
         Returns:
             Dict with at minimum ``{"status": "ok" | "degraded" | "unhealthy"}``.
+
         """
         if self._health_probe is not None:
             probe_result = getattr(self._health_probe, "readiness", None)
@@ -755,7 +815,7 @@ class KernelFacade:
         return {"status": "ok", "substrate": self._substrate_type}
 
     def register_task(self, descriptor: TaskDescriptor) -> None:
-        """Registers a new task descriptor in the task registry.
+        """Register a new task descriptor in the task registry.
 
         Convenience wrapper that delegates to the injected ``TaskRegistry``.
         Callers must supply a ``task_registry`` at construction time.
@@ -767,6 +827,7 @@ class KernelFacade:
         Raises:
             RuntimeError: If no ``task_registry`` was provided at construction.
             ValueError: If ``task_id`` is already registered.
+
         """
         if self._task_registry is None:
             raise RuntimeError(
@@ -775,7 +836,7 @@ class KernelFacade:
         self._task_registry.register(descriptor)
 
     def get_task_status(self, task_id: str) -> TaskHealthStatus | None:
-        """Returns the current health snapshot for a task.
+        """Return the current health snapshot for a task.
 
         Delegates to the injected ``TaskRegistry.get_health()``.
 
@@ -787,6 +848,7 @@ class KernelFacade:
 
         Raises:
             RuntimeError: If no ``task_registry`` was provided at construction.
+
         """
         if self._task_registry is None:
             raise RuntimeError(
@@ -795,7 +857,7 @@ class KernelFacade:
         return self._task_registry.get_health(task_id)
 
     def list_session_tasks(self, session_id: str) -> list[TaskDescriptor]:
-        """Returns all task descriptors registered for a session.
+        """Return all task descriptors registered for a session.
 
         Delegates to the injected ``TaskRegistry.list_session_tasks()``.
 
@@ -807,6 +869,7 @@ class KernelFacade:
 
         Raises:
             RuntimeError: If no ``task_registry`` was provided at construction.
+
         """
         if self._task_registry is None:
             raise RuntimeError(
@@ -820,7 +883,7 @@ class KernelFacade:
     # ------------------------------------------------------------------
 
     async def query_trace_runtime(self, run_id: str) -> TraceRuntimeView:
-        """Returns a TRACE-facing aggregated runtime view for one run.
+        """Return a TRACE-facing aggregated runtime view for one run.
 
         Builds a ``TraceRuntimeView`` from the kernel's ``RunProjection`` plus
         the in-memory branch registry.  The branch list reflects calls to
@@ -835,6 +898,7 @@ class KernelFacade:
 
         Raises:
             ValueError: If the run is not found.
+
         """
         import datetime
 
@@ -881,7 +945,7 @@ class KernelFacade:
         )
 
     def record_task_view(self, record: TaskViewRecord) -> str:
-        """Persists a TaskViewRecord to the injected task_view_log store.
+        """Persist a TaskViewRecord to the injected task_view_log store.
 
         Args:
             record: The task view record to persist.
@@ -891,6 +955,7 @@ class KernelFacade:
 
         Raises:
             RuntimeError: If no ``task_view_log`` was provided at construction.
+
         """
         if self._task_view_log is None:
             raise RuntimeError(
@@ -900,7 +965,7 @@ class KernelFacade:
         return record.task_view_id
 
     def get_task_view_record(self, task_view_id: str) -> TaskViewRecord | None:
-        """Returns a TaskViewRecord by its task_view_id.
+        """Return a TaskViewRecord by its task_view_id.
 
         Args:
             task_view_id: Identifier to look up.
@@ -910,6 +975,7 @@ class KernelFacade:
 
         Raises:
             RuntimeError: If no ``task_view_log`` was provided at construction.
+
         """
         if self._task_view_log is None:
             raise RuntimeError(
@@ -919,7 +985,7 @@ class KernelFacade:
         return self._task_view_log.get_by_id(task_view_id)
 
     def get_task_view_by_decision(self, run_id: str, decision_ref: str) -> TaskViewRecord | None:
-        """Returns the latest TaskViewRecord for one run + decision_ref pair.
+        """Return the latest TaskViewRecord for one run + decision_ref pair.
 
         Args:
             run_id: Target run identifier.
@@ -930,6 +996,7 @@ class KernelFacade:
 
         Raises:
             RuntimeError: If no ``task_view_log`` was provided at construction.
+
         """
         if self._task_view_log is None:
             raise RuntimeError(
@@ -950,6 +1017,7 @@ class KernelFacade:
 
         Raises:
             RuntimeError: If no ``task_view_log`` was provided at construction.
+
         """
         if self._task_view_log is None:
             raise RuntimeError(
@@ -959,7 +1027,7 @@ class KernelFacade:
         self._task_view_log.bind_to_decision(task_view_id, decision_ref)
 
     async def open_stage(self, stage_id: str, run_id: str, branch_id: str | None = None) -> None:
-        """Opens a new TRACE stage within a run.
+        """Open a new TRACE stage within a run.
 
         Records the stage in the in-memory stage registry and forwards a
         ``stage_opened`` signal to the workflow for durable event logging.
@@ -968,6 +1036,7 @@ class KernelFacade:
             stage_id: Stage identifier (e.g. ``"route"``, ``"capture"``).
             run_id: Target run identifier.
             branch_id: Optional branch this stage belongs to.
+
         """
         import datetime
 
@@ -998,7 +1067,7 @@ class KernelFacade:
         new_state: TraceStageState,
         failure_code: str | None = None,
     ) -> None:
-        """Updates a stage's lifecycle state.
+        """Update a stage's lifecycle state.
 
         Updates the in-memory stage registry and forwards a
         ``stage_state_updated`` signal to the workflow.
@@ -1011,6 +1080,7 @@ class KernelFacade:
 
         Raises:
             KeyError: If the stage_id is not found for this run.
+
         """
         import dataclasses
         import datetime
@@ -1044,13 +1114,14 @@ class KernelFacade:
         )
 
     async def open_branch(self, request: OpenBranchRequest) -> None:
-        """Opens a new trajectory branch within a run.
+        """Open a new trajectory branch within a run.
 
         Records the branch in the in-memory branch registry and forwards a
         ``branch_opened`` signal to the workflow for durable event logging.
 
         Args:
             request: Branch open request.
+
         """
         import datetime
 
@@ -1079,7 +1150,7 @@ class KernelFacade:
         )
 
     async def mark_branch_state(self, request: BranchStateUpdateRequest) -> None:
-        """Updates a branch's lifecycle state.
+        """Update a branch's lifecycle state.
 
         Updates the in-memory branch registry and forwards a
         ``branch_state_updated`` signal to the workflow.
@@ -1089,6 +1160,7 @@ class KernelFacade:
 
         Raises:
             KeyError: If the branch_id is not found for this run.
+
         """
         with self._branch_lock:
             run_branches = self._branch_registry.get(request.run_id, {})
@@ -1122,7 +1194,7 @@ class KernelFacade:
         )
 
     async def open_human_gate(self, request: HumanGateRequest) -> None:
-        """Opens a human review gate within a run.
+        """Open a human review gate within a run.
 
         Forwards a ``human_gate_opened`` signal to the workflow for durable
         event logging.  The workflow records it as an ``authoritative_fact``
@@ -1130,6 +1202,7 @@ class KernelFacade:
 
         Args:
             request: Human gate open request.
+
         """
         with self._human_gate_lock:
             self._open_human_gates.setdefault(request.run_id, set()).add(request.gate_ref)
@@ -1152,7 +1225,7 @@ class KernelFacade:
         )
 
     def get_action_state(self, dispatch_idempotency_key: str) -> str | None:
-        """Returns the current dedupe state for an action's idempotency key.
+        """Return the current dedupe state for an action's idempotency key.
 
         Args:
             dispatch_idempotency_key: Dispatch idempotency key to look up.
@@ -1161,6 +1234,7 @@ class KernelFacade:
             State string (e.g. ``"reserved"``, ``"dispatched"``,
             ``"acknowledged"``, ``"succeeded"``, ``"unknown_effect"``), or
             ``None`` if the key is unknown or no dedupe_store was injected.
+
         """
         if self._dedupe_store is None:
             return None
@@ -1169,9 +1243,119 @@ class KernelFacade:
 
     @staticmethod
     def _is_expected_cancel_race_error(error: Exception) -> bool:
-        """Returns whether cancel failure is expected due to completion race."""
+        """Return whether cancel failure is expected due to completion race."""
         message = str(error).lower()
         return any(
             token in message
             for token in ("not found", "already completed", "not running", "closed")
         )
+
+
+def _serialize_action(action: Action) -> dict[str, Any]:
+    """Serialize one Action to signal-safe plain JSON."""
+    return {
+        "action_id": action.action_id,
+        "run_id": action.run_id,
+        "action_type": action.action_type,
+        "effect_class": action.effect_class,
+        "external_idempotency_level": action.external_idempotency_level,
+        "interaction_target": action.interaction_target,
+        "input_ref": action.input_ref,
+        "input_json": action.input_json,
+        "policy_tags": list(action.policy_tags),
+        "timeout_ms": action.timeout_ms,
+        "side_effect_class": action.side_effect_class,
+    }
+
+
+def _serialize_execution_plan(
+    plan: ExecutionPlan,
+    *,
+    plan_type: str | None = None,
+) -> dict[str, Any]:
+    """Serialize an ExecutionPlan to a transport payload."""
+    resolved_type = plan_type
+    if resolved_type is None:
+        if isinstance(plan, SequentialPlan):
+            resolved_type = "sequential"
+        elif isinstance(plan, ParallelPlan):
+            resolved_type = "parallel"
+        elif isinstance(plan, ConditionalPlan):
+            resolved_type = "conditional"
+        elif isinstance(plan, DependencyGraph):
+            resolved_type = "dependency_graph"
+        elif isinstance(plan, SpeculativePlan):
+            resolved_type = "speculative"
+        else:
+            raise ValueError(f"Unsupported plan type for serialization: {type(plan).__name__}")
+
+    if isinstance(plan, SequentialPlan):
+        return {
+            "plan_type": resolved_type,
+            "steps": [_serialize_action(step) for step in plan.steps],
+        }
+    if isinstance(plan, ParallelPlan):
+        return {
+            "plan_type": resolved_type,
+            "groups": [
+                {
+                    "actions": [_serialize_action(action) for action in group.actions],
+                    "join_strategy": group.join_strategy,
+                    "n": group.n,
+                    "timeout_ms": group.timeout_ms,
+                    "group_idempotency_key": group.group_idempotency_key,
+                }
+                for group in plan.groups
+            ],
+        }
+    if isinstance(plan, ConditionalPlan):
+        return {
+            "plan_type": resolved_type,
+            "gating_action": _serialize_action(plan.gating_action),
+            "branches": [
+                {
+                    "trigger_outcomes": list(branch.trigger_outcomes),
+                    "plan": _serialize_execution_plan(branch.plan),
+                }
+                for branch in plan.branches
+            ],
+            "default_plan": (
+                _serialize_execution_plan(plan.default_plan)
+                if plan.default_plan is not None
+                else None
+            ),
+        }
+    if isinstance(plan, DependencyGraph):
+        return {
+            "plan_type": resolved_type,
+            "nodes": [
+                {
+                    "node_id": node.node_id,
+                    "action": _serialize_action(node.action),
+                    "depends_on": list(node.depends_on),
+                }
+                for node in plan.nodes
+            ],
+        }
+    if isinstance(plan, SpeculativePlan):
+        return {
+            "plan_type": resolved_type,
+            "candidates": [
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "plan": _serialize_execution_plan(candidate.plan),
+                }
+                for candidate in plan.candidates
+            ],
+            "speculation_timeout_ms": plan.speculation_timeout_ms,
+        }
+    raise ValueError(f"Unsupported plan type for serialization: {type(plan).__name__}")
+
+
+def _plan_submission_ref(run_id: str, plan: ExecutionPlan) -> str:
+    """Build a stable caused_by token for plan submissions."""
+    payload = _serialize_execution_plan(plan)
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:16]
+    return f"kernel_facade.submit_plan:{run_id}:{digest}"

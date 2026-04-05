@@ -15,6 +15,8 @@ _EXPECTED_TASK_EVENTS = {
     "task.restarting",
     "task.reflecting",
     "task.completed",
+    "task.escalated",
+    "task.aborted",
 }
 
 

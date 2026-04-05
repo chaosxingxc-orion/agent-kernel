@@ -34,6 +34,7 @@ class IdempotencyEnvelope:
         peer_operation_id: Optional peer-side operation identifier.
         policy_snapshot_ref: Optional policy snapshot reference.
         rule_bundle_hash: Optional rule bundle hash.
+
     """
 
     dispatch_idempotency_key: str
@@ -58,6 +59,7 @@ class DedupeRecord:
         state: Current monotonic state of the record.
         peer_operation_id: Optional peer-side operation reference.
         external_ack_ref: Optional external acknowledgement reference.
+
     """
 
     dispatch_idempotency_key: str
@@ -76,6 +78,7 @@ class DedupeReservation:
         accepted: Whether the reservation was accepted.
         reason: Discriminator for the reservation outcome.
         existing_record: Existing record when ``reason`` is ``"duplicate"``.
+
     """
 
     accepted: bool
@@ -101,6 +104,7 @@ class DedupeStorePort(Protocol):
 
         Returns:
             Reservation result indicating acceptance or duplicate.
+
         """
 
     def mark_dispatched(
@@ -108,11 +112,12 @@ class DedupeStorePort(Protocol):
         dispatch_idempotency_key: str,
         peer_operation_id: str | None = None,
     ) -> None:
-        """Marks envelope as dispatched.
+        """Mark envelope as dispatched.
 
         Args:
             dispatch_idempotency_key: Key to mark as dispatched.
             peer_operation_id: Optional peer-side operation reference.
+
         """
 
     def mark_acknowledged(
@@ -120,11 +125,12 @@ class DedupeStorePort(Protocol):
         dispatch_idempotency_key: str,
         external_ack_ref: str | None = None,
     ) -> None:
-        """Marks envelope as acknowledged.
+        """Mark envelope as acknowledged.
 
         Args:
             dispatch_idempotency_key: Key to mark as acknowledged.
             external_ack_ref: Optional external acknowledgement reference.
+
         """
 
     def mark_succeeded(
@@ -132,18 +138,20 @@ class DedupeStorePort(Protocol):
         dispatch_idempotency_key: str,
         external_ack_ref: str | None = None,
     ) -> None:
-        """Marks envelope as succeeded — result confirmed and evidence collectible.
+        """Mark envelope as succeeded 鈥?result confirmed and evidence collectible.
 
         Args:
             dispatch_idempotency_key: Key to mark as succeeded.
             external_ack_ref: Optional external acknowledgement reference.
+
         """
 
     def mark_unknown_effect(self, dispatch_idempotency_key: str) -> None:
-        """Marks envelope as unknown effect.
+        """Mark envelope as unknown effect.
 
         Args:
             dispatch_idempotency_key: Key to mark as unknown effect.
+
         """
 
     def reserve_and_dispatch(
@@ -163,16 +171,18 @@ class DedupeStorePort(Protocol):
 
         Returns:
             Reservation result indicating acceptance or duplicate.
+
         """
 
     def get(self, dispatch_idempotency_key: str) -> DedupeRecord | None:
-        """Gets record by idempotency key.
+        """Get record by idempotency key.
 
         Args:
             dispatch_idempotency_key: Key to look up.
 
         Returns:
             Matching dedupe record, or ``None`` if not found.
+
         """
 
 
@@ -190,6 +200,7 @@ class InMemoryDedupeStore:
     """
 
     def __init__(self) -> None:
+        """Initialize the instance with configured dependencies."""
         self._records_by_key: dict[str, DedupeRecord] = {}
 
     def reserve(self, envelope: IdempotencyEnvelope) -> DedupeReservation:
@@ -200,6 +211,7 @@ class InMemoryDedupeStore:
 
         Returns:
             Reservation result with acceptance status.
+
         """
         existing_record = self._records_by_key.get(envelope.dispatch_idempotency_key)
         if existing_record is not None:
@@ -223,7 +235,7 @@ class InMemoryDedupeStore:
         dispatch_idempotency_key: str,
         peer_operation_id: str | None = None,
     ) -> None:
-        """Marks record as dispatched.
+        """Mark record as dispatched.
 
         Args:
             dispatch_idempotency_key: The deduplication key to transition.
@@ -231,6 +243,7 @@ class InMemoryDedupeStore:
 
         Raises:
             DedupeStoreStateError: If key is missing or transition is invalid.
+
         """
         record = self._get_required_record(dispatch_idempotency_key)
         if record.state not in ("reserved", "dispatched"):
@@ -249,7 +262,7 @@ class InMemoryDedupeStore:
         dispatch_idempotency_key: str,
         external_ack_ref: str | None = None,
     ) -> None:
-        """Marks record as acknowledged.
+        """Mark record as acknowledged.
 
         Raises:
             DedupeStoreStateError: If key is missing or transition is invalid.
@@ -257,6 +270,7 @@ class InMemoryDedupeStore:
         Args:
             dispatch_idempotency_key: The deduplication key to look up or transition.
             external_ack_ref: Optional external acknowledgement reference.
+
         """
         record = self._get_required_record(dispatch_idempotency_key)
         if record.state not in ("dispatched", "acknowledged"):
@@ -275,7 +289,7 @@ class InMemoryDedupeStore:
         dispatch_idempotency_key: str,
         external_ack_ref: str | None = None,
     ) -> None:
-        """Marks record as succeeded — result confirmed and evidence collectible.
+        """Mark record as succeeded 鈥?result confirmed and evidence collectible.
 
         Args:
             dispatch_idempotency_key: The deduplication key to transition.
@@ -283,6 +297,7 @@ class InMemoryDedupeStore:
 
         Raises:
             DedupeStoreStateError: If key is missing or transition is invalid.
+
         """
         record = self._get_required_record(dispatch_idempotency_key)
         if record.state not in ("acknowledged", "succeeded"):
@@ -297,13 +312,14 @@ class InMemoryDedupeStore:
         )
 
     def mark_unknown_effect(self, dispatch_idempotency_key: str) -> None:
-        """Marks record as unknown_effect for ambiguous side-effect outcomes.
+        """Mark record as unknown_effect for ambiguous side-effect outcomes.
 
         Args:
             dispatch_idempotency_key: The deduplication key to transition.
 
         Raises:
             DedupeStoreStateError: If key is missing or transition is invalid.
+
         """
         record = self._get_required_record(dispatch_idempotency_key)
         if record.state not in ("dispatched", "unknown_effect"):
@@ -335,6 +351,7 @@ class InMemoryDedupeStore:
 
         Returns:
             Reservation result indicating acceptance or duplicate.
+
         """
         existing_record = self._records_by_key.get(envelope.dispatch_idempotency_key)
         if existing_record is not None:
@@ -354,18 +371,19 @@ class InMemoryDedupeStore:
         return DedupeReservation(accepted=True, reason="accepted")
 
     def get(self, dispatch_idempotency_key: str) -> DedupeRecord | None:
-        """Returns dedupe record by dispatch key.
+        """Return dedupe record by dispatch key.
 
         Args:
             dispatch_idempotency_key: Key to look up.
 
         Returns:
             Matching record, or ``None`` if not found.
+
         """
         return self._records_by_key.get(dispatch_idempotency_key)
 
     def _get_required_record(self, dispatch_idempotency_key: str) -> DedupeRecord:
-        """Gets record or raises state error when key is unknown.
+        """Get record or raises state error when key is unknown.
 
         Args:
             dispatch_idempotency_key: Key to look up.
@@ -375,6 +393,7 @@ class InMemoryDedupeStore:
 
         Raises:
             DedupeStoreStateError: If no record exists for the key.
+
         """
         record = self._records_by_key.get(dispatch_idempotency_key)
         if record is None:

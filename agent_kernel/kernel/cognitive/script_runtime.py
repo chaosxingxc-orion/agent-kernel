@@ -1,9 +1,9 @@
 """ScriptRuntime implementations for Phase 4 (Script Execution Infrastructure).
 
 Provides three concrete runtimes:
-  - EchoScriptRuntime      — PoC/test stub; echoes parameters as JSON.
-  - InProcessPythonScriptRuntime — exec()-based isolated Python; PoC/tests only.
-  - LocalProcessScriptRuntime    — asyncio subprocess with timeout and dead-loop
+  - EchoScriptRuntime      鈥?PoC/test stub; echoes parameters as JSON.
+  - InProcessPythonScriptRuntime 鈥?exec()-based isolated Python; PoC/tests only.
+  - LocalProcessScriptRuntime    鈥?asyncio subprocess with timeout and dead-loop
                                    detection.
 
 WARNING: InProcessPythonScriptRuntime is NOT production-safe.
@@ -37,13 +37,14 @@ class EchoScriptRuntime:
     """
 
     async def execute_script(self, input_value: ScriptActivityInput) -> ScriptResult:
-        """Returns a successful ScriptResult with parameters echoed as JSON.
+        """Return a successful ScriptResult with parameters echoed as JSON.
 
         Args:
             input_value: Script execution payload.
 
         Returns:
             ScriptResult with exit_code=0 and output_json=parameters.
+
         """
         start = time.monotonic()
         serialised = json.dumps(input_value.parameters)
@@ -58,7 +59,7 @@ class EchoScriptRuntime:
         )
 
     async def validate_script(self, script_content: str, host_kind: str) -> bool:
-        """Always returns True for the echo runtime.
+        """Alway returns True for the echo runtime.
 
         Args:
             script_content: Script source (ignored).
@@ -66,6 +67,7 @@ class EchoScriptRuntime:
 
         Returns:
             True unconditionally.
+
         """
         return True
 
@@ -87,21 +89,22 @@ class InProcessPythonScriptRuntime:
     """
 
     def __init__(self, default_timeout_ms: int = 5_000) -> None:
-        """Initialises the runtime with a default timeout.
+        """Initialise the runtime with a default timeout.
 
         Args:
             default_timeout_ms: Default wall-clock timeout in milliseconds.
                 Overridden by ScriptActivityInput.timeout_ms when set.
+
         """
         self._default_timeout_ms = default_timeout_ms
 
     async def execute_script(self, input_value: ScriptActivityInput) -> ScriptResult:
-        """Executes a Python script in an isolated namespace.
+        """Execute a Python script in an isolated namespace.
 
         Runs the script in a daemon thread via a dedicated ThreadPoolExecutor
         so that asyncio.wait_for timeout causes the coroutine to raise
         TimeoutError while the daemon thread is garbage-collected when the
-        process exits — it does not block event loop teardown.
+        process exits 鈥?it does not block event loop teardown.
 
         Args:
             input_value: Script execution payload including script_content and
@@ -110,6 +113,7 @@ class InProcessPythonScriptRuntime:
         Returns:
             ScriptResult with captured stdout/stderr and exit_code.
             ``exit_code=-1`` signals a timeout; no exception is raised.
+
         """
         timeout_ms = input_value.timeout_ms or self._default_timeout_ms
         timeout_s = timeout_ms / 1000.0
@@ -117,7 +121,7 @@ class InProcessPythonScriptRuntime:
 
         # Use a dedicated executor with daemon threads so that a stuck thread
         # does not prevent event-loop shutdown after asyncio.wait_for cancels.
-        # Fresh per-call executor — shutdown(wait=False) abandons the thread
+        # Fresh per-call executor 鈥?shutdown(wait=False) abandons the thread
         # if asyncio.wait_for times out, so it never blocks event-loop teardown.
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         start = time.monotonic()
@@ -153,7 +157,7 @@ class InProcessPythonScriptRuntime:
         parameters: dict[str, Any],
         timeout_ms: int,
     ) -> ScriptResult:
-        """Synchronous execution body delegated to daemon thread pool.
+        """Synchronou execution body delegated to daemon thread pool.
 
         Args:
             script_id: Script identifier for the result.
@@ -164,6 +168,7 @@ class InProcessPythonScriptRuntime:
 
         Returns:
             ScriptResult from the executed script.
+
         """
         stdout_buf = io.StringIO()
         stderr_buf = io.StringIO()
@@ -195,7 +200,7 @@ class InProcessPythonScriptRuntime:
         )
 
     async def validate_script(self, script_content: str, host_kind: str) -> bool:
-        """Validates that the script_content is syntactically valid Python.
+        """Validate that the script_content is syntactically valid Python.
 
         Args:
             script_content: Python source to validate.
@@ -203,6 +208,7 @@ class InProcessPythonScriptRuntime:
 
         Returns:
             True when the source compiles without SyntaxError.
+
         """
         if host_kind != "in_process_python":
             return False
@@ -221,20 +227,21 @@ class LocalProcessScriptRuntime:
     ``exit_code=-1`` is returned.  Callers can check ``result.exit_code == -1``
     to detect timeout and build ``ScriptFailureEvidence`` accordingly.
 
-    Dead-loop detection: timeout + empty stdout → ``suspected_cause`` set to
+    Dead-loop detection: timeout + empty stdout 鈫?``suspected_cause`` set to
     ``"possible_infinite_loop"`` in caller-constructed evidence.
     """
 
     def __init__(self, shell: str | None = None) -> None:
-        """Initialises the runtime.
+        """Initialise the runtime.
 
         Args:
             shell: Optional shell binary to use (default: platform shell).
+
         """
         self._shell = shell
 
     async def execute_script(self, input_value: ScriptActivityInput) -> ScriptResult:
-        """Executes a script in a subprocess and returns the result.
+        """Execute a script in a subprocess and returns the result.
 
         On timeout, the subprocess is killed and a ``ScriptResult`` with
         ``exit_code=-1`` is returned instead of raising.  Callers can detect
@@ -247,6 +254,7 @@ class LocalProcessScriptRuntime:
         Returns:
             ScriptResult with exit_code, stdout, stderr, and execution_ms.
             ``exit_code=-1`` signals a timeout.
+
         """
         timeout_s = input_value.timeout_ms / 1000.0
         start = time.monotonic()
@@ -307,7 +315,7 @@ class LocalProcessScriptRuntime:
         )
 
     async def validate_script(self, script_content: str, host_kind: str) -> bool:
-        """Always returns True for subprocess-based runtimes.
+        """Alway returns True for subprocess-based runtimes.
 
         Real validation would require a dry-run or static analysis pass.
         For the PoC, structural validation is deferred to the executor.
@@ -318,6 +326,7 @@ class LocalProcessScriptRuntime:
 
         Returns:
             True when script_content is non-empty.
+
         """
         return bool(script_content.strip())
 
@@ -344,18 +353,19 @@ class DedupeAwareScriptRuntime:
     """
 
     def __init__(self, inner: Any, dedupe_store: Any) -> None:
-        """Initialises the wrapper with an inner runtime and a dedupe store.
+        """Initialise the wrapper with an inner runtime and a dedupe store.
 
         Args:
             inner: Any object implementing ``execute_script(input_value)``.
             dedupe_store: A ``DedupeStorePort`` implementation for
                 at-most-once tracking.
+
         """
         self._inner = inner
         self._dedupe_store = dedupe_store
 
     async def execute_script(self, input_value: ScriptActivityInput) -> ScriptResult:
-        """Executes the script with at-most-once DedupeStore protection.
+        """Execute the script with at-most-once DedupeStore protection.
 
         Args:
             input_value: Script execution request payload.
@@ -367,6 +377,7 @@ class DedupeAwareScriptRuntime:
 
         Raises:
             Exception:
+
         """
         idempotency_key = (
             f"script:{input_value.run_id}:{input_value.action_id}:{input_value.script_id}"
@@ -381,7 +392,7 @@ class DedupeAwareScriptRuntime:
         )
         reservation = self._dedupe_store.reserve(envelope)
         if not reservation.accepted:
-            # Already dispatched — return noop result rather than re-running.
+            # Already dispatched 鈥?return noop result rather than re-running.
             return ScriptResult(
                 script_id=input_value.script_id,
                 exit_code=0,

@@ -17,6 +17,7 @@ from agent_kernel.kernel.dedupe_store import (
     IdempotencyEnvelope,
     InMemoryDedupeStore,
 )
+from agent_kernel.kernel.idempotency_key_policy import IdempotencyKeyPolicy
 from agent_kernel.kernel.turn_engine import (
     TurnEngine,
     TurnInput,
@@ -203,9 +204,15 @@ def test_turn_engine_blocks_when_admission_denies() -> None:
 
 def test_turn_engine_blocks_duplicate_dedupe_key_before_dispatch() -> None:
     """Dedupe duplicate should short-circuit dispatch path."""
+    action = _build_action()
     dedupe_store = InMemoryDedupeStore()
+    dedupe_key = IdempotencyKeyPolicy.generate(
+        run_id="run-1",
+        action=action,
+        snapshot_hash="hash-1",
+    )
     envelope = IdempotencyEnvelope(
-        dispatch_idempotency_key="run-1:action-1:10",
+        dispatch_idempotency_key=dedupe_key,
         operation_fingerprint="fp-1",
         attempt_seq=1,
         effect_scope="workspace.write",
@@ -220,7 +227,7 @@ def test_turn_engine_blocks_duplicate_dedupe_key_before_dispatch() -> None:
         dedupe_store=dedupe_store,
         executor=_StubExecutor(result={"acknowledged": True}),
     )
-    result = asyncio.run(turn_engine.run_turn(_build_turn_input(), _build_action()))
+    result = asyncio.run(turn_engine.run_turn(_build_turn_input(), action))
 
     assert result.state == "dispatch_blocked"
     assert result.outcome_kind == "blocked"
@@ -241,7 +248,8 @@ def test_turn_engine_returns_dispatched_when_executor_acknowledged() -> None:
     assert result.state == "dispatch_acknowledged"
     assert result.outcome_kind == "dispatched"
     assert admission.calls == 1
-    assert result.dispatch_dedupe_key == "run-1:action-1:10"
+    assert result.dispatch_dedupe_key is not None
+    assert result.dispatch_dedupe_key.startswith("dispatch:run-1:action-1:")
     assert result.intent_commit_ref != ""
     assert [event.state for event in result.emitted_events] == [
         "collecting",

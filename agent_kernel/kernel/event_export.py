@@ -13,11 +13,11 @@ never blocks kernel execution.
 
 Components
 ----------
-- ``EventExportingEventLog`` — decorator that wraps any ``KernelRuntimeEventLog``
+- ``EventExportingEventLog`` 鈥?decorator that wraps any ``KernelRuntimeEventLog``
   and fires async export after each successful ``append_action_commit``.
-- ``TurnTrace`` / ``RunTrace`` — structured evolution view of one turn / run,
+- ``TurnTrace`` / ``RunTrace`` 鈥?structured evolution view of one turn / run,
   assembled from exported ``ActionCommit`` objects.
-- ``InMemoryRunTraceStore`` — reference ``EventExportPort`` implementation for
+- ``InMemoryRunTraceStore`` 鈥?reference ``EventExportPort`` implementation for
   development and integration tests.  Not for production at scale.
 """
 
@@ -25,11 +25,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from agent_kernel.kernel.contracts import ActionCommit, EventExportPort, RuntimeEvent
+    from agent_kernel.kernel.persistence.event_schema_migration import EventSchemaMigrator
 
 _export_logger = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ class EventExportingEventLog:
         export_port: Platform-owned export sink.
         export_timeout_ms: Per-export soft timeout in milliseconds.
             Exports that exceed this are cancelled and logged.  Default 5 s.
+
     """
 
     def __init__(
@@ -72,36 +74,64 @@ class EventExportingEventLog:
         export_port: EventExportPort,
         *,
         export_timeout_ms: int = 5000,
+        event_schema_migrator: EventSchemaMigrator | None = None,
+        target_event_schema_version: str | None = None,
     ) -> None:
+        """Initialize the instance with configured dependencies."""
         self._inner = inner
         self._export_port = export_port
         self._export_timeout_s = export_timeout_ms / 1000.0
         self._background_tasks: set[asyncio.Task] = set()  # prevents GC of fire-and-forget tasks
+        self._event_schema_migrator = event_schema_migrator
+        self._target_event_schema_version = target_event_schema_version
 
     async def append_action_commit(self, commit: ActionCommit) -> str:
-        """Appends commit to inner log then fires async export.
+        """Append commit to inner log then fires async export.
 
         Args:
             commit: Commit to append.
 
         Returns:
             Commit reference from the inner log.
+
         """
         commit_ref: str = await self._inner.append_action_commit(commit)
+        export_commit = self._maybe_migrate_commit(commit)
         task = asyncio.create_task(
-            self._safe_export(commit),
+            self._safe_export(export_commit),
             name=f"kernel-export:{commit.run_id}:{commit.commit_id}",
         )
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
         return commit_ref
 
+    async def close(self) -> None:
+        """Cancel export tasks and close inner event log.
+
+        The runtime invokes ``close()`` during shutdown through an async-aware
+        resource closer. This method therefore awaits cancelled export tasks
+        and also awaits ``inner.close()`` when the wrapped log exposes an async
+        close method.
+        """
+        pending = [task for task in self._background_tasks if not task.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        self._background_tasks.clear()
+
+        close_fn = getattr(self._inner, "close", None)
+        if callable(close_fn):
+            maybe_result = close_fn()
+            if asyncio.iscoroutine(maybe_result):
+                await maybe_result
+
     async def load(
         self,
         run_id: str,
         after_offset: int = 0,
     ) -> list[RuntimeEvent]:
-        """Delegates load to the inner log unchanged.
+        """Delegate load to the inner log unchanged.
 
         Args:
             run_id: Run identifier.
@@ -109,14 +139,16 @@ class EventExportingEventLog:
 
         Returns:
             Ordered list of runtime events.
+
         """
         return await self._inner.load(run_id, after_offset=after_offset)
 
     async def _safe_export(self, commit: ActionCommit) -> None:
-        """Exports one commit with timeout and exception isolation.
+        """Export one commit with timeout and exception isolation.
 
         Args:
             commit: Commit to export to the platform store.
+
         """
         try:
             await asyncio.wait_for(
@@ -137,6 +169,18 @@ class EventExportingEventLog:
                 commit.commit_id,
                 exc,
             )
+
+    def _maybe_migrate_commit(self, commit: ActionCommit) -> ActionCommit:
+        """Migrate commit events for export when migrator is configured."""
+        if self._event_schema_migrator is None:
+            return commit
+        if self._target_event_schema_version is None:
+            return commit
+        migrated_events = self._event_schema_migrator.migrate_batch(
+            list(commit.events),
+            target_version=self._target_event_schema_version,
+        )
+        return replace(commit, events=migrated_events)
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +206,9 @@ class TurnTrace:
         recovery_mode: Recovery mode when ``outcome_kind`` is
             ``recovery_pending``, otherwise ``None``.
         turn_event_types: Ordered list of ``event_type`` strings emitted
-            for this turn — the full FSM trace.
+            for this turn 鈥?the full FSM trace.
         committed_at: RFC3339 UTC timestamp of the commit.
+
     """
 
     action_id: str
@@ -196,6 +241,7 @@ class RunTrace:
             otherwise ``None``.
         first_commit_at: RFC3339 timestamp of the first commit received.
         last_commit_at: RFC3339 timestamp of the most recent commit received.
+
     """
 
     run_id: str
@@ -208,10 +254,11 @@ class RunTrace:
     last_commit_at: str | None = None
 
     def absorb(self, commit: ActionCommit) -> None:
-        """Merges one exported commit into this trace.
+        """Merge one exported commit into this trace.
 
         Args:
             commit: The ``ActionCommit`` to absorb.
+
         """
         if self.first_commit_at is None:
             self.first_commit_at = commit.created_at
@@ -248,7 +295,7 @@ class InMemoryRunTraceStore:
 
     Implements ``EventExportPort``.  Suitable for development, integration
     tests, and single-process observability dashboards.  Not intended for
-    production at scale — use a durable streaming backend instead
+    production at scale 鈥?use a durable streaming backend instead
     (e.g. Kafka, Redis Streams, S3).
 
     Usage::
@@ -263,6 +310,7 @@ class InMemoryRunTraceStore:
     """
 
     def __init__(self) -> None:
+        """Initialize the instance with configured dependencies."""
         self._traces: dict[str, RunTrace] = {}
 
     async def export_commit(self, commit: ActionCommit) -> None:
@@ -270,43 +318,48 @@ class InMemoryRunTraceStore:
 
         Args:
             commit: The kernel ``ActionCommit`` to process.
+
         """
         if commit.run_id not in self._traces:
             self._traces[commit.run_id] = RunTrace(run_id=commit.run_id)
         self._traces[commit.run_id].absorb(commit)
 
     def get(self, run_id: str) -> RunTrace | None:
-        """Returns the accumulated trace for one run, or ``None``.
+        """Return the accumulated trace for one run, or ``None``.
 
         Args:
             run_id: Run identifier to look up.
 
         Returns:
             Accumulated ``RunTrace``, or ``None`` when no commits received.
+
         """
         return self._traces.get(run_id)
 
     def all(self) -> list[RunTrace]:
-        """Returns all accumulated traces sorted by run_id.
+        """Return all accumulated traces sorted by run_id.
 
         Returns:
             Sorted list of all ``RunTrace`` objects.
+
         """
         return sorted(self._traces.values(), key=lambda t: t.run_id)
 
     def terminal_runs(self) -> list[RunTrace]:
-        """Returns only traces where a terminal event was observed.
+        """Return only traces where a terminal event was observed.
 
         Returns:
             List of ``RunTrace`` objects with ``is_terminal=True``.
+
         """
         return [t for t in self._traces.values() if t.is_terminal]
 
     def failed_runs(self) -> list[RunTrace]:
-        """Returns traces that had at least one recovery_pending turn.
+        """Return traces that had at least one recovery_pending turn.
 
         Returns:
             List of ``RunTrace`` objects with ``failure_count > 0``.
+
         """
         return [t for t in self._traces.values() if t.failure_count > 0]
 
@@ -317,7 +370,7 @@ class InMemoryRunTraceStore:
 
 
 def _build_turn_trace(commit: ActionCommit, event_types: list[str]) -> TurnTrace:
-    """Builds one ``TurnTrace`` from a commit that carries an action.
+    """Build one ``TurnTrace`` from a commit that carries an action.
 
     Args:
         commit: Action commit with a non-None ``action``.
@@ -325,6 +378,7 @@ def _build_turn_trace(commit: ActionCommit, event_types: list[str]) -> TurnTrace
 
     Returns:
         Structured turn trace for the dispatched action.
+
     """
     action = commit.action
     assert action is not None  # guaranteed by caller
@@ -348,7 +402,7 @@ def _build_turn_trace(commit: ActionCommit, event_types: list[str]) -> TurnTrace
 
 
 def _infer_outcome_kind(event_types: list[str]) -> str | None:
-    """Derives macro outcome from ordered event type list.
+    """Derive macro outcome from ordered event type list.
 
     Priority: recovery_pending > dispatched > blocked > noop.
 
@@ -357,6 +411,7 @@ def _infer_outcome_kind(event_types: list[str]) -> str | None:
 
     Returns:
         Outcome kind string or ``None`` when undetermined.
+
     """
     if "turn.recovery_pending" in event_types or "turn.effect_unknown" in event_types:
         return "recovery_pending"
@@ -376,22 +431,23 @@ def _infer_outcome_kind(event_types: list[str]) -> str | None:
 def _infer_dedupe_outcome(event_types: list[str]) -> str | None:
     """Infers DedupeStore reservation outcome from turn event types.
 
-    ``turn.dispatched`` present → ``"accepted"`` (or ``"degraded"`` when
+    ``turn.dispatched`` present 鈫?``"accepted"`` (or ``"degraded"`` when
     ``turn.dedupe_degraded`` is also present).  ``turn.dispatch_blocked``
-    without a prior ``turn.dispatched`` → ``"duplicate"``.  Otherwise ``None``.
+    without a prior ``turn.dispatched`` 鈫?``"duplicate"``.  Otherwise ``None``.
 
     Args:
         event_types: Ordered event_type strings for the turn.
 
     Returns:
         Dedupe outcome string or ``None`` when not determinable.
+
     """
     if "turn.dispatched" in event_types:
         if "turn.dedupe_degraded" in event_types:
             return "degraded"
         return "accepted"
     if "turn.dispatch_blocked" in event_types:
-        # Blocked before dispatch → treated as duplicate reservation.
+        # Blocked before dispatch 鈫?treated as duplicate reservation.
         return "duplicate"
     return None
 
@@ -400,7 +456,7 @@ def _infer_recovery_mode(
     event_types: list[str],
     events: list[RuntimeEvent],
 ) -> str | None:
-    """Extracts recovery mode from ``recovery.plan_selected`` payload if present.
+    """Extract recovery mode from ``recovery.plan_selected`` payload if present.
 
     Falls back to inferring from lifecycle event type when the diagnostic event
     is absent (e.g. in legacy commits written before the plan_selected event
@@ -412,6 +468,7 @@ def _infer_recovery_mode(
 
     Returns:
         Recovery mode string or ``None`` when not a recovery turn.
+
     """
     # Prefer the structured diagnostic event payload
     for event in events:
@@ -431,13 +488,14 @@ def _infer_recovery_mode(
 
 
 def _infer_host_kind(events: list[RuntimeEvent]) -> str | None:
-    """Extracts host_kind from turn outcome payload when present.
+    """Extract host_kind from turn outcome payload when present.
 
     Args:
         events: Full list of ``RuntimeEvent`` objects from the commit.
 
     Returns:
         ``host_kind`` string or ``None`` when not recorded.
+
     """
     for event in events:
         if event.event_type in (

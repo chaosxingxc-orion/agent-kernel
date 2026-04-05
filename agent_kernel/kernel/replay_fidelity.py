@@ -27,6 +27,7 @@ class TurnFidelityRecord:
             when the turn was dispatched.  ``None`` for noop outcomes.
         dedupe_state: DedupeRecord state string after the turn, or None.
         event_count: Number of events in the event log for the run after the turn.
+
     """
 
     outcome_kind: str
@@ -43,6 +44,7 @@ class FidelityReport:
         run_id: Run identifier shared by both turns.
         original: Record captured from the original turn execution.
         replay: Record captured from the replay turn execution.
+
     """
 
     run_id: str
@@ -52,8 +54,10 @@ class FidelityReport:
     @property
     def snapshot_hash_matches(self) -> bool:
         """True when both runs produced the same capability snapshot hash.
+
         Returns:
             bool: ``True`` if the check passes, ``False`` otherwise.
+
         """
         return self.original.snapshot_hash == self.replay.snapshot_hash
 
@@ -63,6 +67,7 @@ class FidelityReport:
 
         Returns:
             ``True`` when replay is fully idempotent relative to the original.
+
         """
         return self.snapshot_hash_matches and self.replay.event_count == self.original.event_count
 
@@ -70,8 +75,8 @@ class FidelityReport:
 class ReplayFidelityVerifier:
     """Verifies TurnEngine replay determinism.
 
-    Runs a turn twice — once on ``engine`` (original) and once on
-    ``replay_engine`` (simulated worker restart) — then compares the
+    Runs a turn twice 鈥?once on ``engine`` (original) and once on
+    ``replay_engine`` (simulated worker restart) 鈥?then compares the
     resulting capability snapshot hashes and event counts.
 
     Usage::
@@ -97,7 +102,7 @@ class ReplayFidelityVerifier:
         dedupe_store: Any,
         event_log: Any,
     ) -> FidelityReport:
-        """Runs one turn twice and returns a fidelity comparison report.
+        """Run one turn twice and returns a fidelity comparison report.
 
         The ``snapshot_hash`` field of each ``TurnFidelityRecord`` is
         populated from the ``decision_fingerprint`` of the TurnResult, which
@@ -117,6 +122,7 @@ class ReplayFidelityVerifier:
 
         Returns:
             FidelityReport comparing original and replay turn outcomes.
+
         """
         original_result = await engine.run_turn(turn_input, action=action)
         original_record = await self._capture(
@@ -150,7 +156,7 @@ class ReplayFidelityVerifier:
         dedupe_store: Any,
         event_log: Any,
     ) -> TurnFidelityRecord:
-        """Captures fidelity state after one turn result.
+        """Capture fidelity state after one turn result.
 
         ``snapshot_hash`` is resolved from the best available source:
 
@@ -171,6 +177,7 @@ class ReplayFidelityVerifier:
 
         Returns:
             Populated TurnFidelityRecord.
+
         """
         outcome_kind: str = getattr(result, "outcome_kind", "")
 
@@ -180,7 +187,7 @@ class ReplayFidelityVerifier:
         # directly.  The action_commit["execution_context"]["capability_snapshot_hash"]
         # is only present for dispatched outcomes, so using it for the original
         # run and decision_fingerprint for blocked replays would cause a false
-        # mismatch.  Instead we use decision_fingerprint uniformly — it is
+        # mismatch.  Instead we use decision_fingerprint uniformly 鈥?it is
         # derived from (run_id, trigger_type, action_id, based_on_offset) and
         # is therefore identical for original and replay of the same turn,
         # correctly encoding the "snapshot determinism" invariant we are
@@ -190,7 +197,7 @@ class ReplayFidelityVerifier:
         if outcome_kind != "noop":
             snapshot_hash = getattr(result, "decision_fingerprint", None)
 
-        # Dedupe state — construct key and query the store.
+        # Dedupe state 鈥?construct key and query the store.
         dedupe_state: str | None = None
         try:
             ti = _build_turn_identity(input_value=turn_input, action=action)

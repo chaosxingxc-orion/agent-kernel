@@ -1,9 +1,9 @@
-﻿# INTERFACES
+# INTERFACES
 
-本文档是 `agent-kernel` 当前实现的接口契约说明，按“调用边界 -> API 簇 -> DTO -> 信号/事件语义”组织。
+本文档是 `agent-kernel` 当前实现的接口契约说明，按"调用边界 -> API 簇 -> DTO -> 信号/事件语义"组织。
 
 阅读建议：
-- 如果你只想“把系统接起来”，先看第 2、3、7 节。
+- 如果你只想"把系统接起来"，先看第 2、3、7 节。
 - 如果你在补平台能力发现或治理面板，重点看第 3.3、4、6、8 节。
 - 如果你在排查状态异常，先回到 [ARCHITECTURE.md](./ARCHITECTURE.md) 看 lifecycle 和调用链。
 
@@ -86,7 +86,7 @@ graph LR
 | `cancel_run` | `CancelRunRequest` | `None` | 先写 `cancel_requested` 信号，再调用 cancel_workflow |
 | `resume_run` | `ResumeRunRequest` | `None` | 从 checkpoint 恢复，转为 `resume_from_snapshot` 信号 |
 | `escalate_recovery` | `run_id, reason, caused_by?` | `None` | 人工恢复升级信号 |
-| `query_run` | `QueryRunRequest` | `QueryRunResponse` | 查询 run 投影视图 |
+| `query_run` | `QueryRunRequest` | `QueryRunResponse` | 查询 run 投影视图；响应包含 `policy_versions: RunPolicyVersions \| None` |
 | `query_run_dashboard` | `run_id` | `QueryRunDashboardResponse` | dashboard 友好聚合视图 |
 
 这组 API 是平台最核心的一层：
@@ -118,6 +118,11 @@ graph LR
 | `get_health` | - | `dict` | liveness |
 | `get_health_readiness` | - | `dict` | readiness |
 
+`KernelManifest` 关键字段说明：
+- `trace_protocol_version: str`：当前固定为 `"1.2.1"`，声明内核实现的 TRACE 协议版本；平台可用于特性协商和兼容性判断。
+- `supported_trace_features: frozenset[str]`：声明已启用的 TRACE 能力集合，例如 `branch_protocol`、`task_view_record`、`policy_version_pinning` 等；平台启动时应缓存此字段做功能开关判断。
+- `capability_snapshot_schema_version: str`：当前为 `"2"`，标识 CapabilitySnapshot 的 schema 版本，影响 peer_run_bindings 字段的可用性。
+
 建议平台启动时做两件事：
 - 先调一次 `get_manifest()`，把能力缓存下来。
 - 再接入健康检查，把 `liveness` 和 `readiness` 分开看。
@@ -129,7 +134,7 @@ graph LR
 | `register_task` | `TaskDescriptor` | `None` | 注册任务 |
 | `get_task_status` | `task_id` | `TaskHealthStatus \| None` | 查询任务健康 |
 | `list_session_tasks` | `session_id` | `list[TaskDescriptor]` | 查询会话任务 |
-| `query_trace_runtime` | `run_id` | `TraceRuntimeView` | 聚合 run/branch/stage/review 状态 |
+| `query_trace_runtime` | `run_id` | `TraceRuntimeView` | 聚合 run/branch/stage/review 状态；响应中 `review_state: TraceReviewState` 从当前 open/resolved 的 human_gate 推导，`policy_versions: RunPolicyVersions \| None` 包含 run 创建时固化的策略版本 |
 | `record_task_view` | `TaskViewRecord` | `str` | 记录 task_view |
 | `get_task_view_record` | `task_view_id` | `TaskViewRecord \| None` | 按 id 查 task_view |
 | `get_task_view_by_decision` | `run_id, decision_ref` | `TaskViewRecord \| None` | 按 decision_ref 查 task_view |
@@ -173,7 +178,7 @@ graph LR
 - `SignalRunRequest`
 - `CancelRunRequest`
 - `ResumeRunRequest`
-- `QueryRunRequest` / `QueryRunResponse`
+- `QueryRunRequest` / `QueryRunResponse`（含 `policy_versions: RunPolicyVersions | None`）
 - `QueryRunDashboardResponse`
 - `SpawnChildRunRequest` / `SpawnChildRunResponse`
 
@@ -188,14 +193,16 @@ graph LR
 ### 5.3 协作与能力 DTO
 - `ApprovalRequest`
 - `PlanSubmissionResponse`
-- `KernelManifest`
+- `KernelManifest`（含 `trace_protocol_version`、`supported_trace_features`）
 
 ### 5.4 Trace / Task DTO
-- `TraceRuntimeView` / `TraceBranchView` / `TraceStageView`
+- `TraceRuntimeView`（含 `review_state: TraceReviewState`、`policy_versions: RunPolicyVersions | None`）
+- `TraceBranchView` / `TraceStageView`
 - `TaskViewRecord`
 - `OpenBranchRequest`
 - `BranchStateUpdateRequest`
 - `HumanGateRequest`
+- `RunPolicyVersions`（TRACE v1.2.1 新增，记录 run 创建时固化的策略版本信息）
 
 ### 5.5 Lifecycle 状态字面量
 
@@ -208,6 +215,105 @@ graph LR
 - `recovering`
 - `completed`
 - `aborted`
+
+### 5.6 TaskManager 类型
+
+路径：`agent_kernel/kernel/task_manager/contracts.py`
+
+**TaskLifecycleState**（任务级生命周期，与 RunLifecycleState 平行但独立）：
+
+| 值 | 含义 |
+|---|---|
+| `pending` | 已注册，尚未有 run 执行 |
+| `running` | 有活跃 run 正在执行当前 attempt |
+| `completed` | 目标达成，终态 |
+| `failed` | 当前 attempt 失败，重试预算仍有余量 |
+| `restarting` | RestartPolicyEngine 决定重试，新 run 正在启动 |
+| `reflecting` | 重试预算耗尽，ReflectionOrchestrator 正向模型发反思请求 |
+| `escalated` | 移交人工操作员，终态 |
+| `aborted` | 预算耗尽且未配置反思，终止，终态 |
+
+**TaskDescriptor** — 任务稳定身份与策略（注册一次，不可变）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `task_id` | `str` | 唯一稳定标识符（推荐 UUID），跨 attempt 不变 |
+| `session_id` | `str` | 所属 session |
+| `task_kind` | `"root" \| "plan_step" \| "parallel_branch" \| "speculative_candidate"` | 任务在计划中的结构角色 |
+| `goal_description` | `str` | 任务目标描述，供 ReflectionBridge 构建 LLM 上下文 |
+| `parent_task_id` | `str \| None` | 父任务 id，用于层级计划 |
+| `dependency_task_ids` | `tuple[str, ...]` | 前置任务 id 列表（DependencyGraph 场景） |
+| `restart_policy` | `TaskRestartPolicy` | 重试与耗尽策略 |
+| `metadata` | `dict[str, Any]` | 调用方自定义 KV 元数据 |
+
+**TaskRestartPolicy** — 重试配置：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `max_attempts` | `int` | `3` | 最大 attempt 次数（含首次） |
+| `backoff_base_ms` | `int` | `2000` | 重试等待基数（ms），实际延迟 = base × attempt_seq（线性退避） |
+| `on_exhausted` | `"reflect" \| "escalate" \| "abort"` | `"reflect"` | 重试预算耗尽时的处置策略 |
+| `heartbeat_timeout_ms` | `int` | `300000` | 心跳超时阈值（5 分钟），超过则 TaskWatchdog 判定为 stalled |
+
+**TaskAttempt** — 单次执行记录：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `attempt_id` | `str` | 本次 attempt 唯一标识 |
+| `task_id` | `str` | 所属 task |
+| `run_id` | `str` | 执行本次 attempt 的 kernel run id |
+| `attempt_seq` | `int` | 从 1 开始的序号 |
+| `started_at` | `str` | ISO-8601 UTC 开始时间 |
+| `completed_at` | `str \| None` | 结束时间，运行中为 None |
+| `outcome` | `"completed" \| "failed" \| "cancelled" \| None` | 终态结果 |
+| `failure` | `Any \| None` | 失败时的 FailureEnvelope |
+| `reflection_output` | `str \| None` | 反思驱动启动时的模型决策文本 |
+
+**TaskHealthStatus** — 任务健康快照（`get_task_status` 响应）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `task_id` | `str` | 任务标识 |
+| `lifecycle_state` | `TaskLifecycleState` | 当前生命周期状态 |
+| `current_run_id` | `str \| None` | 活跃 attempt 的 run id |
+| `attempt_seq` | `int` | 当前 attempt 序号 |
+| `max_attempts` | `int` | 策略允许的最大 attempt 数 |
+| `last_heartbeat_ms` | `int \| None` | 最近一次活动的 epoch 毫秒 |
+| `consecutive_missed_beats` | `int` | Watchdog 连续未检测到活动的次数 |
+| `is_stalled` | `bool` | Watchdog 判定是否超时僵尸 |
+
+### 5.7 DedupeStore 协议
+
+路径：`agent_kernel/kernel/dedupe_store.py`
+
+**DedupeState 值与状态转移**：
+
+```
+reserved → dispatched → acknowledged → succeeded
+                     └→ unknown_effect
+```
+
+| 值 | 含义 |
+|---|---|
+| `reserved` | 幂等 key 已占位，尚未发出 |
+| `dispatched` | 已发往执行层，等待回执 |
+| `acknowledged` | 外部系统已回执（收到，不一定成功） |
+| `succeeded` | 结果已确认，可收集执行证据，终态 |
+| `unknown_effect` | 发出后无法确认副作用是否发生，终态 |
+
+**关键方法**：
+
+| 方法 | 说明 |
+|---|---|
+| `reserve(envelope)` | 占位幂等 key；重复 key 返回 `accepted=False` |
+| `mark_dispatched(key)` | `reserved → dispatched` |
+| `mark_acknowledged(key)` | `dispatched → acknowledged` |
+| `mark_succeeded(key)` | `acknowledged → succeeded`；标记终态成功 |
+| `mark_unknown_effect(key)` | `dispatched → unknown_effect` |
+| `reserve_and_dispatch(envelope)` | **原子方法**：直接写入 `dispatched` 态，跳过 `reserved` 中间态，消除 reserve→dispatch 之间的竞争窗口 |
+| `get(key)` | 查询当前 DedupeRecord |
+
+`reserve_and_dispatch` 是推荐的生产用法；两步写法（`reserve` + `mark_dispatched`）仅在需要在占位后延迟发出时使用。`InMemoryDedupeStore` 和 `SQLiteDedupeStore` 均完整实现此协议。
 
 ## 6. Signal 与事件映射
 
@@ -232,7 +338,7 @@ graph LR
 - event 是权威语义。
 - projection 是查询语义。
 
-也就是说，平台看到的“我发了一个 signal”并不等于“run 状态已经立即改变”，真正可读状态以 projection 为准。
+也就是说，平台看到的"我发了一个 signal"并不等于"run 状态已经立即改变"，真正可读状态以 projection 为准。
 
 ## 7. 典型调用序列
 
@@ -290,7 +396,9 @@ await kernel.facade.submit_approval(
 1. 平台不要绕过 `KernelFacade` 直接写 substrate。
 2. 事件是事实源，查询以 projection 为准。
 3. 自定义 `action_type/plan_type/event_type/recovery_mode` 应通过 registry 注册，避免语义漂移。
-4. `get_manifest()` 应在平台启动阶段缓存，作为能力协商依据。
+4. `get_manifest()` 应在平台启动阶段缓存，作为能力协商依据；`trace_protocol_version` 和 `supported_trace_features` 可驱动平台侧功能开关。
+5. Peer 信号授权：生产环境必须使用 schema_version="2" 的 `CapabilitySnapshot.peer_run_bindings`（不可变白名单，纳入 hash）；PoC 回退的 `active_child_runs` 基于可变 projection 状态，不适用于多租户或跨进程场景。
+6. `DedupeStore` 的 `reserve_and_dispatch` 是生产推荐写法；两步式 `reserve + mark_dispatched` 仅在需要在占位后延迟发出时才使用。
 
 一个实操建议：
-- 如果你不确定某个场景应该“读 query 还是读 event stream”，大多数业务页面先读 `query_*`，观测和调试再接 `stream_run_events(...)`。
+- 如果你不确定某个场景应该"读 query 还是读 event stream"，大多数业务页面先读 `query_*`，观测和调试再接 `stream_run_events(...)`。

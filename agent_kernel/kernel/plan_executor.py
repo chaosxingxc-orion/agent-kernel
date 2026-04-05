@@ -6,7 +6,7 @@ ConditionalPlan, DependencyGraph, and SpeculativePlan execution using asyncio
 concurrency primitives.
 
 Design boundaries:
-  - PlanExecutor does NOT manage event logs or deduplication — those are
+  - PlanExecutor does NOT manage event logs or deduplication 鈥?those are
     handled by the TurnEngine for each individual Action.
   - PlanExecutor accepts a generic ``turn_runner`` callable so it never
     imports TurnEngine directly (dependency-inversion for testability).
@@ -48,13 +48,15 @@ class UnsupportedPlanTypeError(Exception):
 
     Attributes:
         plan: The unsupported plan object that triggered the error.
+
     """
 
     def __init__(self, plan: Any) -> None:
-        """Initialises the error with a human-readable message.
+        """Initialise the error with a human-readable message.
 
         Args:
             plan: The unsupported plan object.
+
         """
         super().__init__(
             f"Unsupported plan type: {type(plan).__name__!r}. "
@@ -74,6 +76,7 @@ class PlanResult:
         failed: Number of actions that failed or raised an exception.
         join_results: Ordered list of group join results for parallel plans.
             Empty list for sequential plans.
+
     """
 
     plan_kind: Literal["sequential", "parallel", "conditional", "dependency_graph", "speculative"]
@@ -89,6 +92,7 @@ class PlanResult:
 
         Returns:
             ``True`` if ``failed`` is zero.
+
         """
         return self.succeeded == self.total_actions
 
@@ -103,7 +107,7 @@ class PlanExecutor:
     For SequentialPlan: delegates to ``turn_runner`` for each step in order.
     For ParallelPlan: uses ``asyncio.gather`` for concurrent group execution.
 
-    This class does NOT manage event log or deduplication — those are
+    This class does NOT manage event log or deduplication 鈥?those are
     handled by the TurnEngine for each individual Action.
     """
 
@@ -114,7 +118,7 @@ class PlanExecutor:
         observability_hook: ObservabilityHook | None = None,
         dedupe_store: DedupeStorePort | None = None,
     ) -> None:
-        """Initialises PlanExecutor with an async turn-runner callable.
+        """Initialise PlanExecutor with an async turn-runner callable.
 
         Args:
             turn_runner: Async callable that accepts an Action and returns a
@@ -128,6 +132,7 @@ class PlanExecutor:
             dedupe_store: Optional ``DedupeStorePort`` for per-branch idempotency
                 checks.  When present, already-acknowledged branches are skipped
                 on crash-replay.  When ``None``, per-branch dedupe is disabled.
+
         """
         self._turn_runner = turn_runner
         self._branch_monitor = branch_monitor
@@ -144,7 +149,7 @@ class PlanExecutor:
         self._committed_winner_id: str | None = None
 
     async def commit_speculation(self, winner_candidate_id: str) -> None:
-        """Cancels all speculative tasks except the winner and records the decision.
+        """Cancel all speculative tasks except the winner and records the decision.
 
         Called when a ``speculation_committed`` signal identifies the winning
         candidate.  Non-winner asyncio Tasks are cancelled so their side-effects
@@ -154,6 +159,7 @@ class PlanExecutor:
 
         Args:
             winner_candidate_id: ``candidate_id`` of the candidate to keep.
+
         """
         self._committed_winner_id = winner_candidate_id
         for cid, task in list(self._active_speculative_tasks.items()):
@@ -173,6 +179,7 @@ class PlanExecutor:
 
         Raises:
             UnsupportedPlanTypeError: When ``plan`` is not a recognised plan type.
+
         """
         if isinstance(plan, SequentialPlan):
             return await self._execute_sequential(plan, run_id)
@@ -191,7 +198,7 @@ class PlanExecutor:
         plan: SequentialPlan,
         run_id: str,
     ) -> PlanResult:
-        """Executes each step in order, accumulating success/failure counts.
+        """Execute each step in order, accumulating success/failure counts.
 
         All steps are attempted regardless of prior failures so that the caller
         receives a complete accounting of the plan.  Failures increment the
@@ -203,6 +210,7 @@ class PlanExecutor:
 
         Returns:
             PlanResult with sequential plan_kind.
+
         """
         succeeded = 0
         failed = 0
@@ -228,9 +236,9 @@ class PlanExecutor:
         plan: ParallelPlan,
         run_id: str,
     ) -> PlanResult:
-        """Executes groups sequentially, actions within each group concurrently.
+        """Execute groups sequentially, actions within each group concurrently.
 
-        Groups in a ParallelPlan are ordered — each group executes after the
+        Groups in a ParallelPlan are ordered 鈥?each group executes after the
         previous group's join barrier is satisfied (or not).  Actions within a
         single group execute concurrently via ``asyncio.gather``.
 
@@ -240,6 +248,7 @@ class PlanExecutor:
 
         Returns:
             PlanResult with parallel plan_kind and per-group join results.
+
         """
         join_results: list[ParallelJoinResult] = []
         total_actions = 0
@@ -274,6 +283,7 @@ class PlanExecutor:
 
         Returns:
             ParallelJoinResult with success/failure breakdown and join verdict.
+
         """
         # Register branches before gather so the monitor knows about them.
         if self._branch_monitor is not None:
@@ -360,7 +370,7 @@ class PlanExecutor:
                                 outcome="acknowledged",
                             )
                 else:
-                    # blocked or recovery_pending → BranchFailure
+                    # blocked or recovery_pending 鈫?BranchFailure
                     evidence: FailureEnvelope | None = turn_result.recovery_input
                     failures.append(
                         BranchFailure(
@@ -401,7 +411,7 @@ class PlanExecutor:
         )
 
     async def _execute_dag(self, plan: DependencyGraph, run_id: str) -> PlanResult:
-        """Executes a DependencyGraph using topological ordering.
+        """Execute a DependencyGraph using topological ordering.
 
         Nodes with no unmet dependencies execute concurrently within each
         topological layer via ``asyncio.TaskGroup``. Layers are processed
@@ -416,6 +426,7 @@ class PlanExecutor:
 
         Raises:
             UnsupportedPlanTypeError: When the graph contains a cycle.
+
         """
         if not plan.nodes:
             return PlanResult(
@@ -474,7 +485,7 @@ class PlanExecutor:
         )
 
     async def _execute_conditional(self, plan: ConditionalPlan, run_id: str) -> PlanResult:
-        """Executes a ConditionalPlan by evaluating the gating action first.
+        """Execute a ConditionalPlan by evaluating the gating action first.
 
         The gating action is run via ``turn_runner``. Its ``outcome_kind`` is
         matched against each branch's ``trigger_outcomes`` (left to right). The
@@ -488,6 +499,7 @@ class PlanExecutor:
 
         Returns:
             PlanResult with ``plan_kind="conditional"``.
+
         """
         try:
             gate_result = await self._turn_runner(plan.gating_action)
@@ -526,7 +538,7 @@ class PlanExecutor:
         )
 
     async def _execute_speculative(self, plan: SpeculativePlan, run_id: str) -> PlanResult:
-        """Executes all speculative candidates concurrently via asyncio.
+        """Execute all speculative candidates concurrently via asyncio.
 
         All candidate plans launch simultaneously. An optional
         ``speculation_timeout_ms`` caps the total wait time. Partial results
@@ -545,6 +557,7 @@ class PlanExecutor:
         Returns:
             PlanResult with ``plan_kind="speculative"`` aggregating all
             candidates' success and failure counts.
+
         """
         if not plan.candidates:
             return PlanResult(
@@ -613,7 +626,7 @@ def _evaluate_join(
     successes: list[BranchResult],
     failures: list[BranchFailure],
 ) -> bool:
-    """Evaluates the join strategy for a completed group.
+    """Evaluate the join strategy for a completed group.
 
     Args:
         group: The parallel group whose strategy is evaluated.
@@ -622,6 +635,7 @@ def _evaluate_join(
 
     Returns:
         True when the join condition is satisfied.
+
     """
     strategy = group.join_strategy
     if strategy == "all":

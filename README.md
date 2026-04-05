@@ -17,8 +17,9 @@
 
 ## 1. 版本与范围
 
-- Kernel 版本：`0.2.0`
+- Kernel 版本：`0.2.1`
 - 接口协议：`1.0.0`
+- TRACE 协议：`1.2.1`
 - Python：`>=3.14`
 - 文档刷新日期：`2026-04-05`
 
@@ -58,6 +59,10 @@ graph LR
 
 - 六权威模型：`RunActor` / `EventLog` / `Projection` / `Admission` / `Executor` / `RecoveryGate`
 - 五类计划：`Sequential` / `Parallel` / `Conditional` / `DependencyGraph` / `Speculative`
+- TaskManager 层：跨 run 的任务生命周期治理，含 `RestartPolicyEngine`、`TaskWatchdog`、`ReflectionOrchestrator`
+- 原子幂等派发：`DedupeStore.reserve_and_dispatch()` 消除 reserve→dispatch 竞争窗口，状态机扩展至 `succeeded`
+- 对等 run 授权：双层 peer auth（生产层 `peer_run_bindings` / PoC 层 `active_child_runs`）
+- TRACE v1.2.1：`supported_trace_features` 能力声明、`review_state` 人工 gate 聚合、`policy_versions` 策略版本透传
 - 人机协作：`approval_submitted`、`human_gate_opened`、`task_view`
 - 运行健康：liveness/readiness 探针
 - 观测能力：事件流、trace runtime view、task 生命周期事件

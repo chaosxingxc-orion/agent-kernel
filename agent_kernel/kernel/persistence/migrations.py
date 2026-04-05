@@ -33,6 +33,7 @@ class Migration:
         version: Monotonically increasing integer version (1-based).
         description: Human-readable summary of what this migration does.
         sql: DDL/DML SQL to execute when applying this migration.
+
     """
 
     version: int
@@ -50,6 +51,7 @@ class SchemaMigrationManager:
 
     Args:
         connection: An open ``sqlite3.Connection`` to the target database.
+
     """
 
     _connection: sqlite3.Connection
@@ -67,6 +69,7 @@ class SchemaMigrationManager:
             extra_migrations: Additional migrations to apply after the
                 kernel-built-in migrations.  Must have unique version numbers
                 that do not overlap with built-in versions.
+
         """
         self._connection = connection
         self._migrations = list(KERNEL_MIGRATIONS)
@@ -88,6 +91,7 @@ class SchemaMigrationManager:
 
         Returns:
             Number of migrations applied in this call (0 = already up to date).
+
         """
         self._ensure_migrations_table()
         applied = self._applied_versions()

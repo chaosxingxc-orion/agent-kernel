@@ -1,4 +1,4 @@
-"""RetryingExecutorService — lightweight transient-retry wrapper for ExecutorService.
+"""RetryingExecutorService 鈥?lightweight transient-retry wrapper for ExecutorService.
 
 Implements P3b of the agent-kernel quality plan: wraps any ExecutorService
 with up to ``max_attempts`` retries for ``TransientExecutionError``, adding
@@ -38,6 +38,7 @@ class RetryingExecutorService:
         jitter_ms: Maximum additional random jitter added to each delay in
             milliseconds.  Helps spread out concurrent retries.
             Defaults to 50 ms.
+
     """
 
     def __init__(
@@ -47,6 +48,7 @@ class RetryingExecutorService:
         base_delay_ms: int = 100,
         jitter_ms: int = 50,
     ) -> None:
+        """Initialize the instance with configured dependencies."""
         if max_attempts < 1:
             raise ValueError(f"max_attempts must be >= 1, got {max_attempts}")
         self._inner = inner
@@ -55,7 +57,7 @@ class RetryingExecutorService:
         self._jitter_ms = jitter_ms
 
     async def execute(self, action: Any, **kwargs: Any) -> Any:
-        """Executes *action* via the inner executor, retrying on transient errors.
+        """Execute *action* via the inner executor, retrying on transient errors.
 
         Args:
             action: The action to execute.
@@ -68,6 +70,7 @@ class RetryingExecutorService:
         Raises:
             TransientExecutionError: When all attempts are exhausted.
             Any other exception raised by the inner executor immediately.
+
         """
         last_exc: TransientExecutionError | None = None
         for attempt in range(self._max_attempts):

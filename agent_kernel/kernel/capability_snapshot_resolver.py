@@ -39,7 +39,7 @@ class ActionPayloadCapabilitySnapshotInputResolver:
         input_value: TurnInput,
         action: Action,
     ) -> CapabilitySnapshotInput:
-        """Builds CapabilitySnapshotInput from action payload.
+        """Build CapabilitySnapshotInput from action payload.
 
         Args:
             input_value: Turn input providing run identity and offsets.
@@ -51,6 +51,7 @@ class ActionPayloadCapabilitySnapshotInputResolver:
         Raises:
             CapabilitySnapshotBuildError: When strict mode is enabled and
                 required fields are missing from the action payload.
+
         """
         input_json = action.input_json if isinstance(action.input_json, dict) else {}
         raw_payload = input_json.get("capability_snapshot_input")
@@ -127,13 +128,14 @@ class ActionPayloadCapabilitySnapshotInputResolver:
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
-    """Returns value as dict or empty dict.
+    """Return value as dict or empty dict.
 
     Args:
         value: Candidate value to coerce.
 
     Returns:
         ``value`` when it is a dict, otherwise an empty dict.
+
     """
     if isinstance(value, dict):
         return value
@@ -141,13 +143,14 @@ def _as_dict(value: Any) -> dict[str, Any]:
 
 
 def _as_str_list(value: Any) -> list[str]:
-    """Returns value as list of strings, dropping empty and non-string items.
+    """Return value as list of strings, dropping empty and non-string items.
 
     Args:
         value: Candidate value to coerce.
 
     Returns:
         List of non-empty strings, or empty list when value is not a list.
+
     """
     if not isinstance(value, list):
         return []
@@ -155,13 +158,14 @@ def _as_str_list(value: Any) -> list[str]:
 
 
 def _first_non_empty_string(*values: Any) -> str:
-    """Returns first non-empty string candidate or empty fallback.
+    """Return first non-empty string candidate or empty fallback.
 
     Args:
         *values: Ordered candidate values to inspect.
 
     Returns:
         First non-empty string, or empty string when all candidates are empty.
+
     """
     for value in values:
         if isinstance(value, str) and value:
@@ -170,13 +174,14 @@ def _first_non_empty_string(*values: Any) -> str:
 
 
 def _first_non_empty_optional_string(*values: Any) -> str | None:
-    """Returns first non-empty string candidate or ``None``.
+    """Return first non-empty string candidate or ``None``.
 
     Args:
         *values: Ordered candidate values to inspect.
 
     Returns:
         First non-empty string, or ``None`` when all candidates are empty.
+
     """
     for value in values:
         if isinstance(value, str) and value:
@@ -187,7 +192,7 @@ def _first_non_empty_optional_string(*values: Any) -> str | None:
 def _resolve_declarative_bundle_digest(
     payload: dict[str, Any],
 ) -> DeclarativeBundleDigest | None:
-    """Resolves one declarative bundle digest payload when present.
+    """Resolve one declarative bundle digest payload when present.
 
     Args:
         payload: Action payload dictionary containing digest fields.
@@ -199,6 +204,7 @@ def _resolve_declarative_bundle_digest(
     Raises:
         CapabilitySnapshotBuildError: When some but not all required
             digest fields are present.
+
     """
     raw_digest_payload = payload.get("declarative_bundle_digest")
     if raw_digest_payload is not None and not isinstance(raw_digest_payload, dict):

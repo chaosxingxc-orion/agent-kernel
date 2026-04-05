@@ -29,7 +29,7 @@ class ReflectionContextBuilder:
         base_context: ContextWindow,
         reflection_round: int = 1,
     ) -> ContextWindow:
-        """Merges failure evidence into base context as recovery_context.
+        """Merge failure evidence into base context as recovery_context.
 
         The ``recovery_context`` dict contains:
         - ``failure_kind``: ``evidence.failure_kind``
@@ -52,6 +52,7 @@ class ReflectionContextBuilder:
 
         Returns:
             New ``ContextWindow`` with ``recovery_context`` populated.
+
         """
         recovery_context: dict = {
             "failure_kind": evidence.failure_kind,

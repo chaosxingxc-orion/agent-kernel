@@ -49,6 +49,7 @@ class SkillDefinition:
         tool_bindings: Ordered list of bound tool names.
         mcp_bindings: Ordered list of bound MCP server capabilities.
         metadata: Arbitrary metadata dictionary.
+
     """
 
     skill_id: str
@@ -82,6 +83,7 @@ class SkillRequest:
         context_ref: Optional context binding reference.
         grant_ref: Optional admission grant reference.
         caused_by: Optional causal reference for provenance tracing.
+
     """
 
     run_id: str
@@ -103,6 +105,7 @@ class SkillObservation:
         observation_type: Discriminator for the observation category.
         payload_ref: Optional reference to stored observation payload.
         payload_json: Optional inline observation payload dictionary.
+
     """
 
     observation_type: str
@@ -124,6 +127,7 @@ class SkillResult:
         evidence_ref: Optional reference to execution evidence.
         failure_code: Optional failure code when ``success`` is False.
         failure_detail: Optional human-readable failure description.
+
     """
 
     skill_id: str
@@ -151,6 +155,7 @@ class SkillExecutionInput:
         preferred_skill_id: Optional preferred skill identifier.
         preferred_skill_version: Optional preferred skill version.
         grant_ref: Optional admission grant reference.
+
     """
 
     action_id: str
@@ -171,6 +176,7 @@ class SkillExecutionResult:
     Attributes:
         skill: Resolved skill definition that governed execution.
         result: Skill execution result returned by the runtime.
+
     """
 
     skill: SkillDefinition
@@ -204,7 +210,7 @@ class SkillRegistry(Protocol):
     """Owns skill metadata and versioned bindings."""
 
     async def get(self, skill_id: str, version: str | None = None) -> SkillDefinition | None:
-        """Retrieves one skill definition by id and optional version.
+        """Retrieve one skill definition by id and optional version.
 
         Args:
             skill_id: Skill identifier to look up.
@@ -212,28 +218,31 @@ class SkillRegistry(Protocol):
 
         Returns:
             Matching skill definition, or ``None`` if not found.
+
         """
         ...
 
     async def resolve_by_action(self, action_type: str) -> SkillDefinition | None:
-        """Resolves one skill definition by action type.
+        """Resolve one skill definition by action type.
 
         Args:
             action_type: Action type discriminator.
 
         Returns:
             Matching skill definition, or ``None`` if not found.
+
         """
         ...
 
     async def list_by_kind(self, skill_kind: str) -> list[SkillDefinition]:
-        """Lists all registered skills matching a given kind.
+        """List all registered skills matching a given kind.
 
         Args:
             skill_kind: Skill kind discriminator.
 
         Returns:
             List of matching skill definitions.
+
         """
         ...
 
@@ -245,13 +254,14 @@ class SkillResolver(Protocol):
         self,
         action: SkillActionResolveInput,
     ) -> SkillDefinition:
-        """Resolves which registered skill should execute one action.
+        """Resolve which registered skill should execute one action.
 
         Args:
             action: Action resolve input with type and preference hints.
 
         Returns:
             Resolved skill definition for the action.
+
         """
         ...
 
@@ -260,13 +270,14 @@ class SkillRuntime(Protocol):
     """Executes one skill request under executor governance."""
 
     async def execute(self, request: SkillRequest) -> SkillResult:
-        """Executes one skill request and returns the result.
+        """Execute one skill request and returns the result.
 
         Args:
             request: Skill execution request with action and input payload.
 
         Returns:
             Skill execution result with output or failure details.
+
         """
         ...
 
@@ -275,9 +286,11 @@ class ManagedSkillRuntime(SkillRuntime, Protocol):
     """Extends skill runtime with optional managed lifecycle hooks."""
 
     async def validate(self, request: SkillRequest) -> None:
-        """Validates one request before execute.
+        """Validate one request before execute.
+
         Args:
             request: The incoming request object.
+
         """
         ...
 
@@ -294,13 +307,14 @@ class SkillRuntimeFactory(Protocol):
     """Creates skill runtime instances from registered definitions."""
 
     async def create(self, definition: SkillDefinition) -> SkillRuntime:
-        """Creates one skill runtime from a registered definition.
+        """Create one skill runtime from a registered definition.
 
         Args:
             definition: Skill definition governing the runtime instance.
 
         Returns:
             Initialized skill runtime ready for execution.
+
         """
         ...
 
@@ -313,7 +327,7 @@ class SkillRuntimeHostFactory(Protocol):
         definition: SkillDefinition,
         host_kind: SkillRuntimeHost,
     ) -> SkillRuntime:
-        """Creates runtime for a concrete host kind.
+        """Create runtime for a concrete host kind.
 
         Args:
             definition: Skill definition governing the runtime instance.
@@ -321,6 +335,7 @@ class SkillRuntimeHostFactory(Protocol):
 
         Returns:
             Initialized skill runtime for the requested host kind.
+
         """
         ...
 
@@ -329,20 +344,26 @@ class LocalSkillRuntimeFactory(Protocol):
     """Creates local-host skill runtimes."""
 
     async def create_cli_process(self, definition: SkillDefinition) -> SkillRuntime:
-        """Creates runtime for ``cli_process`` host.
+        """Create runtime for ``cli_process`` host.
+
         Args:
             definition: Skill definition governing the runtime instance.
+
         Returns:
             SkillRuntime: Initialized skill runtime instance.
+
         """
         ...
 
     async def create_in_process_python(self, definition: SkillDefinition) -> SkillRuntime:
-        """Creates runtime for ``in_process_python`` host.
+        """Create runtime for ``in_process_python`` host.
+
         Args:
             definition: Skill definition governing the runtime instance.
+
         Returns:
             SkillRuntime: Initialized skill runtime instance.
+
         """
         ...
 
@@ -351,12 +372,13 @@ class RemoteSkillGatewayFactory(Protocol):
     """Creates remote-service skill gateway runtimes."""
 
     async def create_remote_service(self, definition: SkillDefinition) -> SkillRuntime:
-        """Creates runtime for ``remote_service`` host.
+        """Create runtime for ``remote_service`` host.
 
         Args:
             definition: Skill definition governing the runtime instance.
 
         Returns:
             Initialized remote-service skill runtime.
+
         """
         ...

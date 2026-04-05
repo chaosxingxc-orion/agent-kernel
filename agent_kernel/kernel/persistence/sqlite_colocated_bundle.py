@@ -1,4 +1,4 @@
-"""ColocatedSQLiteBundle — shared SQLite connection for EventLog + DedupeStore.
+"""ColocatedSQLiteBundle 鈥?shared SQLite connection for EventLog + DedupeStore.
 
 Enables atomic dispatch-record writes (dedupe reservation + event append) in a
 single SQLite transaction, eliminating the window where a crash between the two
@@ -48,7 +48,7 @@ class _SharedConnectionEventLog:
 
     This is an internal helper for ``ColocatedSQLiteBundle``; not intended for
     standalone use.  All methods acquire ``_lock`` and operate within the
-    provided connection — the bundle owner manages lifecycle (open/close).
+    provided connection 鈥?the bundle owner manages lifecycle (open/close).
     """
 
     def __init__(self, conn: sqlite3.Connection, lock: threading.Lock) -> None:
@@ -56,7 +56,7 @@ class _SharedConnectionEventLog:
         self._lock = lock
 
     async def append_action_commit(self, commit: ActionCommit) -> str:
-        """Appends one action commit inside the shared connection.
+        """Append one action commit inside the shared connection.
 
         Args:
             commit: The action commit containing events to persist.
@@ -66,6 +66,7 @@ class _SharedConnectionEventLog:
 
         Raises:
             ValueError: If ``commit.events`` is empty.
+
         """
         if not commit.events:
             raise ValueError("ActionCommit.events must contain at least one event.")
@@ -83,12 +84,15 @@ class _SharedConnectionEventLog:
         return f"commit-ref-{seq}"
 
     async def load(self, run_id: str, after_offset: int = 0) -> list[RuntimeEvent]:
-        """Loads events for a run after ``after_offset``.
+        """Load events for a run after ``after_offset``.
+
         Args:
-            run_id:
-            after_offset:
+            run_id: Target run identifier.
+            after_offset: Exclusive lower bound commit offset.
+
         Returns:
-            list[RuntimeEvent]:
+            Ordered runtime events after ``after_offset``.
+
         """
         query = """
             SELECT
@@ -104,13 +108,14 @@ class _SharedConnectionEventLog:
         return [self._row_to_event(row) for row in rows]
 
     async def max_offset(self, run_id: str) -> int:
-        """Returns the highest committed offset for a run, or 0.
+        """Return the highest committed offset for a run, or 0.
 
         Args:
             run_id: Target run identifier.
 
         Returns:
             Maximum commit offset, or 0 when no events exist.
+
         """
         with self._lock:
             cursor = self._conn.execute(
@@ -223,6 +228,7 @@ class _SharedConnectionDedupeStore:
 
         Raises:
             DedupeStoreStateError: If the key already exists in an incompatible state.
+
         """
         # (thread-safe)
         with self._lock:
@@ -274,6 +280,7 @@ class _SharedConnectionDedupeStore:
 
         Returns:
             Reservation result indicating acceptance or duplicate.
+
         """
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
@@ -313,11 +320,14 @@ class _SharedConnectionDedupeStore:
         self, dispatch_idempotency_key: str, peer_operation_id: str | None = None
     ) -> None:
         """Transitions record to ``dispatched`` state.
+
         Args:
-            dispatch_idempotency_key:
-            peer_operation_id:
+            dispatch_idempotency_key: Dedupe key identifying the dispatch record.
+            peer_operation_id: Optional peer-side operation reference.
+
         Raises:
-            Exception:
+            DedupeStoreStateError: If transition is invalid for current state.
+
         """
         with self._lock:
             try:
@@ -356,11 +366,14 @@ class _SharedConnectionDedupeStore:
         self, dispatch_idempotency_key: str, external_ack_ref: str | None = None
     ) -> None:
         """Transitions record to ``acknowledged`` state.
+
         Args:
-            dispatch_idempotency_key:
-            external_ack_ref:
+            dispatch_idempotency_key: Dedupe key identifying the dispatch record.
+            external_ack_ref: Optional external acknowledgement reference.
+
         Raises:
-            Exception:
+            DedupeStoreStateError: If transition is invalid for current state.
+
         """
         with self._lock:
             try:
@@ -399,10 +412,13 @@ class _SharedConnectionDedupeStore:
 
     def mark_unknown_effect(self, dispatch_idempotency_key: str) -> None:
         """Transitions record to ``unknown_effect`` state.
+
         Args:
-            dispatch_idempotency_key:
+            dispatch_idempotency_key: Dedupe key identifying the dispatch record.
+
         Raises:
-            Exception:
+            DedupeStoreStateError: If transition is invalid for current state.
+
         """
         with self._lock:
             try:
@@ -440,11 +456,14 @@ class _SharedConnectionDedupeStore:
                 raise
 
     def get(self, dispatch_idempotency_key: str) -> DedupeRecord | None:
-        """Returns dedupe record by key, or ``None``.
+        """Return dedupe record by key, or ``None``.
+
         Args:
-            dispatch_idempotency_key:
+            dispatch_idempotency_key: Dedupe key to query.
+
         Returns:
-            DedupeRecord | None:
+            Matching dedupe record, or ``None`` when absent.
+
         """
         with self._lock:
             return self._get(dispatch_idempotency_key)
@@ -512,19 +531,21 @@ class ColocatedSQLiteBundle:
 
     Both stores operate on the same SQLite connection, enabling
     ``atomic_dispatch_record()`` to reserve a dedupe key AND append an event
-    commit in a single transaction — eliminating the crash window between
+    commit in a single transaction 鈥?eliminating the crash window between
     two independent writes.
 
     Attributes:
         event_log: EventLog view backed by the shared connection.
         dedupe_store: DedupeStore view backed by the shared connection.
+
     """
 
     def __init__(self, database_path: str | Path = ":memory:") -> None:
-        """Opens the shared SQLite database and initializes schema.
+        """Open the shared SQLite database and initializes schema.
 
         Args:
             database_path: SQLite file path. Use ``":memory:"`` for in-memory mode.
+
         """
         self._database_path = str(database_path)
         self._lock = threading.Lock()
@@ -543,7 +564,7 @@ class ColocatedSQLiteBundle:
         self.dedupe_store = _SharedConnectionDedupeStore(self._conn, self._lock)
 
     def close(self) -> None:
-        """Closes the shared connection after a best-effort WAL checkpoint."""
+        """Close the shared connection after a best-effort WAL checkpoint."""
         with contextlib.suppress(Exception):
             self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         self._conn.close()
@@ -569,6 +590,7 @@ class ColocatedSQLiteBundle:
 
         Raises:
             ValueError: If ``commit.events`` is empty.
+
         """
         if not commit.events:
             raise ValueError("ActionCommit.events must contain at least one event.")
@@ -576,7 +598,7 @@ class ColocatedSQLiteBundle:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
-                # Dedupe reservation check first — cheapest gate.
+                # Dedupe reservation check first 鈥?cheapest gate.
                 existing = self.dedupe_store._get(envelope.dispatch_idempotency_key)
                 if existing is not None:
                     self._conn.execute("ROLLBACK")
@@ -623,7 +645,7 @@ class ColocatedSQLiteBundle:
         )
 
     def _initialize_schema(self) -> None:
-        """Creates colocated tables and indexes when absent."""
+        """Create colocated tables and indexes when absent."""
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS colocated_action_commits (
                 commit_sequence INTEGER PRIMARY KEY AUTOINCREMENT,

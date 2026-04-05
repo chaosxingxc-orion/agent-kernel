@@ -17,6 +17,7 @@ from agent_kernel.kernel.contracts import (
     RecoveryDecision,
     RunProjection,
     RuntimeEvent,
+    SequentialPlan,
     TurnIntentRecord,
 )
 from agent_kernel.kernel.minimal_runtime import (
@@ -31,9 +32,12 @@ from agent_kernel.kernel.minimal_runtime import (
 from agent_kernel.kernel.turn_engine import TurnOutcomeKind, TurnResult, TurnState, TurnStateEvent
 from agent_kernel.substrate.temporal.run_actor_workflow import (
     ActorSignal,
+    RunActorDependencyBundle,
     RunActorStrictModeConfig,
     RunActorWorkflow,
     RunInput,
+    clear_run_actor_dependencies,
+    configure_run_actor_dependencies,
 )
 
 
@@ -1766,3 +1770,90 @@ def test_operational_priority_matrix_full_chain_resolves_to_cancel_in_workflow()
     assert state.recovery_mode == "abort"
     assert state.recovery_reason == "operator_cancel"
     assert state.projected_offset == 4
+
+
+def test_plan_submitted_signal_executes_serialized_plan_when_executor_wired() -> None:
+    """plan_submitted should execute the provided serialized plan payload."""
+    (
+        workflow,
+        _event_log,
+        projection,
+        _admission,
+        _executor,
+        _recovery,
+        deduper,
+    ) = build_workflow()
+    workflow._plan_executor = AsyncMock()
+    projection.get.return_value = make_projection(30)
+    projection.catch_up.return_value = make_projection(31)
+    projection.readiness.return_value = True
+    deduper.seen.return_value = False
+
+    asyncio.run(workflow.run(RunInput(run_id="run-1")))
+    asyncio.run(
+        workflow.signal(
+            ActorSignal(
+                signal_type="plan_submitted",
+                signal_payload={"plan": {"plan_type": "sequential", "steps": []}},
+                caused_by="plan-1",
+            )
+        )
+    )
+
+    workflow._plan_executor.execute_plan.assert_awaited_once()
+    plan_arg, run_id_arg = workflow._plan_executor.execute_plan.await_args.args
+    assert isinstance(plan_arg, SequentialPlan)
+    assert run_id_arg == "run-1"
+
+
+def test_resolve_dependencies_preserves_optional_injected_services() -> None:
+    """Dependency resolver must not drop optional configured services."""
+    event_log = InMemoryKernelRuntimeEventLog()
+    context_port = object()
+    llm_gateway = object()
+    output_parser = object()
+    plan_executor = object()
+    deps = RunActorDependencyBundle(
+        event_log=event_log,
+        projection=InMemoryDecisionProjectionService(event_log),
+        admission=StaticDispatchAdmissionService(),
+        executor=AsyncExecutorService(),
+        recovery=StaticRecoveryGateService(),
+        deduper=InMemoryDecisionDeduper(),
+        context_port=context_port,
+        llm_gateway=llm_gateway,
+        output_parser=output_parser,
+        plan_executor=plan_executor,
+        workflow_id_prefix="agent",
+    )
+    token = configure_run_actor_dependencies(deps)
+    try:
+        resolved = run_actor_workflow_module._resolve_run_actor_dependencies(
+            event_log=None,
+            projection=None,
+            admission=None,
+            executor=None,
+            recovery=None,
+            recovery_outcomes=None,
+            turn_intent_log=None,
+            deduper=None,
+            dedupe_store=None,
+            strict_mode=None,
+        )
+    finally:
+        clear_run_actor_dependencies(token)
+
+    assert resolved.context_port is context_port
+    assert resolved.llm_gateway is llm_gateway
+    assert resolved.output_parser is output_parser
+    assert resolved.plan_executor is plan_executor
+    assert resolved.workflow_id_prefix == "agent"
+
+
+def test_parent_workflow_id_uses_configured_prefix() -> None:
+    """Parent workflow id helper should respect non-default configured prefix."""
+    wid = run_actor_workflow_module._workflow_id_for_parent_run(
+        "run-123",
+        workflow_id_prefix="agent",
+    )
+    assert wid == "agent:run-123"

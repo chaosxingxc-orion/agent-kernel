@@ -34,11 +34,12 @@ class SQLiteCircuitBreakerStore:
     """
 
     def __init__(self, database_path: str | Path = ":memory:") -> None:
-        """Initialises the store and creates the schema if absent.
+        """Initialise the store and creates the schema if absent.
 
         Args:
             database_path: SQLite file path.  Use ``":memory:"`` for
                 in-process ephemeral storage (useful in tests).
+
         """
         self._conn: sqlite3.Connection = sqlite3.connect(
             str(database_path), check_same_thread=False
@@ -53,7 +54,7 @@ class SQLiteCircuitBreakerStore:
     # ------------------------------------------------------------------
 
     def get_state(self, effect_class: str) -> tuple[int, float]:
-        """Returns ``(failure_count, last_failure_epoch_s)`` for *effect_class*.
+        """Return ``(failure_count, last_failure_epoch_s)`` for *effect_class*.
 
         Args:
             effect_class: The action effect class to query.
@@ -61,6 +62,7 @@ class SQLiteCircuitBreakerStore:
         Returns:
             ``(failure_count, last_failure_epoch_s)``.  Returns ``(0, 0.0)``
             when the effect class has no recorded failures.
+
         """
         _sql = (
             "SELECT failure_count, last_failure_ts FROM circuit_breaker_state"
@@ -86,6 +88,7 @@ class SQLiteCircuitBreakerStore:
 
         Raises:
             sqlite3.Error: On database write failure.
+
         """
         now = time.time()
         with self._lock:
@@ -112,10 +115,11 @@ class SQLiteCircuitBreakerStore:
             return int(row[0])
 
     def reset(self, effect_class: str) -> None:
-        """Deletes the failure row for *effect_class*, returning it to CLOSED state.
+        """Delete the failure row for *effect_class*, returning it to CLOSED state.
 
         Args:
             effect_class: The action effect class that just succeeded.
+
         """
         with self._lock:
             self._conn.execute(
@@ -123,3 +127,16 @@ class SQLiteCircuitBreakerStore:
                 (effect_class,),
             )
             self._conn.commit()
+
+    def list_effect_classes(self) -> list[str]:
+        """Return all effect classes with stored breaker state."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT effect_class FROM circuit_breaker_state ORDER BY effect_class ASC"
+            ).fetchall()
+        return [str(row[0]) for row in rows]
+
+    def close(self) -> None:
+        """Close underlying SQLite connection."""
+        with self._lock:
+            self._conn.close()

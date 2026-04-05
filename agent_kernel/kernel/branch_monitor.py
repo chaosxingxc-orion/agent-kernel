@@ -1,6 +1,6 @@
 """Per-branch heartbeat monitoring for parallel execution.
 
-Implements Phase 3 (Parallel Execution) — BranchMonitor component.
+Implements Phase 3 (Parallel Execution) 鈥?BranchMonitor component.
 
 BranchMonitor is NOT an authority.  It does not write to the EventLog.
 It is a cooperative diagnostic tool used by PlanExecutor to detect stalled
@@ -29,6 +29,7 @@ class BranchHeartbeat:
         last_heartbeat_at: ISO 8601 UTC timestamp of the most recent heartbeat.
         expected_interval_ms: Expected time between heartbeats in milliseconds.
         budget_consumed_ratio: Fraction of the execution budget consumed (0.0-1.0).
+
     """
 
     action_id: str
@@ -53,23 +54,24 @@ class _BranchState:
 
 
 def _utc_now_iso() -> str:
-    """Returns the current UTC time as an ISO 8601 string."""
+    """Return the current UTC time as an ISO 8601 string."""
     return datetime.now(UTC).isoformat()
 
 
 def _now_ms() -> float:
-    """Returns the current epoch time in milliseconds."""
+    """Return the current epoch time in milliseconds."""
     return datetime.now(UTC).timestamp() * 1000.0
 
 
 def _parse_ms(iso: str) -> float:
-    """Parses an ISO 8601 UTC string to epoch milliseconds.
+    """Parse an ISO 8601 UTC string to epoch milliseconds.
 
     Args:
         iso: ISO 8601 timestamp string (may include timezone offset).
 
     Returns:
         Epoch milliseconds as a float.
+
     """
     return datetime.fromisoformat(iso).timestamp() * 1000.0
 
@@ -82,18 +84,19 @@ class BranchMonitor:
     """Tracks per-branch heartbeat for parallel execution.
 
     Used by PlanExecutor to detect stalled or dead-loop branches.
-    NOT an authority — does not write to EventLog.
+    NOT an authority 鈥?does not write to EventLog.
 
     The monitor tracks registered branches and detects:
     - Missing heartbeats (no update within ``expected_interval_ms * 2``).
-    - Dead-loop signature: ``budget_consumed_ratio ≈ 1.0`` with no output.
+    - Dead-loop signature: ``budget_consumed_ratio 鈮?1.0`` with no output.
     """
 
     def __init__(self) -> None:
+        """Initialize the instance with configured dependencies."""
         self._branches: dict[str, _BranchState] = {}
 
     def register_branch(self, action_id: str, expected_interval_ms: int) -> None:
-        """Registers a new parallel branch for monitoring.
+        """Register a new parallel branch for monitoring.
 
         Args:
             action_id: Unique action identifier for the branch.
@@ -101,6 +104,7 @@ class BranchMonitor:
 
         Raises:
             ValueError: If a branch with the same action_id is already registered.
+
         """
         if action_id in self._branches:
             raise ValueError(f"Branch already registered: {action_id!r}")
@@ -117,7 +121,7 @@ class BranchMonitor:
         *,
         output_produced: bool = False,
     ) -> None:
-        """Records a heartbeat for an active branch.
+        """Record a heartbeat for an active branch.
 
         Args:
             action_id: Branch identifier.
@@ -126,6 +130,7 @@ class BranchMonitor:
 
         Raises:
             KeyError: If the action_id has not been registered.
+
         """
         state = self._branches[action_id]
         state.last_heartbeat_at = _utc_now_iso()
@@ -134,24 +139,26 @@ class BranchMonitor:
             state.output_produced = True
 
     def complete_branch(self, action_id: str) -> None:
-        """Marks a branch as completed (no further stall detection).
+        """Mark a branch as completed (no further stall detection).
 
         Args:
             action_id: Branch identifier.
 
         Raises:
             KeyError: If the action_id has not been registered.
+
         """
         self._branches[action_id].completed = True
 
     def get_stalled_branches(self) -> list[str]:
-        """Returns action_ids of branches whose heartbeats are overdue.
+        """Return action_ids of branches whose heartbeats are overdue.
 
         A branch is considered stalled when the time since its last heartbeat
         exceeds ``expected_interval_ms * 2``.
 
         Returns:
             List of stalled action_ids (excludes completed branches).
+
         """
         now = _now_ms()
         stalled: list[str] = []
@@ -165,7 +172,7 @@ class BranchMonitor:
         return stalled
 
     def is_suspected_dead_loop(self, action_id: str) -> bool:
-        """Returns True when the branch shows a dead-loop signature.
+        """Return True when the branch shows a dead-loop signature.
 
         The heuristic: ``budget_consumed_ratio >= 0.9`` and no output produced.
 
@@ -177,6 +184,7 @@ class BranchMonitor:
 
         Raises:
             KeyError: If the action_id has not been registered.
+
         """
         state = self._branches[action_id]
         return (
@@ -191,7 +199,7 @@ class BranchMonitor:
         partial_output: str | None = None,
         stderr_tail: str | None = None,
     ) -> ScriptFailureEvidence:
-        """Builds structured failure evidence for a failed or timed-out branch.
+        """Build structured failure evidence for a failed or timed-out branch.
 
         Inspects the branch state to determine whether the failure looks like
         a dead loop (high budget consumption, no output) or a heartbeat timeout.
@@ -208,6 +216,7 @@ class BranchMonitor:
 
         Raises:
             KeyError: If the action_id has not been registered.
+
         """
         state = self._branches[action_id]
         suspected_dead_loop = (

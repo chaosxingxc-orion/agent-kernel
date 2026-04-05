@@ -28,6 +28,7 @@ class FailureEvidenceResolution:
     Attributes:
         source: Selected evidence source following v6.4 priority order.
         evidence_ref: Normalized evidence reference string, or ``None``.
+
     """
 
     source: FailureEvidenceSource
@@ -35,7 +36,7 @@ class FailureEvidenceResolution:
 
 
 def resolve_failure_evidence(envelope: FailureEnvelope) -> FailureEvidenceResolution:
-    """Resolves evidence using the v6.4 priority order.
+    """Resolve evidence using the v6.4 priority order.
 
     Priority is strict and deterministic:
     1. ``external_ack_ref``: strongest external confirmation.
@@ -47,6 +48,7 @@ def resolve_failure_evidence(envelope: FailureEnvelope) -> FailureEvidenceResolu
 
     Returns:
         Selected evidence source and normalized evidence reference.
+
     """
     external_ack_ref = _normalize_optional_ref(envelope.external_ack_ref)
     if external_ack_ref is not None:
@@ -73,7 +75,7 @@ def resolve_failure_evidence(envelope: FailureEnvelope) -> FailureEvidenceResolu
 
 
 def apply_failure_evidence_priority(envelope: FailureEnvelope) -> FailureEnvelope:
-    """Returns envelope with resolved evidence-priority fields populated.
+    """Return envelope with resolved evidence-priority fields populated.
 
     This keeps the original candidate fields untouched and writes canonical
     resolution into explicit fields, so downstream consumers do not need to
@@ -85,6 +87,7 @@ def apply_failure_evidence_priority(envelope: FailureEnvelope) -> FailureEnvelop
     Returns:
         Copy of envelope with ``evidence_priority_source`` and
         ``evidence_priority_ref`` set from deterministic resolution.
+
     """
     resolution = resolve_failure_evidence(envelope)
     return replace(
@@ -95,13 +98,14 @@ def apply_failure_evidence_priority(envelope: FailureEnvelope) -> FailureEnvelop
 
 
 def _normalize_optional_ref(value: str | None) -> str | None:
-    """Normalizes optional references by trimming whitespace and empties.
+    """Normalize optional references by trimming whitespace and empties.
 
     Args:
         value: Optional reference string to normalize.
 
     Returns:
         Trimmed non-empty string, or ``None`` when input is ``None`` or empty.
+
     """
     if value is None:
         return None

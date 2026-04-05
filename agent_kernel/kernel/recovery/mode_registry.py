@@ -45,6 +45,7 @@ class RecoveryModeRegistry:
 
         Raises:
             ValueError: When ``plan_action`` is already registered.
+
         """
         if plan_action in self._entries:
             raise ValueError(
@@ -62,6 +63,7 @@ class RecoveryModeRegistry:
 
         Returns:
             Registered mode string, or ``None`` when not found.
+
         """
         return self._entries.get(plan_action)
 
@@ -70,6 +72,7 @@ class RecoveryModeRegistry:
 
         Returns:
             Immutable set of registered plan action strings.
+
         """
         return frozenset(self._entries)
 

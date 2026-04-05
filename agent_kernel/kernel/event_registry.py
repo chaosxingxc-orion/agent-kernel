@@ -41,6 +41,7 @@ class EventTypeDescriptor:
         schema_version: The RuntimeEvent schema version this descriptor was
             written for.  Validated by ``validate_event_schema_version`` to
             detect stale deserialized events from older deployments.
+
     """
 
     event_type: str
@@ -70,6 +71,7 @@ class EventTypeRegistry:
 
         Raises:
             ValueError: When ``descriptor.event_type`` is already registered.
+
         """
         if descriptor.event_type in self._entries:
             raise ValueError(
@@ -86,6 +88,7 @@ class EventTypeRegistry:
 
         Returns:
             Matching descriptor, or ``None`` when not registered.
+
         """
         return self._entries.get(event_type)
 
@@ -94,6 +97,7 @@ class EventTypeRegistry:
 
         Returns:
             Alphabetically sorted list of all registered descriptors.
+
         """
         return sorted(self._entries.values(), key=lambda d: d.event_type)
 
@@ -102,6 +106,7 @@ class EventTypeRegistry:
 
         Returns:
             Immutable set of registered event type strings.
+
         """
         return frozenset(self._entries.keys())
 
@@ -471,6 +476,24 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
         authority="TaskManager",
         affects_replay=True,
     ),
+    EventTypeDescriptor(
+        event_type="task.escalated",
+        description=(
+            "Task retry/reflect policy escalated the task to human intervention. "
+            "Terminal state for automated retries."
+        ),
+        authority="TaskManager",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="task.aborted",
+        description=(
+            "Task was aborted by restart policy or explicit control signal. "
+            "Terminal state — no further attempts will be made."
+        ),
+        authority="TaskManager",
+        affects_replay=True,
+    ),
 ]
 
 for _descriptor in _KERNEL_EVENTS:
@@ -556,6 +579,7 @@ def recovery_allowed_event_types() -> frozenset[str]:
     Returns:
         Immutable set of event type strings allowed in
         ``_append_recovery_event``.
+
     """
     return frozenset(d.event_type for d in KERNEL_EVENT_REGISTRY.all() if d.recovery_path_allowed)
 
@@ -579,6 +603,7 @@ def validate_event_type(event_type: str, strict: bool = False) -> bool:
 
     Raises:
         ValueError: When ``strict=True`` and the event_type is not registered.
+
     """
     if event_type in KERNEL_EVENT_REGISTRY.known_types():
         return True
@@ -617,6 +642,7 @@ def validate_event_schema_version(schema_version: str, strict: bool = False) -> 
 
     Raises:
         ValueError: When ``strict=True`` and *schema_version* does not match.
+
     """
     if schema_version == _CURRENT_EVENT_SCHEMA_VERSION:
         return True
@@ -630,3 +656,8 @@ def validate_event_schema_version(schema_version: str, strict: bool = False) -> 
         raise ValueError(msg)
     _registry_logger.warning(msg)
     return False
+
+
+def current_event_schema_version() -> str:
+    """Return current RuntimeEvent schema version string."""
+    return _CURRENT_EVENT_SCHEMA_VERSION

@@ -4,7 +4,7 @@ Backed by KernelRuntimeEventLog so task state is durable and replayable.
 All mutating operations append events; reads reconstruct state from the
 in-memory task store (populated at registration/update time).
 
-This is NOT an authority — it does not own projection or admission.
+This is NOT an authority 鈥?it does not own projection or admission.
 It is a coordinator that observes run outcomes and maintains task state.
 """
 
@@ -49,6 +49,7 @@ class TaskRegistry:
     Args:
         max_tasks: Maximum number of tasks retained in memory before oldest
             completed/aborted tasks are evicted.  Prevents unbounded growth.
+
     """
 
     _MAX_TASKS_DEFAULT = 10_000
@@ -66,10 +67,11 @@ class TaskRegistry:
                 every state-mutating operation appends a task lifecycle event
                 so that state can be recovered after a Worker restart via
                 ``InMemoryTaskEventLog.replay_into_registry()``.
+
         """
         self._tasks: dict[str, _TaskEntry] = {}
-        self._session_index: dict[str, list[str]] = {}  # session_id → [task_id]
-        self._run_index: dict[str, str] = {}  # run_id → task_id
+        self._session_index: dict[str, list[str]] = {}  # session_id 鈫?[task_id]
+        self._run_index: dict[str, str] = {}  # run_id 鈫?task_id
         self._lock = threading.Lock()
         self._max_tasks = max_tasks
         self._event_appender = event_appender
@@ -86,6 +88,7 @@ class TaskRegistry:
 
         Raises:
             ValueError: If task_id is already registered.
+
         """
         with self._lock:
             if descriptor.task_id in self._tasks:
@@ -133,6 +136,7 @@ class TaskRegistry:
 
         Raises:
             KeyError: If task_id is not registered.
+
         """
         with self._lock:
             entry = self._tasks[attempt.task_id]
@@ -157,13 +161,21 @@ class TaskRegistry:
                 attempt.run_id,
             )
 
-    def complete_attempt(self, task_id: str, run_id: str, outcome: str) -> None:
+    def complete_attempt(
+        self,
+        task_id: str,
+        run_id: str,
+        outcome: str,
+        failure: object | None = None,
+    ) -> None:
         """Mark the current attempt as completed and advance task state.
 
         Args:
             task_id: Task identifier.
             run_id: Run identifier of the attempt being completed.
             outcome: One of "completed", "failed", "cancelled".
+            failure: Optional failure payload captured for failed/cancelled attempts.
+
         """
         with self._lock:
             entry = self._tasks.get(task_id)
@@ -175,13 +187,29 @@ class TaskRegistry:
             now_iso = datetime.datetime.now(datetime.UTC).isoformat()
             # Update the matching attempt in-place via replacement (list of frozen)
             updated: list[TaskAttempt] = []
+            matched = False
             for a in entry.attempts:
                 if a.run_id == run_id and a.outcome is None:
                     from dataclasses import replace
 
-                    updated.append(replace(a, outcome=outcome, completed_at=now_iso))
+                    updated.append(
+                        replace(
+                            a,
+                            outcome=outcome,
+                            completed_at=now_iso,
+                            failure=failure if outcome != "completed" else None,
+                        )
+                    )
+                    matched = True
                 else:
                     updated.append(a)
+            if not matched:
+                _logger.warning(
+                    "complete_attempt: no active attempt matched task_id=%s run_id=%s",
+                    task_id,
+                    run_id,
+                )
+                return
             entry.attempts = updated
 
             if outcome == "completed":
@@ -210,6 +238,7 @@ class TaskRegistry:
         Args:
             task_id: Task identifier.
             state: New lifecycle state.
+
         """
         with self._lock:
             entry = self._tasks.get(task_id)
@@ -235,6 +264,7 @@ class TaskRegistry:
 
         Args:
             task_id: Task identifier.
+
         """
         with self._lock:
             entry = self._tasks.get(task_id)
@@ -254,6 +284,7 @@ class TaskRegistry:
 
         Args:
             run_id: Run identifier to look up and heartbeat.
+
         """
         with self._lock:
             task_id = self._run_index.get(run_id)
@@ -284,6 +315,7 @@ class TaskRegistry:
 
         Returns:
             TaskDescriptor or None.
+
         """
         with self._lock:
             entry = self._tasks.get(task_id)
@@ -297,6 +329,7 @@ class TaskRegistry:
 
         Returns:
             TaskHealthStatus or None if task_id not registered.
+
         """
         with self._lock:
             entry = self._tasks.get(task_id)
@@ -305,7 +338,10 @@ class TaskRegistry:
             current_attempt = entry.attempts[-1] if entry.attempts else None
             timeout_ms = entry.descriptor.restart_policy.heartbeat_timeout_ms
             is_stalled = False
-            if entry.lifecycle_state == "running" and entry.last_heartbeat_ms is not None:
+            if (
+                entry.lifecycle_state in ("running", "restarting")
+                and entry.last_heartbeat_ms is not None
+            ):
                 age_ms = _now_ms() - entry.last_heartbeat_ms
                 is_stalled = age_ms > timeout_ms
             return TaskHealthStatus(
@@ -331,6 +367,7 @@ class TaskRegistry:
 
         Returns:
             List of TaskAttempt records.
+
         """
         with self._lock:
             entry = self._tasks.get(task_id)
@@ -344,6 +381,7 @@ class TaskRegistry:
 
         Returns:
             List of TaskDescriptor objects in registration order.
+
         """
         with self._lock:
             task_ids = self._session_index.get(session_id, [])
@@ -355,13 +393,14 @@ class TaskRegistry:
             return result
 
     def get_task_id_for_run(self, run_id: str) -> str | None:
-        """Returns task_id for the given run_id under the registry lock.
+        """Return task_id for the given run_id under the registry lock.
 
         Args:
             run_id: Run identifier to look up.
 
         Returns:
             task_id or None if not found.
+
         """
         with self._lock:
             return self._run_index.get(run_id)
@@ -374,12 +413,13 @@ class TaskRegistry:
 
         Returns:
             List of TaskHealthStatus for stalled tasks.
+
         """
         with self._lock:
             stalled = []
             now = _now_ms()
             for task_id, entry in self._tasks.items():
-                if entry.lifecycle_state != "running":
+                if entry.lifecycle_state not in ("running", "restarting"):
                     continue
                 if entry.last_heartbeat_ms is None:
                     continue

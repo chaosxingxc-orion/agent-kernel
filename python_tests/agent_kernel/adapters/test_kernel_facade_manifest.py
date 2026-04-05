@@ -140,6 +140,10 @@ class TestSubmitPlan:
         call_args = facade._workflow_gateway.signal_workflow.call_args
         signal_request = call_args[0][1]
         assert signal_request.signal_type == "plan_submitted"
+        assert signal_request.signal_payload is not None
+        assert signal_request.signal_payload["plan"]["plan_type"] == "sequential"
+        assert signal_request.caused_by is not None
+        assert signal_request.caused_by.startswith("kernel_facade.submit_plan:run-x:")
 
     def test_rejects_unregistered_plan_type(self) -> None:
         """A custom object that is not a registered plan type is rejected."""
@@ -152,6 +156,12 @@ class TestSubmitPlan:
         assert response.accepted is False
         assert response.rejection_reason is not None
         facade._workflow_gateway.signal_workflow.assert_not_awaited()
+
+    def test_submit_plan_rejected_while_draining(self) -> None:
+        facade = _make_facade()
+        facade.set_draining(True)
+        with pytest.raises(RuntimeError, match="draining"):
+            asyncio.run(facade.submit_plan("run-1", SequentialPlan(steps=())))
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +201,42 @@ class TestSubmitApproval:
         signal_request = call_args[0][1]
         assert signal_request.signal_payload["approved"] is False
         assert signal_request.signal_payload["reason"] == "policy violation"
+
+    def test_submit_approval_rejected_while_draining(self) -> None:
+        facade = _make_facade()
+        facade.set_draining(True)
+        request = ApprovalRequest(
+            run_id="run-2",
+            approval_ref="appr-003",
+            approved=True,
+            reviewer_id="user-drain",
+        )
+        with pytest.raises(RuntimeError, match="draining"):
+            asyncio.run(facade.submit_approval(request))
+
+    def test_submit_approval_tracks_inflight_with_drain_coordinator(self) -> None:
+        class _DrainStub:
+            def __init__(self) -> None:
+                self.enter_calls = 0
+                self.exit_calls = 0
+
+            async def enter(self) -> None:
+                self.enter_calls += 1
+
+            async def exit(self) -> None:
+                self.exit_calls += 1
+
+        drain = _DrainStub()
+        facade = _make_facade(drain_coordinator=drain)
+        request = ApprovalRequest(
+            run_id="run-2",
+            approval_ref="appr-004",
+            approved=True,
+            reviewer_id="user-drain",
+        )
+        asyncio.run(facade.submit_approval(request))
+        assert drain.enter_calls == 1
+        assert drain.exit_calls == 1
 
 
 # ---------------------------------------------------------------------------

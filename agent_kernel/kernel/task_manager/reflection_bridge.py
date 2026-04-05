@@ -33,6 +33,7 @@ class ReflectionContext:
         failure_details: Structured list of per-attempt failure data.
         suggested_actions: Hint strings for the model (retry/replace/escalate).
         prompt_fragment: Ready-to-use prompt text for injection into LLM context.
+
     """
 
     task_id: str
@@ -63,6 +64,7 @@ class ReflectionBridge:
 
         Returns:
             ReflectionContext ready for injection into ReasoningLoop.
+
         """
         failure_details = self._extract_failure_details(attempts)
         failure_summary = self._summarize_failures(failure_details)

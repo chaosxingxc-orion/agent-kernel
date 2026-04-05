@@ -10,6 +10,7 @@ All state changes go through TaskRegistry (in-process) or RestartPolicyEngine
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +30,7 @@ class TaskWatchdog:
     Args:
         registry: TaskRegistry providing stall detection and heartbeats.
         policy_engine: RestartPolicyEngine that handles failures.
+
     """
 
     def __init__(
@@ -36,6 +38,7 @@ class TaskWatchdog:
         registry: TaskRegistry,
         policy_engine: RestartPolicyEngine,
     ) -> None:
+        """Initialize the instance with configured dependencies."""
         self._registry = registry
         self._policy_engine = policy_engine
 
@@ -44,13 +47,14 @@ class TaskWatchdog:
 
         Returns:
             List of task_ids that were found stalled and processed.
+
         """
         stalled = self._registry.get_stalled_tasks()
         processed: list[str] = []
 
         for health in stalled:
             if health.current_run_id is None:
-                # No active run — might have already been handled
+                # No active run 鈥?might have already been handled
                 continue
             _logger.warning(
                 "task.stall_detected task_id=%s run_id=%s missed_beats=%d",
@@ -62,7 +66,7 @@ class TaskWatchdog:
                 await self._policy_engine.handle_failure(
                     task_id=health.task_id,
                     failed_run_id=health.current_run_id,
-                    failure=None,  # stall — no explicit FailureEnvelope
+                    failure=None,  # stall 鈥?no explicit FailureEnvelope
                 )
                 processed.append(health.task_id)
             except Exception as exc:
@@ -74,8 +78,21 @@ class TaskWatchdog:
 
         return processed
 
+    def start(self, interval_s: float = 60.0) -> asyncio.Task[Any]:
+        """Start background watchdog loop and return the task handle."""
+
+        async def _loop() -> None:
+            try:
+                while True:
+                    await asyncio.sleep(interval_s)
+                    await self.watchdog_once()
+            except asyncio.CancelledError:
+                return
+
+        return asyncio.get_running_loop().create_task(_loop(), name="task_watchdog")
+
     # ------------------------------------------------------------------
-    # ObservabilityHook integration (partial — implement interface methods
+    # ObservabilityHook integration (partial 鈥?implement interface methods
     # needed for heartbeat forwarding)
     # ------------------------------------------------------------------
 

@@ -5,17 +5,17 @@ Design rationale:
   its execution substrate into one managed system.
 
   Substrate architecture:
-    The kernel *owns* its substrate — the substrate is a managed component,
+    The kernel *owns* its substrate 鈥?the substrate is a managed component,
     not a dependency the kernel passively connects to.  ``KernelRuntime.start()``
     creates a ``TemporalAdaptor`` (or a custom ``RuntimeSubstrate``), wires
     all service instances into it, and starts it.  ``stop()`` (or the async
     context manager) shuts everything down in the correct order.
 
   Temporal connection modes (via ``TemporalSubstrateConfig.mode``):
-    ``"sdk"``  — connects to an external Temporal cluster via
+    ``"sdk"``  鈥?connects to an external Temporal cluster via
                  ``Client.connect(address)``.  The default; suitable for
                  production with a managed Temporal service.
-    ``"host"`` — starts an embedded Temporal dev-server via
+    ``"host"`` 鈥?starts an embedded Temporal dev-server via
                  ``WorkflowEnvironment.start_local()`` (requires
                  ``pip install 'temporalio[testing]'``).  No external process
                  needed; suitable for local development and CI.
@@ -31,6 +31,8 @@ Design rationale:
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Self
@@ -55,7 +57,8 @@ from agent_kernel.kernel.minimal_runtime import (
     StaticDispatchAdmissionService,
     StaticRecoveryGateService,
 )
-from agent_kernel.runtime.health import KernelHealthProbe
+from agent_kernel.runtime.drain_coordinator import DrainCoordinator
+from agent_kernel.runtime.health import HealthStatus, KernelHealthProbe, event_log_health_check
 from agent_kernel.substrate.local.adaptor import LocalFSMAdaptor, LocalSubstrateConfig
 from agent_kernel.substrate.temporal.adaptor import TemporalAdaptor, TemporalSubstrateConfig
 from agent_kernel.substrate.temporal.run_actor_workflow import (
@@ -70,7 +73,7 @@ _runtime_logger = logging.getLogger(__name__)
 class KernelRuntimeConfig:
     """Unified configuration for the single-system kernel runtime.
 
-    All components — event log, substrate adaptor, facade, and gateway — are
+    All components 鈥?event log, substrate adaptor, facade, and gateway 鈥?are
     wired from this one config object.  No external bootstrap code required.
 
     Substrate selection:
@@ -82,7 +85,7 @@ class KernelRuntimeConfig:
         Pass an explicit ``TemporalSubstrateConfig`` to switch modes or
         override individual Temporal settings::
 
-            # Host mode — embedded dev-server, no external Temporal needed
+            # Host mode 鈥?embedded dev-server, no external Temporal needed
             config = KernelRuntimeConfig(
                 substrate=TemporalSubstrateConfig(mode="host"),
             )
@@ -109,6 +112,7 @@ class KernelRuntimeConfig:
             Default 5 000 ms.
         substrate: Optional explicit substrate configuration.  When provided
             takes full precedence over the flat Temporal fields above.
+
     """
 
     task_queue: str = "agent-kernel"
@@ -116,12 +120,20 @@ class KernelRuntimeConfig:
     temporal_namespace: str = "default"
     event_log_backend: Literal["in_memory", "sqlite"] = "in_memory"
     sqlite_database_path: str | Path = ":memory:"
+    persistence_backend: Literal["in_memory", "sqlite", "postgresql"] | None = None
+    pg_dsn: str | None = None
+    pg_pool_min: int = 2
+    pg_pool_max: int = 10
     strict_mode_enabled: bool = True
     workflow_id_prefix: str = "run"
     observability_hook: ObservabilityHook | None = None
     event_export_port: EventExportPort | None = None
     export_timeout_ms: int = 5000
     substrate: TemporalSubstrateConfig | LocalSubstrateConfig | None = None
+    enable_outbox_reconciler: bool = False
+    outbox_reconcile_interval_s: float = 300.0
+    enable_circuit_breaker_probe: bool = False
+    circuit_breaker_probe_interval_s: float = 60.0
 
 
 class KernelRuntime:
@@ -159,10 +171,18 @@ class KernelRuntime:
         facade: KernelFacade,
         adaptor: TemporalAdaptor,
         health: KernelHealthProbe,
+        drain_coordinator: DrainCoordinator,
+        background_tasks: list[Any] | None = None,
+        closeables: list[Any] | None = None,
     ) -> None:
+        """Initialize the instance with configured dependencies."""
         self._facade = facade
         self._adaptor = adaptor
         self._health = health
+        self._drain_coordinator = drain_coordinator
+        self._background_tasks = background_tasks or []
+        self._closeables = closeables or []
+        self._stopped = False
 
     # ------------------------------------------------------------------
     # Backward-compat internal accessors (used by tests and heartbeat)
@@ -187,6 +207,7 @@ class KernelRuntime:
 
         Args:
             callback: Callable that accepts one ``asyncio.Task`` argument.
+
         """
         self._adaptor.add_worker_done_callback(callback)
 
@@ -220,11 +241,12 @@ class KernelRuntime:
 
         Raises:
             RuntimeError: If the Temporal Python SDK is not installed.
+
         """
         if config is None:
             config = KernelRuntimeConfig()
 
-        # Build the substrate config — explicit substrate takes precedence
+        # Build the substrate config 鈥?explicit substrate takes precedence
         # over the flat backward-compat fields.
         substrate_config: TemporalSubstrateConfig | LocalSubstrateConfig
         if config.substrate is not None:
@@ -267,38 +289,143 @@ class KernelRuntime:
             adaptor = TemporalAdaptor(substrate_config)
             await adaptor.start(deps, temporal_client=temporal_client)
 
-        facade = KernelFacade(adaptor.gateway)
         health = KernelHealthProbe()
+        health.register_check(
+            "event_log",
+            event_log_health_check(event_log),
+            required_for_startup=True,
+        )
+
+        def _worker_health_check() -> tuple[HealthStatus, str]:
+            if adaptor.worker_failed:
+                with contextlib.suppress(Exception):
+                    adaptor.check_worker()
+                return HealthStatus.UNHEALTHY, "worker_failed"
+            return HealthStatus.OK, "worker_running"
+
+        health.register_check("worker", _worker_health_check, required_for_startup=True)
+
+        background_tasks: list[Any] = []
+        outbox_scheduler: Any | None = None
+        if config.enable_outbox_reconciler:
+            from agent_kernel.kernel.persistence.dispatch_outbox_reconciler import (
+                DispatchOutboxReconciler,
+                ScheduledOutboxReconciler,
+            )
+
+            outbox_scheduler = ScheduledOutboxReconciler(
+                DispatchOutboxReconciler(),
+                event_log=event_log,
+                dedupe_store=dedupe_store,
+                interval_s=config.outbox_reconcile_interval_s,
+                observability_hook=config.observability_hook,
+            )
+            background_tasks.append(outbox_scheduler.start())
+
+            def _outbox_health_check() -> tuple[HealthStatus, str]:
+                last_result = outbox_scheduler.last_reconciliation_result
+                if last_result is None:
+                    return (HealthStatus.OK, "outbox_reconciler_not_run_yet")
+                if last_result.violations_found > 0:
+                    return (
+                        HealthStatus.DEGRADED,
+                        (
+                            "outbox_reconciler_found_violations "
+                            f"found={last_result.violations_found} "
+                            f"repaired={last_result.violations_repaired}"
+                        ),
+                    )
+                return (HealthStatus.OK, "outbox_reconciler_clean")
+
+            health.register_check("outbox_reconciler", _outbox_health_check)
+
+        if config.enable_circuit_breaker_probe:
+            store = getattr(recovery, "_circuit_breaker_store", None)
+            policy = getattr(recovery, "_circuit_breaker_policy", None)
+            if store is not None and policy is not None:
+                from agent_kernel.kernel.recovery.circuit_breaker_probe import (
+                    CircuitBreakerProbeScheduler,
+                )
+
+                probe_scheduler = CircuitBreakerProbeScheduler(
+                    circuit_breaker_store=store,
+                    policy=policy,
+                    probe_fns={},
+                    interval_s=config.circuit_breaker_probe_interval_s,
+                )
+                background_tasks.append(probe_scheduler.start())
+
+        substrate_type = (
+            "local_fsm" if isinstance(substrate_config, LocalSubstrateConfig) else "temporal"
+        )
+        drain_coordinator = DrainCoordinator()
+        facade = KernelFacade(
+            adaptor.gateway,
+            health_probe=health,
+            substrate_type=substrate_type,
+            drain_coordinator=drain_coordinator,
+        )
+
+        closeables = _collect_closeables(event_log=event_log, dedupe_store=dedupe_store)
 
         _runtime_logger.info(
-            "KernelRuntime started — substrate=%s",
+            "KernelRuntime started 鈥?substrate=%s",
             type(substrate_config).__name__,
         )
-        return cls(facade=facade, adaptor=adaptor, health=health)
+        return cls(
+            facade=facade,
+            adaptor=adaptor,
+            health=health,
+            drain_coordinator=drain_coordinator,
+            background_tasks=background_tasks,
+            closeables=closeables,
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def stop(self) -> None:
+    async def stop(self, drain_timeout_s: float = 30.0) -> None:
         """Gracefully stop the substrate and clear kernel state.
 
         Delegates to the substrate adaptor which cancels the worker task,
         waits for cleanup, and (in host mode) shuts down the embedded
         dev-server.  Safe to call multiple times.
         """
+        if self._stopped:
+            return
+
+        self._facade.set_draining(True)
+        drained = await self._drain_coordinator.wait(drain_timeout_s)
+        if not drained:
+            _runtime_logger.warning(
+                "KernelRuntime drain timed out after %.1fs; forcing shutdown with in_flight=%d",
+                drain_timeout_s,
+                self._drain_coordinator.in_flight_count,
+            )
+
+        for task in self._background_tasks:
+            if task is not None and not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+
         await self._adaptor.stop()
+        for resource in self._closeables:
+            await _close_resource(resource)
+        self._stopped = True
 
     async def __aenter__(self) -> Self:
         """Enters the async context manager and returns this runtime.
 
         Returns:
             Self: This runtime instance.
+
         """
         return self
 
     async def __aexit__(self, *_: object) -> None:
-        """Exits the async context manager, stopping the runtime."""
+        """Exit the async context manager, stopping the runtime."""
         await self.stop()
 
     # ------------------------------------------------------------------
@@ -307,10 +434,11 @@ class KernelRuntime:
 
     @property
     def facade(self) -> KernelFacade:
-        """The kernel facade — the only allowed platform entrypoint.
+        """The kernel facade 鈥?the only allowed platform entrypoint.
 
         Returns:
             KernelFacade: The wired facade instance.
+
         """
         return self._facade
 
@@ -320,6 +448,7 @@ class KernelRuntime:
 
         Returns:
             TemporalWorkflowGateway: The gateway wired by the active substrate.
+
         """
         return self._adaptor.gateway
 
@@ -329,6 +458,7 @@ class KernelRuntime:
 
         Returns:
             KernelHealthProbe: The health probe instance.
+
         """
         return self._health
 
@@ -338,6 +468,7 @@ class KernelRuntime:
 
         Returns:
             bool: Worker failure state.
+
         """
         return self._adaptor.worker_failed
 
@@ -349,6 +480,7 @@ class KernelRuntime:
 
         Raises:
             Exception: The exception that caused the worker to exit.
+
         """
         self._adaptor.check_worker()
 
@@ -363,7 +495,7 @@ def _build_services(
 ) -> tuple[Any, Any, Any, Any, Any, Any, Any]:
     """Build shared service instances from config.
 
-    All returned instances share state (e.g. event_log ↔ projection).
+    All returned instances share state (e.g. event_log 鈫?projection).
     They must be passed together to ``RunActorDependencyBundle``.
 
     Consistency guarantee: when ``event_log_backend="sqlite"``, both the
@@ -384,8 +516,28 @@ def _build_services(
     Returns:
         Tuple of (event_log, projection, admission, executor, recovery,
             deduper, dedupe_store).
+
     """
-    if config.event_log_backend == "sqlite":
+    backend = _resolve_persistence_backend(config)
+    if backend == "postgresql":
+        if not config.pg_dsn:
+            raise ValueError(
+                "KernelRuntimeConfig.pg_dsn is required when persistence_backend='postgresql'."
+            )
+        from agent_kernel.kernel.persistence.pg_colocated_bundle import (
+            PostgresColocatedBundle,
+        )
+
+        bundle = PostgresColocatedBundle(
+            config.pg_dsn,
+            pool_min=config.pg_pool_min,
+            pool_max=config.pg_pool_max,
+        )
+        base_event_log = bundle.event_log
+        dedupe_store = bundle.dedupe_store
+        # Keep shared bundle reachable so runtime stop can close resources.
+        base_event_log._kernel_colocated_bundle = bundle
+    elif backend == "sqlite":
         from agent_kernel.kernel.persistence.sqlite_dedupe_store import (
             SQLiteDedupeStore,
         )
@@ -423,3 +575,69 @@ def _build_services(
     recovery = StaticRecoveryGateService()
     deduper = InMemoryDecisionDeduper()
     return event_log, projection, admission, executor, recovery, deduper, dedupe_store
+
+
+def _resolve_persistence_backend(config: KernelRuntimeConfig) -> str:
+    """Resolve effective persistence backend with backward compatibility.
+
+    ``persistence_backend`` takes precedence when explicitly configured.
+    Otherwise we map legacy ``event_log_backend``:
+    - ``sqlite`` -> ``sqlite``
+    - ``in_memory`` -> ``in_memory``
+    """
+    if config.persistence_backend is not None:
+        return config.persistence_backend
+    if config.event_log_backend == "sqlite":
+        return "sqlite"
+    return "in_memory"
+
+
+def _collect_closeables(*, event_log: Any, dedupe_store: Any) -> list[Any]:
+    """Collect closable persistence resources from wired services.
+
+    ``event_log`` can be wrapped (for example ``EventExportingEventLog``).
+    We therefore traverse ``_inner`` links so resources attached to the raw
+    storage layer (for example ``_kernel_colocated_bundle`` on PostgreSQL
+    logs) are still discovered and closed.
+    """
+    closeables: list[Any] = []
+    seen: set[int] = set()
+
+    def _register(candidate: Any) -> None:
+        if candidate is None:
+            return
+        candidate_id = id(candidate)
+        if candidate_id in seen:
+            return
+        seen.add(candidate_id)
+        if hasattr(candidate, "close"):
+            closeables.append(candidate)
+
+    log_chain: list[Any] = []
+    current = event_log
+    traversed: set[int] = set()
+    while current is not None and id(current) not in traversed:
+        traversed.add(id(current))
+        log_chain.append(current)
+        current = getattr(current, "_inner", None)
+
+    # Close event-log wrappers first (outer -> inner), then bundled infra.
+    for log in log_chain:
+        _register(log)
+    for log in log_chain:
+        _register(getattr(log, "_kernel_colocated_bundle", None))
+    _register(dedupe_store)
+    return closeables
+
+
+async def _close_resource(resource: Any) -> None:
+    """Close one resource, awaiting async close when required."""
+    close_fn = getattr(resource, "close", None)
+    if close_fn is None:
+        return
+    try:
+        maybe_result = close_fn()
+        if asyncio.iscoroutine(maybe_result):
+            await maybe_result
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        _runtime_logger.warning("KernelRuntime resource close failed: %r", exc)

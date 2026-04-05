@@ -17,21 +17,25 @@ class SQLiteRecoveryOutcomeStore(RecoveryOutcomeStore):
     """Persists recovery outcomes in SQLite with per-run latest lookup."""
 
     def __init__(self, database_path: str | Path = ":memory:") -> None:
+        """Initialize the instance with configured dependencies."""
         self._database_path = str(database_path)
         self._conn = sqlite3.connect(self._database_path)
         self._conn.row_factory = sqlite3.Row
         self._ensure_schema()
 
     def close(self) -> None:
-        """Closes SQLite connection."""
+        """Close SQLite connection."""
         self._conn.close()
 
     async def write_outcome(self, outcome: RecoveryOutcome) -> None:
-        """Persists one recovery outcome row.
+        """Persist one recovery outcome row.
+
         Args:
             outcome: Recovery outcome record to persist.
+
         Raises:
             sqlite3.Error: On database write failure.
+
         """
         try:
             self._conn.execute(
@@ -63,11 +67,14 @@ class SQLiteRecoveryOutcomeStore(RecoveryOutcomeStore):
             raise
 
     async def latest_for_run(self, run_id: str) -> RecoveryOutcome | None:
-        """Returns latest recovery outcome for one run, if present.
+        """Return latest recovery outcome for one run, if present.
+
         Args:
             run_id: Identifier of the target run.
+
         Returns:
             RecoveryOutcome | None: Latest recovery outcome, or ``None`` if absent.
+
         """
         row = self._conn.execute(
             """
