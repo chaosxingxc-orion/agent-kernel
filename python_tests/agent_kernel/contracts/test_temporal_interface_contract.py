@@ -60,6 +60,8 @@ def test_query_run_response_includes_recovery_mode_for_observability() -> None:
         "recovery_mode",
         "recovery_reason",
         "active_child_runs",
+        "policy_versions",
+        "active_stage_id",
     ]
 
 

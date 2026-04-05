@@ -11,6 +11,7 @@ capability inputs into a replay-safe execution snapshot.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from dataclasses import dataclass, field
@@ -75,6 +76,14 @@ class CapabilitySnapshotInput:
     session_mode: str | None = None
     approval_state: str | None = None
     declarative_bundle_digest: DeclarativeBundleDigest | None = None
+    peer_run_bindings: list[str] = field(default_factory=list)
+    """Explicit list of peer run_ids authorized to signal this run.
+
+    When non-empty, ``peer_auth.is_peer_run_authorized()`` uses this as the
+    production-tier allowlist.  Empty means PoC fallback (active_child_runs).
+    Included in the SHA256 hash so the authorization policy is immutably
+    bound to the snapshot.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +130,8 @@ class CapabilitySnapshot:
     declarative_bundle_digest: DeclarativeBundleDigest | None = None
     created_at: str = ""
     snapshot_schema_version: str = "1"
+    peer_run_bindings: list[str] = field(default_factory=list)
+    """Authorized peer run_ids (production tier); empty = PoC fallback."""
 
 
 _CURRENT_SNAPSHOT_SCHEMA_VERSION = "1"
@@ -156,6 +167,7 @@ class CapabilitySnapshotBuilder:
             reference appears identical — use ``dataclasses.replace()`` to
             produce a new instance before mutating.
         """
+        input_value = copy.deepcopy(input_value)
         self._validate_input(input_value)
 
         normalized_tool_bindings = _normalize_string_list(input_value.tool_bindings)
@@ -181,6 +193,7 @@ class CapabilitySnapshotBuilder:
             "declarative_bundle_digest": _normalize_bundle_digest(
                 input_value.declarative_bundle_digest
             ),
+            "peer_run_bindings": _normalize_string_list(input_value.peer_run_bindings),
         }
         snapshot_hash = _build_stable_sha256(canonical_payload)
 
@@ -207,6 +220,7 @@ class CapabilitySnapshotBuilder:
             declarative_bundle_digest=input_value.declarative_bundle_digest,
             created_at=_utc_now_iso(),
             snapshot_schema_version=_CURRENT_SNAPSHOT_SCHEMA_VERSION,
+            peer_run_bindings=_normalize_string_list(input_value.peer_run_bindings),
         )
 
     def _validate_input(self, input_value: CapabilitySnapshotInput) -> None:

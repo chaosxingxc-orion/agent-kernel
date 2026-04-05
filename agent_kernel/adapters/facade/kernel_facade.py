@@ -23,9 +23,12 @@ from agent_kernel.adapters.agent_core.context_adapter import AgentCoreContextInp
 from agent_kernel.kernel.action_type_registry import KERNEL_ACTION_TYPE_REGISTRY
 from agent_kernel.kernel.contracts import (
     ApprovalRequest,
+    BranchStateUpdateRequest,
     CancelRunRequest,
     ExecutionPlan,
+    HumanGateRequest,
     KernelManifest,
+    OpenBranchRequest,
     PlanSubmissionResponse,
     QueryRunDashboardResponse,
     QueryRunRequest,
@@ -37,7 +40,12 @@ from agent_kernel.kernel.contracts import (
     SpawnChildRunResponse,
     StartRunRequest,
     StartRunResponse,
+    TaskViewRecord,
     TemporalWorkflowGateway,
+    TraceBranchView,
+    TraceRuntimeView,
+    TraceStageState,
+    TraceStageView,
 )
 from agent_kernel.kernel.event_registry import KERNEL_EVENT_REGISTRY
 from agent_kernel.kernel.plan_type_registry import KERNEL_PLAN_TYPE_REGISTRY
@@ -110,6 +118,8 @@ class KernelFacade:
         substrate_type: str = _SUBSTRATE_TEMPORAL,
         kernel_version: str = _KERNEL_VERSION,
         task_registry: TaskRegistry | None = None,
+        task_view_log: Any | None = None,
+        dedupe_store: Any | None = None,
     ) -> None:
         """Initializes facade with substrate gateway and optional adapters.
 
@@ -130,6 +140,12 @@ class KernelFacade:
             task_registry: Optional ``TaskRegistry`` for task-level lifecycle
                 management.  When provided, enables ``register_task()``,
                 ``get_task_status()``, and ``list_session_tasks()``.
+            task_view_log: Optional task view log store (e.g.
+                ``SQLiteTaskViewLog``).  When provided, enables
+                ``record_task_view()``, ``get_task_view_record()``, and
+                ``get_task_view_by_decision()``.
+            dedupe_store: Optional dedupe store for ``get_action_state()``.
+                When ``None``, ``get_action_state()`` always returns ``None``.
         """
         self._workflow_gateway = workflow_gateway
         self._context_adapter = context_adapter
@@ -138,6 +154,16 @@ class KernelFacade:
         self._substrate_type = substrate_type
         self._kernel_version = kernel_version
         self._task_registry = task_registry
+        self._task_view_log = task_view_log
+        self._dedupe_store = dedupe_store
+        # In-memory branch registry: run_id → {branch_id: TraceBranchView}.
+        # Branch lifecycle events are also forwarded to the workflow as signals.
+        self._branch_registry: dict[str, dict[str, TraceBranchView]] = {}
+        self._branch_lock = threading.Lock()
+        # In-memory stage registry: run_id → {stage_id: TraceStageView}.
+        # Stage lifecycle events are also forwarded to the workflow as signals.
+        self._stage_registry: dict[str, dict[str, TraceStageView]] = {}
+        self._stage_lock = threading.Lock()
         # Per-instance approval dedup gate: tracks (run_id, approval_ref) pairs
         # that have already been forwarded to the substrate.  Prevents duplicate
         # approval signals from the same facade instance (e.g. accidental double
@@ -145,6 +171,12 @@ class KernelFacade:
         # facade instance — cross-process dedup lives in the event log.
         self._submitted_approvals: set[tuple[str, str]] = set()
         self._approvals_lock = threading.Lock()
+        # Human gate registry: run_id → set of gate_refs opened via
+        # open_human_gate().  Used to derive review_state in query_trace_runtime().
+        # "_resolved" suffix tracks gate_refs resolved by submit_approval().
+        self._open_human_gates: dict[str, set[str]] = {}
+        self._resolved_human_gates: dict[str, set[str]] = {}
+        self._human_gate_lock = threading.Lock()
 
     @staticmethod
     def _build_signal_observability(
@@ -416,6 +448,8 @@ class KernelFacade:
             recovery_mode=projection.recovery_mode,
             recovery_reason=projection.recovery_reason,
             active_child_runs=projection.active_child_runs,
+            policy_versions=projection.policy_versions,
+            active_stage_id=getattr(projection, "active_stage_id", None),
         )
 
     async def query_run_dashboard(self, run_id: str) -> QueryRunDashboardResponse:
@@ -449,9 +483,20 @@ class KernelFacade:
             A child run response that hides substrate handles.
 
         """
+        # Inherit parent's context binding into the child request so the child
+        # run has access to the same workspace context without requiring the
+        # caller to manually thread binding_ref through spawn requests.
+        request_for_gateway = request
+        if self._context_adapter is not None and request.context_ref is None:
+            parent_binding = self._context_adapter.resolve_run_context(request.parent_run_id)
+            if parent_binding is not None:
+                from dataclasses import replace as _replace
+
+                request_for_gateway = _replace(request, context_ref=parent_binding)
+
         workflow = await self._workflow_gateway.start_child_workflow(
             request.parent_run_id,
-            request,
+            request_for_gateway,
         )
         child_run_id = str(workflow.get("run_id") or workflow.get("workflow_id", ""))
         # Minimal closed-loop behavior: notify parent run projection that a new
@@ -512,6 +557,20 @@ class KernelFacade:
             supported_event_types=KERNEL_EVENT_REGISTRY.known_types(),
             substrate_type=self._substrate_type,
             substrate_limitations=_substrate_limitations(self._substrate_type),
+            supported_trace_features=frozenset(
+                {
+                    "run_policy_version_freeze",
+                    "trace_runtime_view",
+                    "task_view_record",
+                    "task_view_late_bind",
+                    "branch_lifecycle",
+                    "stage_lifecycle",
+                    "human_gate",
+                    "action_state_query",
+                    "trace_failure_code",
+                    "side_effect_class",
+                }
+            ),
         )
 
     async def submit_plan(
@@ -591,6 +650,10 @@ class KernelFacade:
             if dedup_key in self._submitted_approvals:
                 return
             self._submitted_approvals.add(dedup_key)
+        # Mark the gate as resolved so query_trace_runtime() can derive
+        # review_state = "completed" instead of "pending".
+        with self._human_gate_lock:
+            self._resolved_human_gates.setdefault(request.run_id, set()).add(request.approval_ref)
         await self._workflow_gateway.signal_workflow(
             request.run_id,
             SignalRunRequest(
@@ -751,6 +814,358 @@ class KernelFacade:
                 "KernelFacade construction."
             )
         return self._task_registry.list_session_tasks(session_id)
+
+    # ------------------------------------------------------------------
+    # TRACE alignment methods (Gap A-I from hi-agent architecture review)
+    # ------------------------------------------------------------------
+
+    async def query_trace_runtime(self, run_id: str) -> TraceRuntimeView:
+        """Returns a TRACE-facing aggregated runtime view for one run.
+
+        Builds a ``TraceRuntimeView`` from the kernel's ``RunProjection`` plus
+        the in-memory branch registry.  The branch list reflects calls to
+        ``open_branch()`` and ``mark_branch_*()`` since this facade instance
+        was created.
+
+        Args:
+            run_id: Target run identifier.
+
+        Returns:
+            ``TraceRuntimeView`` derived from the current run projection.
+
+        Raises:
+            ValueError: If the run is not found.
+        """
+        import datetime
+
+        response = await self.query_run(QueryRunRequest(run_id=run_id))
+        # Map kernel lifecycle state to TRACE run state.
+        _lifecycle_to_trace: dict[str, str] = {
+            "created": "created",
+            "running": "active",
+            "waiting_callback": "waiting",
+            "waiting_human": "waiting",
+            "completed": "completed",
+            "failed": "failed",
+            "cancelled": "aborted",
+        }
+        run_state = _lifecycle_to_trace.get(response.lifecycle_state, "active")
+        wait_state: str = "none"
+        if response.waiting_external:
+            wait_state = "external_callback"
+        with self._human_gate_lock:
+            open_gates = self._open_human_gates.get(run_id, set())
+            resolved_gates = self._resolved_human_gates.get(run_id, set())
+        if open_gates:
+            unresolved = open_gates - resolved_gates
+            review_state: str = "pending" if unresolved else "completed"
+        else:
+            review_state = "not_required"
+
+        with self._branch_lock:
+            branches = list((self._branch_registry.get(run_id) or {}).values())
+
+        with self._stage_lock:
+            stages = list((self._stage_registry.get(run_id) or {}).values())
+
+        return TraceRuntimeView(
+            run_id=run_id,
+            run_state=run_state,  # type: ignore[arg-type]
+            wait_state=wait_state,  # type: ignore[arg-type]
+            review_state=review_state,  # type: ignore[arg-type]
+            active_stage_id=response.active_stage_id,
+            branches=branches,
+            policy_versions=response.policy_versions,
+            projected_at=datetime.datetime.now(datetime.UTC).isoformat(),
+            stages=stages,
+        )
+
+    def record_task_view(self, record: TaskViewRecord) -> str:
+        """Persists a TaskViewRecord to the injected task_view_log store.
+
+        Args:
+            record: The task view record to persist.
+
+        Returns:
+            The ``task_view_id`` of the persisted record.
+
+        Raises:
+            RuntimeError: If no ``task_view_log`` was provided at construction.
+        """
+        if self._task_view_log is None:
+            raise RuntimeError(
+                "record_task_view() requires a task_view_log injected at KernelFacade construction."
+            )
+        self._task_view_log.write(record)
+        return record.task_view_id
+
+    def get_task_view_record(self, task_view_id: str) -> TaskViewRecord | None:
+        """Returns a TaskViewRecord by its task_view_id.
+
+        Args:
+            task_view_id: Identifier to look up.
+
+        Returns:
+            Matching ``TaskViewRecord``, or ``None`` if not found.
+
+        Raises:
+            RuntimeError: If no ``task_view_log`` was provided at construction.
+        """
+        if self._task_view_log is None:
+            raise RuntimeError(
+                "get_task_view_record() requires a task_view_log injected at "
+                "KernelFacade construction."
+            )
+        return self._task_view_log.get_by_id(task_view_id)
+
+    def get_task_view_by_decision(self, run_id: str, decision_ref: str) -> TaskViewRecord | None:
+        """Returns the latest TaskViewRecord for one run + decision_ref pair.
+
+        Args:
+            run_id: Target run identifier.
+            decision_ref: Decision reference to look up.
+
+        Returns:
+            Matching ``TaskViewRecord``, or ``None`` if not found.
+
+        Raises:
+            RuntimeError: If no ``task_view_log`` was provided at construction.
+        """
+        if self._task_view_log is None:
+            raise RuntimeError(
+                "get_task_view_by_decision() requires a task_view_log injected at "
+                "KernelFacade construction."
+            )
+        return self._task_view_log.get_by_decision(run_id, decision_ref)
+
+    def bind_task_view_to_decision(self, task_view_id: str, decision_ref: str) -> None:
+        """Binds a persisted TaskViewRecord to its resulting decision_ref.
+
+        Delegates to the injected task_view_log's ``bind_to_decision()`` method.
+        Call this after the model responds to late-bind the decision reference.
+
+        Args:
+            task_view_id: The task view record identifier to update.
+            decision_ref: Decision reference from TurnIntentRecord.intent_commit_ref.
+
+        Raises:
+            RuntimeError: If no ``task_view_log`` was provided at construction.
+        """
+        if self._task_view_log is None:
+            raise RuntimeError(
+                "bind_task_view_to_decision() requires a task_view_log injected at "
+                "KernelFacade construction."
+            )
+        self._task_view_log.bind_to_decision(task_view_id, decision_ref)
+
+    async def open_stage(self, stage_id: str, run_id: str, branch_id: str | None = None) -> None:
+        """Opens a new TRACE stage within a run.
+
+        Records the stage in the in-memory stage registry and forwards a
+        ``stage_opened`` signal to the workflow for durable event logging.
+
+        Args:
+            stage_id: Stage identifier (e.g. ``"route"``, ``"capture"``).
+            run_id: Target run identifier.
+            branch_id: Optional branch this stage belongs to.
+        """
+        import datetime
+
+        view = TraceStageView(
+            stage_id=stage_id,
+            state="active",  # type: ignore[arg-type]
+            entered_at=datetime.datetime.now(datetime.UTC).isoformat(),
+            branch_id=branch_id,
+        )
+        with self._stage_lock:
+            self._stage_registry.setdefault(run_id, {})[stage_id] = view
+        await self._workflow_gateway.signal_run(
+            SignalRunRequest(
+                run_id=run_id,
+                signal_type="stage_opened",
+                signal_payload={
+                    "stage_id": stage_id,
+                    "branch_id": branch_id,
+                },
+                caused_by="kernel_facade.open_stage",
+            )
+        )
+
+    async def mark_stage_state(
+        self,
+        run_id: str,
+        stage_id: str,
+        new_state: TraceStageState,
+        failure_code: str | None = None,
+    ) -> None:
+        """Updates a stage's lifecycle state.
+
+        Updates the in-memory stage registry and forwards a
+        ``stage_state_updated`` signal to the workflow.
+
+        Args:
+            run_id: Target run identifier.
+            stage_id: Stage identifier to update.
+            new_state: New ``TraceStageState`` value.
+            failure_code: Optional failure code when transitioning to ``"failed"``.
+
+        Raises:
+            KeyError: If the stage_id is not found for this run.
+        """
+        import dataclasses
+        import datetime
+
+        with self._stage_lock:
+            run_stages = self._stage_registry.get(run_id, {})
+            existing = run_stages.get(stage_id)
+            if existing is None:
+                raise KeyError(f"Stage {stage_id!r} not found for run {run_id!r}.")
+            exited_at: str | None = None
+            if new_state in ("completed", "failed"):
+                exited_at = datetime.datetime.now(datetime.UTC).isoformat()
+            updated = dataclasses.replace(
+                existing,
+                state=new_state,
+                exited_at=exited_at if exited_at else existing.exited_at,
+                failure_code=failure_code if failure_code is not None else existing.failure_code,
+            )
+            run_stages[stage_id] = updated
+        await self._workflow_gateway.signal_run(
+            SignalRunRequest(
+                run_id=run_id,
+                signal_type="stage_state_updated",
+                signal_payload={
+                    "stage_id": stage_id,
+                    "new_state": new_state,
+                    "failure_code": failure_code,
+                },
+                caused_by="kernel_facade.mark_stage_state",
+            )
+        )
+
+    async def open_branch(self, request: OpenBranchRequest) -> None:
+        """Opens a new trajectory branch within a run.
+
+        Records the branch in the in-memory branch registry and forwards a
+        ``branch_opened`` signal to the workflow for durable event logging.
+
+        Args:
+            request: Branch open request.
+        """
+        import datetime
+
+        view = TraceBranchView(
+            branch_id=request.branch_id,
+            stage_id=request.stage_id,
+            state="active",  # type: ignore[arg-type]
+            opened_at=datetime.datetime.now(datetime.UTC).isoformat(),
+            parent_branch_id=request.parent_branch_id,
+            proposed_by=request.proposed_by,
+        )
+        with self._branch_lock:
+            self._branch_registry.setdefault(request.run_id, {})[request.branch_id] = view
+        await self._workflow_gateway.signal_run(
+            SignalRunRequest(
+                run_id=request.run_id,
+                signal_type="branch_opened",
+                signal_payload={
+                    "branch_id": request.branch_id,
+                    "stage_id": request.stage_id,
+                    "parent_branch_id": request.parent_branch_id,
+                    "proposed_by": request.proposed_by,
+                },
+                caused_by="kernel_facade.open_branch",
+            )
+        )
+
+    async def mark_branch_state(self, request: BranchStateUpdateRequest) -> None:
+        """Updates a branch's lifecycle state.
+
+        Updates the in-memory branch registry and forwards a
+        ``branch_state_updated`` signal to the workflow.
+
+        Args:
+            request: Branch state update request.
+
+        Raises:
+            KeyError: If the branch_id is not found for this run.
+        """
+        with self._branch_lock:
+            run_branches = self._branch_registry.get(request.run_id, {})
+            existing = run_branches.get(request.branch_id)
+            if existing is None:
+                raise KeyError(
+                    f"Branch {request.branch_id!r} not found for run {request.run_id!r}."
+                )
+            import dataclasses
+
+            updated = dataclasses.replace(
+                existing,
+                state=request.new_state,
+                failure_code=str(request.failure_code.value)
+                if request.failure_code
+                else existing.failure_code,
+            )
+            run_branches[request.branch_id] = updated
+        await self._workflow_gateway.signal_run(
+            SignalRunRequest(
+                run_id=request.run_id,
+                signal_type="branch_state_updated",
+                signal_payload={
+                    "branch_id": request.branch_id,
+                    "new_state": request.new_state,
+                    "failure_code": request.failure_code.value if request.failure_code else None,
+                    "reason": request.reason,
+                },
+                caused_by="kernel_facade.mark_branch_state",
+            )
+        )
+
+    async def open_human_gate(self, request: HumanGateRequest) -> None:
+        """Opens a human review gate within a run.
+
+        Forwards a ``human_gate_opened`` signal to the workflow for durable
+        event logging.  The workflow records it as an ``authoritative_fact``
+        and blocks auto-resume while review_state != "approved".
+
+        Args:
+            request: Human gate open request.
+        """
+        with self._human_gate_lock:
+            self._open_human_gates.setdefault(request.run_id, set()).add(request.gate_ref)
+        await self._workflow_gateway.signal_run(
+            SignalRunRequest(
+                run_id=request.run_id,
+                signal_type="human_gate_opened",
+                signal_payload={
+                    "gate_ref": request.gate_ref,
+                    "gate_type": request.gate_type,
+                    "trigger_reason": request.trigger_reason,
+                    "trigger_source": request.trigger_source,
+                    "stage_id": request.stage_id,
+                    "branch_id": request.branch_id,
+                    "artifact_ref": request.artifact_ref,
+                    "caused_by": request.caused_by,
+                },
+                caused_by="kernel_facade.open_human_gate",
+            )
+        )
+
+    def get_action_state(self, dispatch_idempotency_key: str) -> str | None:
+        """Returns the current dedupe state for an action's idempotency key.
+
+        Args:
+            dispatch_idempotency_key: Dispatch idempotency key to look up.
+
+        Returns:
+            State string (e.g. ``"reserved"``, ``"dispatched"``,
+            ``"acknowledged"``, ``"succeeded"``, ``"unknown_effect"``), or
+            ``None`` if the key is unknown or no dedupe_store was injected.
+        """
+        if self._dedupe_store is None:
+            return None
+        record = self._dedupe_store.get(dispatch_idempotency_key)
+        return record.state if record is not None else None
 
     @staticmethod
     def _is_expected_cancel_race_error(error: Exception) -> bool:

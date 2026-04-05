@@ -127,6 +127,20 @@ class AgentCoreContextAdapter:
         """
         self._binding_by_run[run_id] = binding_ref
 
+    def resolve_run_context(self, run_id: str) -> str | None:
+        """Return the binding_ref associated with a run, or None.
+
+        Used by ``KernelFacade.spawn_child_run()`` to inherit the parent
+        run's context binding into the child workflow start request.
+
+        Args:
+            run_id: Run identifier to look up.
+
+        Returns:
+            The binding_ref string if found, else None.
+        """
+        return self._binding_by_run.get(run_id)
+
     def export_context(
         self,
         run_id: str,

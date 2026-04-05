@@ -105,6 +105,14 @@ class _FailingReserveDedupeStore(DedupeStorePort):
         del envelope
         raise RuntimeError("dedupe unavailable")
 
+    def reserve_and_dispatch(
+        self,
+        envelope: IdempotencyEnvelope,
+        peer_operation_id: str | None = None,
+    ) -> DedupeReservation:
+        del envelope, peer_operation_id
+        raise RuntimeError("dedupe unavailable")
+
     def mark_dispatched(
         self,
         dispatch_idempotency_key: str,

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    from agent_kernel.kernel.task_manager.reflection_orchestrator import ReflectionOrchestrator
     from agent_kernel.kernel.task_manager.registry import TaskRegistry
 
 _logger = logging.getLogger(__name__)
@@ -46,25 +47,53 @@ class RestartPolicyEngine:
             implement async start_run(StartRunRequest) -> StartRunResponse.
     """
 
-    def __init__(self, registry: TaskRegistry, facade: Any) -> None:
+    def __init__(
+        self,
+        registry: TaskRegistry,
+        facade: Any,
+        reflection_orchestrator: ReflectionOrchestrator | None = None,
+    ) -> None:
+        """Initialize the engine.
+
+        Args:
+            registry: TaskRegistry for state tracking and attempt history.
+            facade: KernelFacade-compatible object with start_run().
+            reflection_orchestrator: Optional ReflectionOrchestrator.  When
+                provided, handle_failure() calls reflect_and_infer() on
+                ``action="reflect"`` decisions.  When None, the task is
+                transitioned to ``"reflecting"`` state and the caller is
+                responsible for driving the reflection cycle.
+        """
         self._registry = registry
         self._facade = facade
+        self._reflection_orchestrator = reflection_orchestrator
 
     async def handle_failure(
         self,
         task_id: str,
         failed_run_id: str,
         failure: Any | None = None,
+        *,
+        reflection_run_context: dict[str, Any] | None = None,
     ) -> RestartDecision:
         """Handle a task attempt failure and take the appropriate action.
 
         Records the attempt failure, evaluates the restart policy, and either
         launches a new run attempt or transitions the task to a terminal state.
 
+        When ``action="reflect"`` and both ``reflection_orchestrator`` and
+        ``reflection_run_context`` are provided, this method directly awaits
+        ``ReflectionOrchestrator.reflect_and_infer()`` so the full
+        reflect-and-retry cycle completes before returning.
+
         Args:
             task_id: Task that failed.
             failed_run_id: Run id of the failed attempt.
             failure: Optional FailureEnvelope from the run.
+            reflection_run_context: Optional dict with keys ``run_id``,
+                ``snapshot``, ``history``, and ``inference_config``.  When
+                provided alongside a configured ``ReflectionOrchestrator``,
+                the reflection inference is awaited inside this call.
 
         Returns:
             RestartDecision describing what was done.
@@ -91,6 +120,32 @@ class RestartPolicyEngine:
             await self._launch_retry(descriptor, attempt_seq + 1)
         elif decision.action == "reflect":
             self._registry.update_state(task_id, "reflecting")
+            if self._reflection_orchestrator is not None and reflection_run_context is not None:
+                _logger.info(
+                    "task.reflection_triggered task_id=%s orchestrator=awaiting",
+                    task_id,
+                )
+                try:
+                    await self._reflection_orchestrator.reflect_and_infer(
+                        descriptor=descriptor,
+                        attempts=attempts,
+                        run_id=reflection_run_context.get("run_id", failed_run_id),
+                        snapshot=reflection_run_context["snapshot"],
+                        history=reflection_run_context.get("history", []),
+                        inference_config=reflection_run_context["inference_config"],
+                    )
+                except Exception as exc:
+                    _logger.error(
+                        "task.reflection_failed task_id=%s error=%s",
+                        task_id,
+                        exc,
+                    )
+            elif self._reflection_orchestrator is not None:
+                _logger.info(
+                    "task.reflection_triggered task_id=%s orchestrator=attached "
+                    "context=missing — caller must drive reflect_and_infer()",
+                    task_id,
+                )
         elif decision.action == "escalate":
             self._registry.update_state(task_id, "escalated")
         else:
@@ -174,6 +229,13 @@ class RestartPolicyEngine:
             return
 
         new_run_id = f"task-retry-{descriptor.task_id}-{next_seq}-{uuid.uuid4().hex[:8]}"
+        backoff_base = getattr(descriptor, "backoff_base_ms", 1000)
+        max_backoff = getattr(descriptor, "max_backoff_ms", 30_000)
+        delay_ms = min(backoff_base * (2 ** max(0, next_seq - 2)), max_backoff)
+        if delay_ms > 0:
+            import asyncio as _asyncio
+
+            await _asyncio.sleep(delay_ms / 1000.0)
         try:
             response = await self._facade.start_run(
                 StartRunRequest(

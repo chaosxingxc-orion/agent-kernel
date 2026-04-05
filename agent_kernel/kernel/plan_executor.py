@@ -81,6 +81,7 @@ class PlanResult:
     succeeded: int
     failed: int
     join_results: list[ParallelJoinResult] = field(default_factory=list)
+    committed_winner_id: str | None = None  # SpeculativePlan only: candidate_id of committed winner
 
     @property
     def all_succeeded(self) -> bool:
@@ -138,17 +139,23 @@ class PlanExecutor:
         # overwrite the outer layer's task dict (D-H4).
         self._active_speculative_tasks: dict[str, asyncio.Task[PlanResult]] = {}
         self._speculative_task_stack: list[dict[str, asyncio.Task[PlanResult]]] = []
+        # Tracks the last committed winner so _execute_speculative() can
+        # surface it in the returned PlanResult for event-log recording.
+        self._committed_winner_id: str | None = None
 
     async def commit_speculation(self, winner_candidate_id: str) -> None:
-        """Cancels all speculative tasks except the winner.
+        """Cancels all speculative tasks except the winner and records the decision.
 
         Called when a ``speculation_committed`` signal identifies the winning
         candidate.  Non-winner asyncio Tasks are cancelled so their side-effects
-        are not applied.  Already-done tasks are left untouched.
+        are not applied.  Already-done tasks are left untouched.  The winner
+        ``candidate_id`` is stored so ``_execute_speculative()`` can include it
+        in the returned ``PlanResult`` for downstream event-log recording.
 
         Args:
             winner_candidate_id: ``candidate_id`` of the candidate to keep.
         """
+        self._committed_winner_id = winner_candidate_id
         for cid, task in list(self._active_speculative_tasks.items()):
             if cid != winner_candidate_id and not task.done():
                 task.cancel()
@@ -588,11 +595,16 @@ class PlanExecutor:
                 succeeded += result.succeeded
                 failed += result.failed
 
+        # Capture the committed winner before clearing so callers can record
+        # the decision in the event log via PlanResult.committed_winner_id.
+        winner = self._committed_winner_id
+        self._committed_winner_id = None
         return PlanResult(
             plan_kind="speculative",
             total_actions=total_actions,
             succeeded=succeeded,
             failed=failed,
+            committed_winner_id=winner,
         )
 
 

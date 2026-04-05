@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import sqlite3
+import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -17,13 +18,18 @@ class SQLiteTurnIntentLog(TurnIntentLog):
 
     def __init__(self, database_path: str | Path = ":memory:") -> None:
         self._database_path = str(database_path)
-        self._conn = sqlite3.connect(self._database_path)
+        # check_same_thread=False + RLock: same pattern as SQLiteDedupeStore.
+        self._conn = sqlite3.connect(self._database_path, check_same_thread=False)
+        self._lock = threading.RLock()
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._ensure_schema()
 
     def close(self) -> None:
         """Closes SQLite connection."""
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
     async def write_intent(self, intent: TurnIntentRecord) -> None:
         """Writes one turn intent with idempotent semantics by intent ref.
@@ -32,47 +38,48 @@ class SQLiteTurnIntentLog(TurnIntentLog):
         Raises:
             sqlite3.Error: On database write failure.
         """
-        try:
-            self._conn.execute(
-                """
-                INSERT INTO turn_intent_log (
-                  run_id,
-                  intent_commit_ref,
-                  decision_ref,
-                  decision_fingerprint,
-                  dispatch_dedupe_key,
-                  host_kind,
-                  outcome_kind,
-                  written_at,
-                  reflection_round
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(intent_commit_ref) DO UPDATE SET
-                  run_id = excluded.run_id,
-                  decision_ref = excluded.decision_ref,
-                  decision_fingerprint = excluded.decision_fingerprint,
-                  dispatch_dedupe_key = excluded.dispatch_dedupe_key,
-                  host_kind = excluded.host_kind,
-                  outcome_kind = excluded.outcome_kind,
-                  written_at = excluded.written_at,
-                  reflection_round = excluded.reflection_round
-                """,
-                (
-                    intent.run_id,
-                    intent.intent_commit_ref,
-                    intent.decision_ref,
-                    intent.decision_fingerprint,
-                    intent.dispatch_dedupe_key,
-                    intent.host_kind,
-                    intent.outcome_kind,
-                    intent.written_at,
-                    intent.reflection_round,
-                ),
-            )
-            self._conn.commit()
-        except Exception:
-            with contextlib.suppress(Exception):
-                self._conn.rollback()
-            raise
+        with self._lock:
+            try:
+                self._conn.execute(
+                    """
+                    INSERT INTO turn_intent_log (
+                      run_id,
+                      intent_commit_ref,
+                      decision_ref,
+                      decision_fingerprint,
+                      dispatch_dedupe_key,
+                      host_kind,
+                      outcome_kind,
+                      written_at,
+                      reflection_round
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(intent_commit_ref) DO UPDATE SET
+                      run_id = excluded.run_id,
+                      decision_ref = excluded.decision_ref,
+                      decision_fingerprint = excluded.decision_fingerprint,
+                      dispatch_dedupe_key = excluded.dispatch_dedupe_key,
+                      host_kind = excluded.host_kind,
+                      outcome_kind = excluded.outcome_kind,
+                      written_at = excluded.written_at,
+                      reflection_round = excluded.reflection_round
+                    """,
+                    (
+                        intent.run_id,
+                        intent.intent_commit_ref,
+                        intent.decision_ref,
+                        intent.decision_fingerprint,
+                        intent.dispatch_dedupe_key,
+                        intent.host_kind,
+                        intent.outcome_kind,
+                        intent.written_at,
+                        intent.reflection_round,
+                    ),
+                )
+                self._conn.commit()
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._conn.rollback()
+                raise
 
     async def latest_for_run(self, run_id: str) -> TurnIntentRecord | None:
         """Returns latest persisted turn intent record for one run.
@@ -81,8 +88,9 @@ class SQLiteTurnIntentLog(TurnIntentLog):
         Returns:
             TurnIntentRecord | None: Latest turn intent record, or ``None`` if absent.
         """
-        row = self._conn.execute(
-            """
+        with self._lock:
+            row = self._conn.execute(
+                """
             SELECT
               run_id,
               intent_commit_ref,
@@ -98,8 +106,8 @@ class SQLiteTurnIntentLog(TurnIntentLog):
             ORDER BY written_at DESC, id DESC
             LIMIT 1
             """,
-            (run_id,),
-        ).fetchone()
+                (run_id,),
+            ).fetchone()
         if row is None:
             return None
         return TurnIntentRecord(
@@ -115,8 +123,7 @@ class SQLiteTurnIntentLog(TurnIntentLog):
         )
 
     def _ensure_schema(self) -> None:
-        self._conn.execute(
-            """
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS turn_intent_log (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               run_id TEXT NOT NULL,
@@ -129,12 +136,9 @@ class SQLiteTurnIntentLog(TurnIntentLog):
               written_at TEXT NOT NULL,
               reflection_round INTEGER DEFAULT 0
             )
-            """
-        )
-        self._conn.execute(
-            """
+            """)
+        self._conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_turn_intent_log_run_written
             ON turn_intent_log(run_id, written_at DESC, id DESC)
-            """
-        )
+            """)
         self._conn.commit()

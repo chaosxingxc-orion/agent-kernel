@@ -258,6 +258,57 @@ class _SharedConnectionDedupeStore:
                 raise
         return DedupeReservation(accepted=True, reason="accepted")
 
+    def reserve_and_dispatch(
+        self,
+        envelope: IdempotencyEnvelope,
+        peer_operation_id: str | None = None,
+    ) -> DedupeReservation:
+        """Atomically reserves and marks envelope as dispatched.
+
+        Uses a single BEGIN IMMEDIATE transaction to eliminate the non-atomic
+        window between reservation and dispatch state update.
+
+        Args:
+            envelope: Idempotency envelope to reserve and dispatch.
+            peer_operation_id: Optional peer-side operation reference.
+
+        Returns:
+            Reservation result indicating acceptance or duplicate.
+        """
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                existing = self._get(envelope.dispatch_idempotency_key)
+                if existing is not None:
+                    self._conn.execute("ROLLBACK")
+                    return DedupeReservation(
+                        accepted=False,
+                        reason="duplicate",
+                        existing_record=existing,
+                    )
+                self._conn.execute(
+                    """
+                    INSERT INTO colocated_dedupe_store (
+                        dispatch_idempotency_key, operation_fingerprint,
+                        attempt_seq, state, peer_operation_id, external_ack_ref
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        envelope.dispatch_idempotency_key,
+                        envelope.operation_fingerprint,
+                        envelope.attempt_seq,
+                        "dispatched",
+                        peer_operation_id or envelope.peer_operation_id,
+                        None,
+                    ),
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._conn.execute("ROLLBACK")
+                raise
+        return DedupeReservation(accepted=True, reason="accepted")
+
     def mark_dispatched(
         self, dispatch_idempotency_key: str, peer_operation_id: str | None = None
     ) -> None:
@@ -573,8 +624,7 @@ class ColocatedSQLiteBundle:
 
     def _initialize_schema(self) -> None:
         """Creates colocated tables and indexes when absent."""
-        self._conn.executescript(
-            """
+        self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS colocated_action_commits (
                 commit_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                 stream_run_id TEXT NOT NULL,
@@ -618,5 +668,4 @@ class ColocatedSQLiteBundle:
                 peer_operation_id TEXT,
                 external_ack_ref TEXT
             );
-            """
-        )
+            """)

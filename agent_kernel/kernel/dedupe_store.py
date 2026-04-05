@@ -10,7 +10,7 @@ class DedupeStoreStateError(ValueError):
     """Raised when dedupe state transitions violate monotonic constraints."""
 
 
-DedupeState = Literal["reserved", "dispatched", "acknowledged", "unknown_effect"]
+DedupeState = Literal["reserved", "dispatched", "acknowledged", "succeeded", "unknown_effect"]
 HostKind = Literal[
     "local_process",
     "local_cli",
@@ -127,11 +127,42 @@ class DedupeStorePort(Protocol):
             external_ack_ref: Optional external acknowledgement reference.
         """
 
+    def mark_succeeded(
+        self,
+        dispatch_idempotency_key: str,
+        external_ack_ref: str | None = None,
+    ) -> None:
+        """Marks envelope as succeeded — result confirmed and evidence collectible.
+
+        Args:
+            dispatch_idempotency_key: Key to mark as succeeded.
+            external_ack_ref: Optional external acknowledgement reference.
+        """
+
     def mark_unknown_effect(self, dispatch_idempotency_key: str) -> None:
         """Marks envelope as unknown effect.
 
         Args:
             dispatch_idempotency_key: Key to mark as unknown effect.
+        """
+
+    def reserve_and_dispatch(
+        self,
+        envelope: IdempotencyEnvelope,
+        peer_operation_id: str | None = None,
+    ) -> DedupeReservation:
+        """Atomically reserves and marks an envelope as dispatched.
+
+        Combines ``reserve()`` and ``mark_dispatched()`` into a single atomic
+        operation, eliminating the non-atomic window between reservation and
+        dispatch state update.
+
+        Args:
+            envelope: Idempotency envelope to reserve and dispatch.
+            peer_operation_id: Optional peer-side operation reference.
+
+        Returns:
+            Reservation result indicating acceptance or duplicate.
         """
 
     def get(self, dispatch_idempotency_key: str) -> DedupeRecord | None:
@@ -239,6 +270,32 @@ class InMemoryDedupeStore:
             external_ack_ref=external_ack_ref or record.external_ack_ref,
         )
 
+    def mark_succeeded(
+        self,
+        dispatch_idempotency_key: str,
+        external_ack_ref: str | None = None,
+    ) -> None:
+        """Marks record as succeeded — result confirmed and evidence collectible.
+
+        Args:
+            dispatch_idempotency_key: The deduplication key to transition.
+            external_ack_ref: Optional external acknowledgement reference.
+
+        Raises:
+            DedupeStoreStateError: If key is missing or transition is invalid.
+        """
+        record = self._get_required_record(dispatch_idempotency_key)
+        if record.state not in ("acknowledged", "succeeded"):
+            raise DedupeStoreStateError(f"Cannot transition {record.state} -> succeeded.")
+        self._records_by_key[dispatch_idempotency_key] = DedupeRecord(
+            dispatch_idempotency_key=record.dispatch_idempotency_key,
+            operation_fingerprint=record.operation_fingerprint,
+            attempt_seq=record.attempt_seq,
+            state="succeeded",
+            peer_operation_id=record.peer_operation_id,
+            external_ack_ref=external_ack_ref or record.external_ack_ref,
+        )
+
     def mark_unknown_effect(self, dispatch_idempotency_key: str) -> None:
         """Marks record as unknown_effect for ambiguous side-effect outcomes.
 
@@ -259,6 +316,42 @@ class InMemoryDedupeStore:
             peer_operation_id=record.peer_operation_id,
             external_ack_ref=record.external_ack_ref,
         )
+
+    def reserve_and_dispatch(
+        self,
+        envelope: IdempotencyEnvelope,
+        peer_operation_id: str | None = None,
+    ) -> DedupeReservation:
+        """Atomically reserves and marks envelope as dispatched.
+
+        This eliminates the non-atomic window between ``reserve()`` and
+        ``mark_dispatched()`` by performing both state transitions in one
+        operation.  If a duplicate key exists, returns a rejected reservation
+        without modifying state.
+
+        Args:
+            envelope: Idempotency envelope to reserve and dispatch.
+            peer_operation_id: Optional peer-side operation reference.
+
+        Returns:
+            Reservation result indicating acceptance or duplicate.
+        """
+        existing_record = self._records_by_key.get(envelope.dispatch_idempotency_key)
+        if existing_record is not None:
+            return DedupeReservation(
+                accepted=False,
+                reason="duplicate",
+                existing_record=existing_record,
+            )
+
+        self._records_by_key[envelope.dispatch_idempotency_key] = DedupeRecord(
+            dispatch_idempotency_key=envelope.dispatch_idempotency_key,
+            operation_fingerprint=envelope.operation_fingerprint,
+            attempt_seq=envelope.attempt_seq,
+            state="dispatched",
+            peer_operation_id=peer_operation_id or envelope.peer_operation_id,
+        )
+        return DedupeReservation(accepted=True, reason="accepted")
 
     def get(self, dispatch_idempotency_key: str) -> DedupeRecord | None:
         """Returns dedupe record by dispatch key.

@@ -20,6 +20,7 @@ from agent_kernel.kernel.task_manager.contracts import (
     TaskHealthStatus,
     TaskLifecycleState,
 )
+from agent_kernel.kernel.task_manager.event_log import TaskEventAppender
 
 _logger = logging.getLogger(__name__)
 
@@ -52,12 +53,26 @@ class TaskRegistry:
 
     _MAX_TASKS_DEFAULT = 10_000
 
-    def __init__(self, max_tasks: int = _MAX_TASKS_DEFAULT) -> None:
+    def __init__(
+        self,
+        max_tasks: int = _MAX_TASKS_DEFAULT,
+        event_appender: TaskEventAppender | None = None,
+    ) -> None:
+        """Initialize the registry.
+
+        Args:
+            max_tasks: Maximum number of tasks retained in memory.
+            event_appender: Optional persistence adapter.  When provided,
+                every state-mutating operation appends a task lifecycle event
+                so that state can be recovered after a Worker restart via
+                ``InMemoryTaskEventLog.replay_into_registry()``.
+        """
         self._tasks: dict[str, _TaskEntry] = {}
         self._session_index: dict[str, list[str]] = {}  # session_id → [task_id]
         self._run_index: dict[str, str] = {}  # run_id → task_id
         self._lock = threading.Lock()
         self._max_tasks = max_tasks
+        self._event_appender = event_appender
 
     # ------------------------------------------------------------------
     # Registration
@@ -81,6 +96,24 @@ class TaskRegistry:
             self._evict_if_needed()
             self._tasks[descriptor.task_id] = _TaskEntry(descriptor=descriptor)
             self._session_index.setdefault(descriptor.session_id, []).append(descriptor.task_id)
+            self._emit(
+                "task.registered",
+                {
+                    "task_id": descriptor.task_id,
+                    "session_id": descriptor.session_id,
+                    "task_kind": descriptor.task_kind,
+                    "goal_description": descriptor.goal_description,
+                    "parent_task_id": descriptor.parent_task_id,
+                    "dependency_task_ids": list(descriptor.dependency_task_ids),
+                    "metadata": descriptor.metadata,
+                    "restart_policy": {
+                        "max_attempts": descriptor.restart_policy.max_attempts,
+                        "backoff_base_ms": descriptor.restart_policy.backoff_base_ms,
+                        "on_exhausted": descriptor.restart_policy.on_exhausted,
+                        "heartbeat_timeout_ms": descriptor.restart_policy.heartbeat_timeout_ms,
+                    },
+                },
+            )
             _logger.debug(
                 "task.registered task_id=%s session_id=%s kind=%s",
                 descriptor.task_id,
@@ -107,6 +140,16 @@ class TaskRegistry:
             entry.lifecycle_state = "running"
             entry.last_heartbeat_ms = _now_ms()
             self._run_index[attempt.run_id] = attempt.task_id
+            self._emit(
+                "task.attempt_started",
+                {
+                    "attempt_id": attempt.attempt_id,
+                    "task_id": attempt.task_id,
+                    "run_id": attempt.run_id,
+                    "attempt_seq": attempt.attempt_seq,
+                    "started_at": attempt.started_at,
+                },
+            )
             _logger.debug(
                 "task.attempt_started task_id=%s attempt_seq=%d run_id=%s",
                 attempt.task_id,
@@ -147,6 +190,10 @@ class TaskRegistry:
                 entry.lifecycle_state = "failed"
 
             self._run_index.pop(run_id, None)
+            event_type = (
+                "task.attempt_completed" if outcome == "completed" else "task.attempt_failed"
+            )
+            self._emit(event_type, {"task_id": task_id, "run_id": run_id, "outcome": outcome})
             _logger.debug(
                 "task.attempt_completed task_id=%s run_id=%s outcome=%s",
                 task_id,
@@ -170,6 +217,15 @@ class TaskRegistry:
                 _logger.warning("update_state: unknown task_id=%s", task_id)
                 return
             entry.lifecycle_state = state
+            state_event_map = {
+                "restarting": "task.restarting",
+                "reflecting": "task.reflecting",
+                "completed": "task.completed",
+                "escalated": "task.escalated",
+                "aborted": "task.aborted",
+            }
+            if (et := state_event_map.get(state)) is not None:
+                self._emit(et, {"task_id": task_id, "state": state})
 
     def heartbeat(self, task_id: str) -> None:
         """Record a liveness heartbeat for a task.
@@ -298,6 +354,18 @@ class TaskRegistry:
                     result.append(entry.descriptor)
             return result
 
+    def get_task_id_for_run(self, run_id: str) -> str | None:
+        """Returns task_id for the given run_id under the registry lock.
+
+        Args:
+            run_id: Run identifier to look up.
+
+        Returns:
+            task_id or None if not found.
+        """
+        with self._lock:
+            return self._run_index.get(run_id)
+
     def get_stalled_tasks(self) -> list[TaskHealthStatus]:
         """Return health snapshots for all tasks that appear stalled.
 
@@ -340,6 +408,20 @@ class TaskRegistry:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _emit(self, event_type: str, payload: dict) -> None:
+        """Append a task lifecycle event to the optional event appender.
+
+        Called inside the registry lock; implementations must be thread-safe.
+        Failures are swallowed so that persistence errors never break the
+        in-memory state machine.
+        """
+        if self._event_appender is None:
+            return
+        try:
+            self._event_appender.append_task_event(event_type, payload)
+        except Exception:
+            _logger.warning("task_registry: event_appender failed for %s", event_type)
 
     def _evict_if_needed(self) -> None:
         """Evict oldest terminal tasks when max_tasks is exceeded."""

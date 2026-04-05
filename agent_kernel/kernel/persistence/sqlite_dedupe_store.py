@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import sqlite3
+import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -32,7 +33,13 @@ class SQLiteDedupeStore:
                 in-memory mode.
         """
         self._database_path = str(database_path)
-        self._conn = sqlite3.connect(self._database_path, isolation_level=None)
+        # check_same_thread=False allows the connection to be used from multiple
+        # threads.  All public methods are serialized via self._lock (RLock allows
+        # re-entrant acquisition from internal helpers that call self.get()).
+        self._conn = sqlite3.connect(
+            self._database_path, isolation_level=None, check_same_thread=False
+        )
+        self._lock = threading.RLock()
         self._conn.row_factory = sqlite3.Row
         # WAL mode allows concurrent readers while one writer is active.
         # NORMAL sync is safe with WAL — durable on OS crash for PoC use.
@@ -49,9 +56,10 @@ class SQLiteDedupeStore:
         The checkpoint is best-effort — failures are silently suppressed so
         that a crashed connection can still be closed.
         """
-        with contextlib.suppress(Exception):
-            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        self._conn.close()
+        with self._lock:
+            with contextlib.suppress(Exception):
+                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self._conn.close()
 
     def reserve(self, envelope: IdempotencyEnvelope) -> DedupeReservation:
         """Reserves dispatch idempotency key if absent.
@@ -67,6 +75,10 @@ class SQLiteDedupeStore:
         """
         # BEGIN IMMEDIATE acquires a write lock upfront, preventing TOCTOU
         # between the existence check and the INSERT across concurrent processes.
+        with self._lock:
+            return self._reserve_locked(envelope)
+
+    def _reserve_locked(self, envelope: IdempotencyEnvelope) -> DedupeReservation:
         self._conn.execute("BEGIN IMMEDIATE")
         try:
             existing_record = self.get(envelope.dispatch_idempotency_key)
@@ -119,22 +131,81 @@ class SQLiteDedupeStore:
         Raises:
             DedupeStoreStateError: If state transition is invalid.
         """
-        try:
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                record = self._get_required_record(dispatch_idempotency_key)
+                if record.state not in ("reserved", "dispatched"):
+                    raise DedupeStoreStateError(f"Cannot transition {record.state} -> dispatched.")
+                self._update_state(
+                    dispatch_idempotency_key=dispatch_idempotency_key,
+                    state="dispatched",
+                    peer_operation_id=peer_operation_id or record.peer_operation_id,
+                    external_ack_ref=record.external_ack_ref,
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._conn.execute("ROLLBACK")
+                raise
+
+    def reserve_and_dispatch(
+        self,
+        envelope: IdempotencyEnvelope,
+        peer_operation_id: str | None = None,
+    ) -> DedupeReservation:
+        """Atomically reserves and marks envelope as dispatched.
+
+        Uses a single BEGIN IMMEDIATE transaction to eliminate the non-atomic
+        window between reservation and dispatch state update.  If a duplicate
+        key exists, returns a rejected reservation without modifying state.
+
+        Args:
+            envelope: Idempotency envelope to reserve and dispatch.
+            peer_operation_id: Optional peer-side operation reference.
+
+        Returns:
+            Reservation result indicating acceptance or duplicate.
+        """
+        with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
-            record = self._get_required_record(dispatch_idempotency_key)
-            if record.state not in ("reserved", "dispatched"):
-                raise DedupeStoreStateError(f"Cannot transition {record.state} -> dispatched.")
-            self._update_state(
-                dispatch_idempotency_key=dispatch_idempotency_key,
-                state="dispatched",
-                peer_operation_id=peer_operation_id or record.peer_operation_id,
-                external_ack_ref=record.external_ack_ref,
-            )
-            self._conn.execute("COMMIT")
-        except Exception:
-            with contextlib.suppress(Exception):
-                self._conn.execute("ROLLBACK")
-            raise
+            try:
+                existing_record = self.get(envelope.dispatch_idempotency_key)
+                if existing_record is not None:
+                    self._conn.execute("ROLLBACK")
+                    return DedupeReservation(
+                        accepted=False,
+                        reason="duplicate",
+                        existing_record=existing_record,
+                    )
+
+                cursor = self._conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO dedupe_store (
+                      dispatch_idempotency_key,
+                      operation_fingerprint,
+                      attempt_seq,
+                      state,
+                      peer_operation_id,
+                      external_ack_ref
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        envelope.dispatch_idempotency_key,
+                        envelope.operation_fingerprint,
+                        envelope.attempt_seq,
+                        "dispatched",
+                        peer_operation_id or envelope.peer_operation_id,
+                        None,
+                    ),
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._conn.execute("ROLLBACK")
+                raise
+        return DedupeReservation(accepted=True, reason="accepted")
 
     def mark_acknowledged(
         self,
@@ -150,22 +221,57 @@ class SQLiteDedupeStore:
         Raises:
             DedupeStoreStateError: If state transition is invalid.
         """
-        try:
-            self._conn.execute("BEGIN IMMEDIATE")
-            record = self._get_required_record(dispatch_idempotency_key)
-            if record.state not in ("dispatched", "acknowledged"):
-                raise DedupeStoreStateError(f"Cannot transition {record.state} -> acknowledged.")
-            self._update_state(
-                dispatch_idempotency_key=dispatch_idempotency_key,
-                state="acknowledged",
-                peer_operation_id=record.peer_operation_id,
-                external_ack_ref=external_ack_ref or record.external_ack_ref,
-            )
-            self._conn.execute("COMMIT")
-        except Exception:
-            with contextlib.suppress(Exception):
-                self._conn.execute("ROLLBACK")
-            raise
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                record = self._get_required_record(dispatch_idempotency_key)
+                if record.state not in ("dispatched", "acknowledged"):
+                    raise DedupeStoreStateError(
+                        f"Cannot transition {record.state} -> acknowledged."
+                    )
+                self._update_state(
+                    dispatch_idempotency_key=dispatch_idempotency_key,
+                    state="acknowledged",
+                    peer_operation_id=record.peer_operation_id,
+                    external_ack_ref=external_ack_ref or record.external_ack_ref,
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._conn.execute("ROLLBACK")
+                raise
+
+    def mark_succeeded(
+        self,
+        dispatch_idempotency_key: str,
+        external_ack_ref: str | None = None,
+    ) -> None:
+        """Marks record as succeeded — result confirmed and evidence collectible.
+
+        Args:
+            dispatch_idempotency_key: Key to mark as succeeded.
+            external_ack_ref: Optional external acknowledgement reference.
+
+        Raises:
+            DedupeStoreStateError: If state transition is invalid.
+        """
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                record = self._get_required_record(dispatch_idempotency_key)
+                if record.state not in ("acknowledged", "succeeded"):
+                    raise DedupeStoreStateError(f"Cannot transition {record.state} -> succeeded.")
+                self._update_state(
+                    dispatch_idempotency_key=dispatch_idempotency_key,
+                    state="succeeded",
+                    peer_operation_id=record.peer_operation_id,
+                    external_ack_ref=external_ack_ref or record.external_ack_ref,
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._conn.execute("ROLLBACK")
+                raise
 
     def mark_unknown_effect(self, dispatch_idempotency_key: str) -> None:
         """Marks record as unknown_effect.
@@ -176,22 +282,25 @@ class SQLiteDedupeStore:
         Raises:
             DedupeStoreStateError: If state transition is invalid.
         """
-        try:
-            self._conn.execute("BEGIN IMMEDIATE")
-            record = self._get_required_record(dispatch_idempotency_key)
-            if record.state not in ("dispatched", "unknown_effect"):
-                raise DedupeStoreStateError(f"Cannot transition {record.state} -> unknown_effect.")
-            self._update_state(
-                dispatch_idempotency_key=dispatch_idempotency_key,
-                state="unknown_effect",
-                peer_operation_id=record.peer_operation_id,
-                external_ack_ref=record.external_ack_ref,
-            )
-            self._conn.execute("COMMIT")
-        except Exception:
-            with contextlib.suppress(Exception):
-                self._conn.execute("ROLLBACK")
-            raise
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                record = self._get_required_record(dispatch_idempotency_key)
+                if record.state not in ("dispatched", "unknown_effect"):
+                    raise DedupeStoreStateError(
+                        f"Cannot transition {record.state} -> unknown_effect."
+                    )
+                self._update_state(
+                    dispatch_idempotency_key=dispatch_idempotency_key,
+                    state="unknown_effect",
+                    peer_operation_id=record.peer_operation_id,
+                    external_ack_ref=record.external_ack_ref,
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._conn.execute("ROLLBACK")
+                raise
 
     def get(self, dispatch_idempotency_key: str) -> DedupeRecord | None:
         """Gets dedupe record by key.
@@ -202,32 +311,33 @@ class SQLiteDedupeStore:
         Returns:
             Matching dedupe record, or ``None`` if not found.
         """
-        cursor = self._conn.cursor()
-        cursor.execute(
-            """
-            SELECT
-              dispatch_idempotency_key,
-              operation_fingerprint,
-              attempt_seq,
-              state,
-              peer_operation_id,
-              external_ack_ref
-            FROM dedupe_store
-            WHERE dispatch_idempotency_key = ?
-            """,
-            (dispatch_idempotency_key,),
-        )
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        return DedupeRecord(
-            dispatch_idempotency_key=row["dispatch_idempotency_key"],
-            operation_fingerprint=row["operation_fingerprint"],
-            attempt_seq=row["attempt_seq"],
-            state=row["state"],
-            peer_operation_id=row["peer_operation_id"],
-            external_ack_ref=row["external_ack_ref"],
-        )
+        with self._lock:
+            cursor = self._conn.cursor()
+            cursor.execute(
+                """
+                SELECT
+                  dispatch_idempotency_key,
+                  operation_fingerprint,
+                  attempt_seq,
+                  state,
+                  peer_operation_id,
+                  external_ack_ref
+                FROM dedupe_store
+                WHERE dispatch_idempotency_key = ?
+                """,
+                (dispatch_idempotency_key,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return DedupeRecord(
+                dispatch_idempotency_key=row["dispatch_idempotency_key"],
+                operation_fingerprint=row["operation_fingerprint"],
+                attempt_seq=row["attempt_seq"],
+                state=row["state"],
+                peer_operation_id=row["peer_operation_id"],
+                external_ack_ref=row["external_ack_ref"],
+            )
 
     def _get_required_record(self, dispatch_idempotency_key: str) -> DedupeRecord:
         """Gets record by key or raises.

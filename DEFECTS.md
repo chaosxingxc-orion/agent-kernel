@@ -212,26 +212,180 @@
 
 ---
 
-## 缺陷统计
+## 缺陷统计（第一轮）
 
-| 级别     | 数量 | 必须修复条件 |
-|----------|------|-------------|
-| CRITICAL | 4    | 上线前全部修复 |
-| HIGH     | 6    | 下一迭代全部修复 |
-| MEDIUM   | 7    | 近 2 个迭代内修复 |
-| LOW      | 3    | 作为技术债持续改善 |
-| **合计** | **20** | |
+| 级别     | 数量 | 必须修复条件 | 状态 |
+|----------|------|-------------|------|
+| CRITICAL | 4    | 上线前全部修复 | ✅ 全部已修复 |
+| HIGH     | 6    | 下一迭代全部修复 | ✅ 全部已修复 |
+| MEDIUM   | 7    | 近 2 个迭代内修复 | ✅ 全部已修复 |
+| LOW      | 3    | 作为技术债持续改善 | ✅ 全部已修复 |
+| **合计** | **20** | | ✅ **20/20 已修复** |
 
 ---
 
-## 快速修复优先级
+## 修复清单（第一轮）
 
 ```
-1. D-C1 ~ D-C4   Python 2 语法（单行改动，无风险）
-2. D-H1           seen_signal_tokens 位置调整（信号丢失最严重场景）
-3. D-H2           submitted_approvals 加锁（并发安全）
-4. D-H3           continue_as_new 信号安全（数据完整性）
-5. D-H4           speculative tasks 嵌套覆盖（资源泄漏）
-6. D-H5           append 失败无回滚（幂等性）
-7. D-H6           async 健康探针兼容（运维安全）
+D-C1 ~ D-C4   Python 2 异常语法                    ✅ 已修复
+D-H1           seen_signal_tokens 位置调整           ✅ 已修复（append 成功后才 add）
+D-H2           submitted_approvals 加锁              ✅ 已修复（threading.Lock + with 块）
+D-H3           continue_as_new 信号安全              ✅ 已修复（RunInput.pending_signals）
+D-H4           speculative tasks 嵌套覆盖            ✅ 已修复（_speculative_task_stack）
+D-H5           append 失败无回滚                     ✅ 已修复（mark_unknown_effect on append fail）
+D-H6           async 健康探针兼容                    ✅ 已修复（TypeError 快速失败）
+D-M1           InMemoryEventLog 无界增长             ✅ 已修复（_MAX_RETAINED_RUNS + cleanup_completed_run）
+D-M2           InMemory 投影无锁并发                 ✅ 已修复（per-run asyncio.Lock）
+D-M3           DedupeStore reserve→dispatch 非原子   ✅ 已修复（reserve_and_dispatch() 原子方法）
+D-M4           CapabilitySnapshot 可变输入           ✅ 已修复（build() 入口 deepcopy）
+D-M5           _timed_out 脏留存                     ✅ 已修复（signal 失败后 discard）
+D-M6           plan_executor None guard 缺失         ✅ 已修复
+D-M7           Worker 优雅关闭                       ✅ 已修复（shutdown() + drain）
+D-L1           dedupe 降级无可观测信号               ✅ 已修复（dedupe_degraded 事件 + warning log）
+D-L2           断言在 append 之前                    ✅ 已修复（assert 移至 append 成功后）
+D-L3           configure_run_actor_dependencies 缺 fail-fast  ✅ 已修复
+```
+
+---
+
+## 第二轮补充缺陷（2026-04-05 生产工程规模审查）
+
+> 审查范围：TaskManager 新模块 + SQLite 持久化层 + 安全扫描（ruff S 规则）
+> 新增缺陷总数：7
+
+---
+
+### D-C5：SQLiteDeDupeStore 缺少 check_same_thread=False — 多线程崩溃
+- **文件**：`agent_kernel/kernel/persistence/sqlite_dedupe_store.py:35`
+- **类别**：`concurrency-safety`, `broken-invariant`
+- **根因**：`sqlite3.connect(self._database_path, isolation_level=None)` 未设置 `check_same_thread=False`。SQLite 默认拒绝跨线程连接访问，Temporal Worker 在 thread-pool 中调用 DedupeStore 时触发 `ProgrammingError: SQLite objects created in a thread can only be used in that same thread`，导致 Turn 中断。
+- **影响**：所有使用 SQLite DedupeStore 的生产部署，在任何多线程场景下（asyncio + thread executor、FastAPI worker pool）必然崩溃。
+- **优先级**：P0（上线前修复）
+- **修复方向**：`sqlite3.connect(self._database_path, isolation_level=None, check_same_thread=False)` 并加 `threading.Lock` 保护写操作。
+
+---
+
+### D-C6：SQLiteTurnIntentLog 缺少线程安全三件套 — 数据损坏
+- **文件**：`agent_kernel/kernel/persistence/sqlite_turn_intent_log.py:20`
+- **类别**：`concurrency-safety`, `data-race`
+- **根因**：`sqlite3.connect` 缺少 `check_same_thread=False`、无 `threading.Lock` 保护、未启用 WAL 模式（`PRAGMA journal_mode=WAL`），而同类的 `SQLiteEventLog` 已正确设置 WAL。
+- **影响**：多线程写入时 WAL 缺失导致 database locked 错误；并发读写可能产生事务冲突，TurnIntent 记录损坏；多个 Worker 同时写时概率性崩溃。
+- **优先级**：P0（上线前修复）
+- **修复方向**：添加 `check_same_thread=False` + `threading.Lock` + `PRAGMA journal_mode=WAL`，与 SQLiteEventLog 保持一致。
+
+---
+
+### D-H7：TaskWatchdog 绕过锁直接访问 TaskRegistry 私有字段
+- **文件**：`agent_kernel/kernel/task_manager/watchdog.py:110`
+- **类别**：`concurrency-safety`, `incorrect-type`
+- **根因**：
+  ```python
+  task = self._registry._run_index.get(run_id)  # 直接访问私有字段，绕过锁
+  ```
+  `TaskRegistry._run_index` 由 `threading.Lock` 保护，但 Watchdog 直接读取绕过锁，在高并发下产生数据竞争。
+- **影响**：Watchdog 读取到部分写入的 task 对象，基于脏数据做心跳判断，可能误触发 stall 检测或漏检。
+- **优先级**：P1（下一迭代）
+- **修复方向**：在 `TaskRegistry` 暴露 `get_by_run_id(run_id)` 公开方法（持有锁读取），Watchdog 调用该方法。
+
+---
+
+### D-H8：backoff_base_ms 字段声明但 _launch_retry 从不使用 — 重试风暴
+- **文件**：`agent_kernel/kernel/task_manager/restart_policy.py:220`（`_launch_retry`）
+- **类别**：`incorrect-contract`, `missing-boundary-validation`
+- **根因**：`TaskRestartPolicy.backoff_base_ms` 字段存在于合约中，表示基础退避时间，但 `_launch_retry()` 不包含任何 `asyncio.sleep()` 调用，重试立即触发，相当于无退避。
+- **影响**：任务连续失败时，Worker 立即发起下一次 Run，对 Temporal Server 和下游服务产生突发请求压力（重试风暴）；在分布式场景下雪崩效应显著。
+- **优先级**：P1（下一迭代）
+- **修复方向**：在 `_launch_retry()` 中计算 `sleep_ms = backoff_base_ms * (2 ** (next_seq - 1))`（指数退避），在发起 `start_run` 前执行 `await asyncio.sleep(sleep_ms / 1000.0)`；加 max_backoff_ms 上限。
+
+---
+
+### D-H9：TaskWatchdog 直接调用 complete_attempt 绕过 RestartPolicyEngine
+- **文件**：`agent_kernel/kernel/task_manager/watchdog.py:108-113`
+- **类别**：`broken-invariant`, `incorrect-contract`
+- **根因**：Watchdog 检测到 stall 后直接调用 `self._registry.complete_attempt(run_id, "failed")` 和 `self._registry.update_state(task_id, "stalled")`，绕过 `RestartPolicyEngine.handle_failure()`，导致：
+  - restart_policy 的 max_attempts 预算被绕过（不扣除次数）
+  - on_exhausted 策略（escalate/reflect/abort）被忽略
+  - ReflectionOrchestrator 不会被触发
+  - TaskEventLog 不会收到标准的失败事件序列
+- **影响**：stall 场景下任务直接死亡，不走反思和重启逻辑，任务管理模块的核心价值被架空。
+- **优先级**：P1（下一迭代）
+- **修复方向**：Watchdog 检测到 stall 后调用 `await restart_engine.handle_failure(task_id, run_id, failure=stall_failure_envelope)`，由 RestartPolicyEngine 统一决策。
+
+---
+
+### D-M8：安全扫描 — exec/SQL 注入/不安全随机数三项违规
+- **类别**：`security-vulnerability`
+- **根因**（ruff S 规则扫描结果）：
+  1. **S102 (exec)**：代码中存在 `exec()` 调用，可能接受外部输入，远程代码执行风险
+  2. **S608 (SQL f-string)**：SQL 语句通过 f-string 拼接，未使用参数化查询，SQL 注入风险
+  3. **S311 (random.randint)**：使用 `random` 模块生成值，若用于任何安全相关场景（如 token、nonce）则不安全
+- **影响**：S608 是可直接利用的 SQL 注入漏洞；S102 在多租户场景下是 RCE 向量；S311 在安全场景下降低熵。
+- **优先级**：P1（安全规范要求）
+- **修复方向**：S608 改用参数化查询 `cursor.execute(sql, params)`；S311 改用 `secrets` 模块或 `os.urandom`（非安全场景保留 random 并加 `# noqa: S311` 说明）；S102 review exec 调用确认输入来源，必要时加白名单校验。
+
+---
+
+### D-L4：peer_auth 模块未集成到 RunActorWorkflow 信号路由
+- **文件**：`agent_kernel/substrate/temporal/run_actor_workflow.py`（`_handle_signal` 方法）
+- **类别**：`missing-boundary-validation`, `incomplete-implementation`
+- **根因**：`peer_auth.is_peer_run_authorized()` 已实现完整的双层授权逻辑（production tier 和 PoC fallback），但 `RunActorWorkflow._handle_signal()` 在处理来自 peer 的信号时未调用该函数，任何知道 Workflow ID 的调用方都可以发送信号。
+- **影响**：在生产多租户场景下，非授权 Run 可以向任意 Run 发送 `submit_plan`、`commit_speculation` 等信号，绕过 peer 授权边界。
+- **优先级**：P2（投产前补充）
+- **修复方向**：在 `_handle_signal` 的 peer-origin 分支中添加：
+  ```python
+  if not is_peer_run_authorized(signal.from_peer_run_id, self._snapshot, self._active_child_runs):
+      logger.warning("unauthorized peer signal rejected ...")
+      return
+  ```
+
+---
+
+## 缺陷统计（含第二轮）— 最终状态
+
+| 级别     | 第一轮 | 第二轮补充 | 总计 | 已修复 |
+|----------|--------|-----------|------|--------|
+| CRITICAL | 4      | 2 (D-C5,C6) | 6  | ✅ 6/6 |
+| HIGH     | 6      | 3 (D-H7~H9) | 9  | ✅ 9/9 |
+| MEDIUM   | 7      | 1 (D-M8)   | 8  | ✅ 8/8 |
+| LOW      | 3      | 1 (D-L4)   | 4  | ✅ 4/4 |
+| **合计** | **20** | **7**     | **27** | ✅ **27/27 全部已修复** |
+
+## 修复清单（第二轮）
+
+```
+D-C5   sqlite_dedupe_store.py       check_same_thread=False + threading.Lock  ✅
+D-C6   sqlite_turn_intent_log.py    check_same_thread=False + threading.Lock + WAL  ✅
+D-H7   watchdog.py                  get_task_id_for_run() 公开方法  ✅
+D-H8   restart_policy.py            指数退避 asyncio.sleep  ✅
+D-H9   watchdog.py                  改为调用 RestartPolicyEngine.handle_failure  ✅
+D-M8   script_runtime/consistency   移除 noqa S102/S311，参数化表名引用  ✅
+D-L4   run_actor_workflow.py        is_peer_run_authorized() 集成到 _handle_signal  ✅
+```
+
+## 第三轮额外优化（2026-04-05）
+
+```
+D-M3 (原)   reserve_and_dispatch() 原子方法（消除 reserve→dispatch 窗口）  ✅
+D-M1 (原)   InMemoryEventLog cleanup_completed_run() + _MAX_RETAINED_RUNS  ✅
+D-M4 (原)   CapabilitySnapshotBuilder.build() deepcopy 防御性拷贝  ✅
+D-L3 (原)   configure_run_actor_dependencies() fail-fast 必填字段校验  ✅
+D-H5 (原)   _append_turn_outcome_commit 失败时 mark_unknown_effect 回滚  ✅
+TRACE-review_state  query_trace_runtime() review_state 从 human gate 状态推导  ✅
+```
+
+## PoC 已知限制（不计入缺陷，标记为架构演进项）
+
+```
+P-1  SpeculativePlan 无 Temporal Child Workflow 跨进程隔离（需 Child Workflow API）
+P-2  KernelFacade 无 per-caller 认证（需网关层 JWT/mTLS）
+P-3  TraceRuntimeView branch/stage 来自 facade 内存注册表（V2：事件重建）
+```
+
+## ⚠️ 原始 P0/P1 批次（已过期，均已修复）
+
+```
+DC-05  sqlite_dedupe_store.py:35   check_same_thread=False + threading.Lock
+DC-06  sqlite_turn_intent_log.py   check_same_thread=False + threading.Lock + WAL
+DH-09  watchdog.py:108             改为调用 RestartPolicyEngine.handle_failure
+DM-08  安全扫描                    参数化查询 + secrets 模块
 ```

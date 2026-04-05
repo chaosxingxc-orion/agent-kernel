@@ -547,6 +547,23 @@ Registry Extension Points ✓：
 - **`SpeculativePlan` 必须用 Child Workflow**：每个候选独立 History，避免主 Workflow History 爆炸（K 候选 × N 步 × 4 events/step 的乘法开销）。
 - **`DependencyGraph` 确定性**：节点必须按 `node_id` 字典序构建拓扑图，同层节点按字典序 `create_task`。
 
+### Branch ≠ child_run — 架构约束说明
+
+> **重要**：Branch 和 child run 是不同层次的概念，不可混同。
+
+| 概念 | 归属 | 说明 |
+|------|------|------|
+| **Branch** | TRACE / hi-agent | 逻辑轨迹身份（trajectory identity）。由 hi-agent 创建、命名、管理语义。agent-kernel 只记录生命周期事件，不拥有语义。 |
+| **child run** | agent-kernel | 一个可能的内核执行载体（execution vehicle）。由 `spawn_child_run` 创建，对应一个独立的 `RunActorWorkflow` 实例。 |
+
+**V1 映射关系**：`1 Branch → 1 child run`（最简映射，便于实现）。
+
+**架构约束**：此映射是 V1 的实现选择，**不是架构约束**。
+- 未来一个 Branch 可能跨越多个 child run（失败重试、迁移）。
+- 未来多个 Branch 可能共享一个 child run（批处理、并发轻量分支）。
+- kernel 不得将 `branch_id == child_run_id` 的假设写入任何持久化结构或协议契约。
+- hi-agent 拥有 Branch 的演进空间，kernel 只负责可靠执行和事件记录。
+
 ### KernelFacade 接口体系（v0.2）
 
 ```

@@ -128,6 +128,20 @@ class InMemoryKernelRuntimeEventLog(KernelRuntimeEventLog):
         run_events = self._events_by_run.get(run_id, [])
         return [event for event in run_events if event.commit_offset > after_offset]
 
+    def cleanup_completed_run(self, run_id: str) -> None:
+        """Removes all stored events for a completed run to reclaim memory.
+
+        This is a PoC-level cleanup hook for callers that know a run has
+        reached a terminal state (``run.completed`` or ``run.aborted``).
+        Production implementations should use a persistent store with TTL
+        eviction instead of this manual hook.
+
+        Args:
+            run_id: Run identifier whose events should be released.
+        """
+        self._events_by_run.pop(run_id, None)
+        self._next_offset_by_run.pop(run_id, None)
+
 
 class InMemoryDecisionProjectionService(DecisionProjectionService):
     """Builds authoritative run projection by replaying runtime events."""

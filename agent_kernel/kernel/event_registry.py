@@ -476,6 +476,74 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
 for _descriptor in _KERNEL_EVENTS:
     KERNEL_EVENT_REGISTRY.register(_descriptor)
 
+# TRACE branch + task_view + human_gate lifecycle events
+KERNEL_EVENT_REGISTRY.register(
+    EventTypeDescriptor(
+        event_type="branch.opened",
+        description="A new trajectory branch was opened within a run (TRACE CTS).",
+        authority="RunActor",
+        affects_replay=True,
+    )
+)
+KERNEL_EVENT_REGISTRY.register(
+    EventTypeDescriptor(
+        event_type="branch.state_updated",
+        description="Branch lifecycle state transitioned (active/waiting/pruned/succeeded/failed).",
+        authority="RunActor",
+        affects_replay=True,
+    )
+)
+KERNEL_EVENT_REGISTRY.register(
+    EventTypeDescriptor(
+        event_type="branch.pruned",
+        description="Branch was pruned by route policy or budget exhaustion.",
+        authority="RunActor",
+        affects_replay=True,
+    )
+)
+KERNEL_EVENT_REGISTRY.register(
+    EventTypeDescriptor(
+        event_type="branch.succeeded",
+        description="Branch reached succeeded terminal state.",
+        authority="RunActor",
+        affects_replay=True,
+    )
+)
+KERNEL_EVENT_REGISTRY.register(
+    EventTypeDescriptor(
+        event_type="branch.failed",
+        description="Branch reached failed terminal state.",
+        authority="RunActor",
+        affects_replay=True,
+    )
+)
+KERNEL_EVENT_REGISTRY.register(
+    EventTypeDescriptor(
+        event_type="task_view.recorded",
+        description=(
+            "TaskViewRecord persisted; references what context was shown for this decision."
+        ),
+        authority="RunActor",
+        affects_replay=True,
+    )
+)
+KERNEL_EVENT_REGISTRY.register(
+    EventTypeDescriptor(
+        event_type="human_gate.opened",
+        description="Human review gate opened (Gate A/B/C/D).",
+        authority="RunActor",
+        affects_replay=True,
+    )
+)
+KERNEL_EVENT_REGISTRY.register(
+    EventTypeDescriptor(
+        event_type="run.policy_versions_pinned",
+        description="Policy versions frozen at run creation for TRACE version pinning.",
+        authority="RunActor",
+        affects_replay=True,
+    )
+)
+
 
 def recovery_allowed_event_types() -> frozenset[str]:
     """Return frozenset of event types permitted in the recovery append path.

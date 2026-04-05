@@ -17,20 +17,29 @@ from agent_kernel.kernel.task_manager.contracts import (
     TaskLifecycleState,
     TaskRestartPolicy,
 )
+from agent_kernel.kernel.task_manager.event_log import InMemoryTaskEventLog, TaskEventAppender
 from agent_kernel.kernel.task_manager.reflection_bridge import ReflectionBridge
+from agent_kernel.kernel.task_manager.reflection_orchestrator import (
+    ReflectionOrchestrator,
+    reflection_context_to_recovery_dict,
+)
 from agent_kernel.kernel.task_manager.registry import TaskRegistry
 from agent_kernel.kernel.task_manager.restart_policy import RestartDecision, RestartPolicyEngine
 from agent_kernel.kernel.task_manager.watchdog import TaskWatchdog
 
 __all__ = [
+    "InMemoryTaskEventLog",
     "ReflectionBridge",
+    "ReflectionOrchestrator",
     "RestartDecision",
     "RestartPolicyEngine",
     "TaskAttempt",
     "TaskDescriptor",
+    "TaskEventAppender",
     "TaskHealthStatus",
     "TaskLifecycleState",
     "TaskRegistry",
     "TaskRestartPolicy",
     "TaskWatchdog",
+    "reflection_context_to_recovery_dict",
 ]

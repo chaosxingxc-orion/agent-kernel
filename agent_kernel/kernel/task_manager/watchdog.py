@@ -107,7 +107,7 @@ class TaskWatchdog:
         self._registry.heartbeat_for_run(run_id)
         if to_state in ("completed", "aborted"):
             # Look up task and record attempt completion
-            task_id = self._registry._run_index.get(run_id)
+            task_id = self._registry.get_task_id_for_run(run_id)
             if task_id:
                 outcome = "completed" if to_state == "completed" else "failed"
                 self._registry.complete_attempt(task_id, run_id, outcome)

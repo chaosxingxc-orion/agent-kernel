@@ -9,6 +9,7 @@ implementation is introduced.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
@@ -42,6 +43,13 @@ InteractionTarget = Literal[
     "tool_executor",  # MCP, function call, CLI, sandbox, code execution
     "human_actor",  # approval gate, feedback loop, human escalation
     "event_stream",  # Kafka, Redis Streams, pub/sub, message queue
+]
+
+SideEffectClass = Literal[
+    "read_only",
+    "local_write",
+    "external_write",
+    "irreversible_submit",
 ]
 
 
@@ -123,6 +131,9 @@ class Action:
     input_json: dict[str, Any] | None = None
     policy_tags: list[str] = field(default_factory=list)
     timeout_ms: int | None = None
+    side_effect_class: SideEffectClass | None = None
+    """Blast-radius governance dimension (TRACE §6.8).
+    Orthogonal to effect_class which governs idempotency/recovery."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,6 +232,22 @@ class ActionCommit:
 
 
 @dataclass(frozen=True, slots=True)
+class RunPolicyVersions:
+    """Policy versions frozen at run creation for TRACE policy version pinning.
+
+    hi-agent provides these at start_run time.  agent-kernel freezes them
+    into the run metadata so waiting runs resume under the same policies
+    that were active when the run was created (TRACE arbitration Rule A3).
+    """
+
+    route_policy_version: str | None = None
+    skill_policy_version: str | None = None
+    evaluation_policy_version: str | None = None
+    task_view_policy_version: str | None = None
+    pinned_at: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class RunProjection:
     """Represents the minimal authoritative decision projection.
 
@@ -238,6 +265,8 @@ class RunProjection:
     recovery_mode: RecoveryMode | None = None
     recovery_reason: str | None = None
     active_child_runs: list[str] = field(default_factory=list)
+    policy_versions: RunPolicyVersions | None = None
+    task_contract_ref: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -427,6 +456,28 @@ class RecoveryInput:
     failed_effect_class: str | None = None
 
 
+class TraceFailureCode(StrEnum):
+    """TRACE-normalized failure taxonomy (v1.2.1 §6.9).
+
+    Used in FailureEnvelope.trace_failure_code for postmortem,
+    route pruning, and evolution trigger routing.
+    """
+
+    MISSING_EVIDENCE = "missing_evidence"
+    INVALID_CONTEXT = "invalid_context"
+    HARNESS_DENIED = "harness_denied"
+    MODEL_OUTPUT_INVALID = "model_output_invalid"
+    MODEL_REFUSAL = "model_refusal"
+    CALLBACK_TIMEOUT = "callback_timeout"
+    NO_PROGRESS = "no_progress"
+    CONTRADICTORY_EVIDENCE = "contradictory_evidence"
+    UNSAFE_ACTION_BLOCKED = "unsafe_action_blocked"
+    EXPLORATION_BUDGET_EXHAUSTED = "exploration_budget_exhausted"
+    """CTS exploration budget — hi-agent decides, kernel reports the signal."""
+    EXECUTION_BUDGET_EXHAUSTED = "execution_budget_exhausted"
+    """Kernel-owned execution/runtime/timeout budget — kernel reports directly."""
+
+
 @dataclass(frozen=True, slots=True)
 class FailureEnvelope:
     """Represents v6.4 failure evidence payload consumed by Recovery.
@@ -468,6 +519,10 @@ class FailureEnvelope:
     retryability: Literal["retryable", "non_retryable", "unknown"] = "unknown"
     compensation_hint: str | None = None
     human_escalation_hint: str | None = None
+    trace_failure_code: TraceFailureCode | None = None
+    """TRACE-normalized failure code.  Set by RecoveryPlanner when writing
+    RecoveryOutcome.  Enables hi-agent to route pruning and evolve triggers
+    without parsing kernel-internal failure_code strings."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -569,6 +624,12 @@ class StartRunRequest:
     context_ref: str | None = None
     parent_run_id: str | None = None
     trace_context: str | None = None
+    task_contract_ref: str | None = None
+    initial_stage_id: str | None = None
+    route_policy_version: str | None = None
+    skill_policy_version: str | None = None
+    evaluation_policy_version: str | None = None
+    task_view_policy_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -639,6 +700,8 @@ class QueryRunResponse:
     recovery_mode: RecoveryMode | None = None
     recovery_reason: str | None = None
     active_child_runs: list[str] = field(default_factory=list)
+    policy_versions: RunPolicyVersions | None = None
+    active_stage_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -663,6 +726,7 @@ class SpawnChildRunRequest:
     child_kind: str
     input_ref: str | None = None
     input_json: dict[str, Any] | None = None
+    context_ref: str | None = None  # Inherited from parent run by KernelFacade
 
 
 @dataclass(frozen=True, slots=True)
@@ -2301,3 +2365,184 @@ class KernelManifest:
     substrate_type: str
     capability_snapshot_schema_version: str = "2"
     substrate_limitations: frozenset[str] = field(default_factory=frozenset)
+    trace_protocol_version: str = "1.2.1"
+    """TRACE architecture protocol version this kernel implements."""
+    supported_trace_features: frozenset[str] = field(default_factory=frozenset)
+    """TRACE-specific capabilities: branch_protocol, task_view_record,
+    policy_version_pinning, etc."""
+
+
+# ---------------------------------------------------------------------------
+# TRACE Runtime Truth DTOs
+# ---------------------------------------------------------------------------
+
+TraceRunState = Literal[
+    "created", "active", "waiting", "recovering", "completed", "failed", "aborted"
+]
+TraceStageState = Literal["pending", "active", "blocked", "completed", "failed"]
+TraceBranchState = Literal["proposed", "active", "waiting", "pruned", "succeeded", "failed"]
+TraceWaitState = Literal["none", "external_callback", "human_review", "scheduled_resume"]
+TraceReviewState = Literal["not_required", "requested", "in_review", "approved", "rejected"]
+
+
+@dataclass(frozen=True, slots=True)
+class TraceBranchView:
+    """Snapshot of one branch's state within a TraceRuntimeView."""
+
+    branch_id: str
+    stage_id: str
+    state: TraceBranchState
+    opened_at: str
+    parent_branch_id: str | None = None
+    proposed_by: str | None = None
+    failure_code: str | None = None
+    policy_versions: RunPolicyVersions | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TraceStageView:
+    """Snapshot of one stage's state within a TraceRuntimeView.
+
+    Stages are TRACE's formal phase objects (route, capture, evaluate, evolve).
+    agent-kernel records stage lifecycle events but does not own stage semantics.
+    """
+
+    stage_id: str
+    state: TraceStageState
+    entered_at: str
+    exited_at: str | None = None
+    branch_id: str | None = None
+    failure_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TraceRuntimeView:
+    """TRACE-facing aggregated runtime truth.  Derived from RunProjection + branch events.
+
+    This is a derived view built on top of RunProjection (which remains the
+    authoritative kernel-internal projection).  hi-agent consumes this view
+    for routing, pruning, and evolution decisions.
+    """
+
+    run_id: str
+    run_state: TraceRunState
+    wait_state: TraceWaitState
+    review_state: TraceReviewState
+    active_stage_id: str | None
+    branches: list[TraceBranchView]
+    policy_versions: RunPolicyVersions | None
+    projected_at: str
+    stages: list[TraceStageView] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class TaskViewRecord:
+    """Records what context references were shown to the model for one decision.
+
+    hi-agent assembles Task View content and calls record_task_view() before
+    each model invocation.  agent-kernel stores the references and policy
+    versions so the decision can be replayed and attributed during postmortem.
+
+    agent-kernel stores REFERENCES only — content lives in agent-core / storage.
+    """
+
+    task_view_id: str
+    run_id: str
+    selected_model_role: str
+    """\"heavy_reasoning\" | \"light_processing\" | \"evaluation\""""
+    assembled_at: str
+    decision_ref: str | None = None
+    """Late-bound after the model call via bind_to_decision().
+
+    Matches ``TurnIntentRecord.intent_commit_ref`` once bound.
+    """
+    stage_id: str | None = None
+    branch_id: str | None = None
+    task_contract_ref: str | None = None
+    evidence_refs: list[str] = field(default_factory=list)
+    memory_refs: list[str] = field(default_factory=list)
+    knowledge_refs: list[str] = field(default_factory=list)
+    policy_versions: RunPolicyVersions | None = None
+    schema_version: str = "1"
+
+
+@dataclass(frozen=True, slots=True)
+class OpenBranchRequest:
+    """Request to open a new trajectory branch within a run.
+
+    Branch ID generation and uniqueness within the run is hi-agent's
+    responsibility.
+    """
+
+    run_id: str
+    branch_id: str
+    stage_id: str
+    parent_branch_id: str | None = None
+    proposed_by: str | None = None
+    """\"model\" | \"human\" | \"system\""""
+
+
+@dataclass(frozen=True, slots=True)
+class BranchStateUpdateRequest:
+    """Request to update a branch's lifecycle state."""
+
+    run_id: str
+    branch_id: str
+    new_state: TraceBranchState
+    failure_code: TraceFailureCode | None = None
+    reason: str | None = None
+
+
+HumanGateType = Literal[
+    "contract_correction",  # Gate A: task contract conflict
+    "route_direction",  # Gate B: budget/ambiguous exploration
+    "artifact_review",  # Gate C: intermediate artifact quality
+    "final_approval",  # Gate D: irreversible submission
+]
+
+
+@dataclass(frozen=True, slots=True)
+class HumanGateRequest:
+    """Request to open a human review gate within a run.
+
+    Human gates are first-class lifecycle events, not just approval signals.
+    The system may trigger them proactively (system-triggered) or they may
+    originate from user requests.
+    """
+
+    gate_ref: str
+    gate_type: HumanGateType
+    run_id: str
+    trigger_reason: str
+    trigger_source: Literal["system", "human"]
+    stage_id: str | None = None
+    branch_id: str | None = None
+    artifact_ref: str | None = None
+    caused_by: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# TRACE Runtime Arbitration Semantics (Gap E)
+#
+# These rules are enforced inside RunActorWorkflow and documented here as the
+# public kernel contract so hi-agent can rely on them without reading internals.
+#
+# Rule A1 (callback_beats_timeout):
+#   If a callback with valid (action_id, callback_id) arrives AFTER a
+#   heartbeat_timeout signal for the same action, the callback result wins.
+#   The timeout event is demoted to derived_diagnostic and does NOT override
+#   the callback result.
+#
+# Rule A2 (effect_unknown_recovery_path):
+#   An action reaching effect_unknown enters RecoveryGate before any retry.
+#   For side_effect_class "irreversible_submit": NO automatic re-dispatch.
+#   For "external_write": query external state before re-dispatch.
+#
+# Rule A3 (policy_version_freeze_on_resume):
+#   A waiting run resumes under the policy_versions pinned at run creation.
+#   No mid-run policy version change without an explicit change_record event.
+#
+# Rule A4 (human_review_blocks_auto_resume):
+#   While TraceReviewState != "approved", scheduled_resume is deferred.
+#   Actions with side_effect_class "irreversible_submit" require approval.
+# ---------------------------------------------------------------------------

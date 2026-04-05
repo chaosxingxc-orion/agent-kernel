@@ -45,6 +45,7 @@ from agent_kernel.kernel.contracts import (
     RecoveryInput,
     RecoveryOutcome,
     RecoveryOutcomeStore,
+    RunPolicyVersions,
     RunProjection,
     RuntimeEvent,
     TurnIntentLog,
@@ -76,6 +77,9 @@ class RunInput:
     Attributes:
         trace_context: W3C ``traceparent`` value forwarded from the caller so
             Temporal activities join the originating distributed trace.
+        pending_signals: Serialized ActorSignal dicts carried over from the
+            previous continue_as_new instance (D-H3).  Restored at startup so
+            signals are not lost across History resets.
     """
 
     run_id: str
@@ -85,6 +89,10 @@ class RunInput:
     input_json: dict[str, Any] | None = None
     runtime_context_ref: str | None = None
     trace_context: str | None = None
+    pending_signals: list[dict[str, Any]] | None = None
+    policy_versions: RunPolicyVersions | None = None
+    initial_stage_id: str | None = None
+    task_contract_ref: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +102,8 @@ class ActorSignal:
     signal_type: str
     signal_payload: dict[str, Any] | None = None
     caused_by: str | None = None
+    signal_token: str | None = None
+    from_peer_run_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +174,14 @@ def configure_run_actor_dependencies(
         Args:
             dependencies:
     """
+    if dependencies is not None:
+        missing = [
+            field
+            for field in ("event_log", "projection", "admission", "executor", "recovery", "deduper")
+            if getattr(dependencies, field, None) is None
+        ]
+        if missing:
+            raise ValueError(f"RunActorDependencyBundle is missing required fields: {missing}")
     _RUN_ACTOR_CONFIG.set(dependencies)
     with _RUN_ACTOR_CONFIG_FALLBACK_LOCK:
         _RUN_ACTOR_CONFIG_FALLBACK["dependencies"] = dependencies
@@ -293,7 +311,44 @@ class RunActorWorkflow:
         self._run_id = input_value.run_id
         self._session_id = input_value.session_id
         self._parent_run_id = input_value.parent_run_id
+        self._policy_versions: RunPolicyVersions | None = input_value.policy_versions
+        self._active_stage_id: str | None = input_value.initial_stage_id
         self._last_projection = await self._projection.get(input_value.run_id)
+        # Emit policy_versions_pinned event when policy versions are provided (B5).
+        if self._policy_versions is not None:
+            _pv = self._policy_versions
+            _pv_pinned_commit = ActionCommit(
+                run_id=self._run_id,
+                commit_id=f"policy-versions-pinned:{self._run_id}",
+                created_at=_utc_now_iso(),
+                caused_by="run.start",
+                action=None,
+                events=[
+                    RuntimeEvent(
+                        run_id=self._run_id,
+                        event_id=f"evt-policy-pinned-{self._run_id}",
+                        commit_offset=0,
+                        event_type="run.policy_versions_pinned",
+                        event_class="fact",
+                        event_authority="authoritative_fact",
+                        ordering_key=self._run_id,
+                        wake_policy="projection_only",
+                        created_at=_utc_now_iso(),
+                        payload_json={
+                            "route_policy_version": _pv.route_policy_version,
+                            "skill_policy_version": _pv.skill_policy_version,
+                            "evaluation_policy_version": _pv.evaluation_policy_version,
+                            "task_view_policy_version": _pv.task_view_policy_version,
+                            "pinned_at": _pv.pinned_at,
+                        },
+                    )
+                ],
+            )
+            await self._event_log.append_action_commit(_pv_pinned_commit)
+        # Restore pending signals carried over from previous CAN instance (D-H3).
+        if input_value.pending_signals:
+            for raw in input_value.pending_signals:
+                self._pending_signals.append(ActorSignal(**raw))
         if self._pending_signals:
             pending_signals = list(self._pending_signals)
             self._pending_signals.clear()
@@ -364,6 +419,43 @@ class RunActorWorkflow:
         if not self._run_id:
             raise RuntimeError("RunActorWorkflow.run must be called first.")
 
+        # Peer-run authorization check (D-L4): reject signals from unauthorized peers.
+        if input_value.from_peer_run_id is not None:
+            from agent_kernel.kernel.peer_auth import is_peer_run_authorized
+
+            _snapshot = getattr(self, "_last_snapshot", None)
+            if _snapshot is None:
+                # Fall back to active_child_runs from latest projection.
+                _proj = self._last_projection
+                _active_children = _proj.active_child_runs if _proj is not None else []
+                _snapshot_for_auth = None
+            else:
+                _active_children = (
+                    self._last_projection.active_child_runs
+                    if self._last_projection is not None
+                    else []
+                )
+                _snapshot_for_auth = _snapshot
+            if _snapshot_for_auth is not None:
+                if not is_peer_run_authorized(
+                    input_value.from_peer_run_id,
+                    _snapshot_for_auth,
+                    _active_children,
+                ):
+                    _logger.warning(
+                        "peer signal rejected: unauthorized from_peer_run_id=%s run_id=%s",
+                        input_value.from_peer_run_id,
+                        self._run_id,
+                    )
+                    return
+            elif input_value.from_peer_run_id not in _active_children:
+                _logger.warning(
+                    "peer signal rejected: unauthorized from_peer_run_id=%s run_id=%s",
+                    input_value.from_peer_run_id,
+                    self._run_id,
+                )
+                return
+
         if input_value.caused_by:
             signal_token = f"{input_value.signal_type}:{input_value.caused_by}"
             if signal_token in self._seen_signal_tokens:
@@ -414,12 +506,19 @@ class RunActorWorkflow:
 
         # Dispatch speculation_committed to PlanExecutor when wired.
         if input_value.signal_type == "speculation_committed":
-            winner_id = (input_value.signal_payload or {}).get("winner_candidate_id")
-            if winner_id and self._plan_executor is not None:
-                _commit_task = asyncio.create_task(
-                    self._plan_executor.commit_speculation(winner_id)
+            if self._plan_executor is None:
+                _logger.warning(
+                    "speculation_committed signal received but plan_executor is not "
+                    "configured; run_id=%s",
+                    self._run_id,
                 )
-                del _commit_task  # reference kept by event loop; local var avoids RUF006
+            else:
+                winner_id = (input_value.signal_payload or {}).get("winner_candidate_id")
+                if winner_id:
+                    _commit_task = asyncio.create_task(
+                        self._plan_executor.commit_speculation(winner_id)
+                    )
+                    del _commit_task  # reference kept by event loop; local var avoids RUF006
 
         # History safety: count rounds and continue_as_new when threshold hit.
         self._history_event_count += 1
@@ -451,18 +550,30 @@ class RunActorWorkflow:
     def _trigger_continue_as_new(self) -> None:
         """Calls Temporal continue_as_new to reset History for this run.
 
-        Preserves ``run_id``, ``session_id``, and ``parent_run_id`` so the
-        new workflow instance resumes seamlessly from external event log state.
+        Preserves ``run_id``, ``session_id``, ``parent_run_id``, and any
+        buffered pending signals so the new workflow instance resumes
+        seamlessly from external event log state (D-H3).
         All authoritative state lives in the external KernelRuntimeEventLog
         and DecisionProjectionService, so no additional state needs carrying.
         """
         if temporal_workflow is None or self._run_id is None:
             return  # pragma: no cover — guarded by _should_continue_as_new
+        serialized: list[dict[str, Any]] = [
+            {
+                "signal_type": s.signal_type,
+                "signal_payload": s.signal_payload,
+                "caused_by": s.caused_by,
+                "signal_token": s.signal_token,
+                "from_peer_run_id": s.from_peer_run_id,
+            }
+            for s in self._pending_signals
+        ]
         temporal_workflow.continue_as_new(
             RunInput(
                 run_id=self._run_id,
                 session_id=self._session_id,
                 parent_run_id=self._parent_run_id,
+                pending_signals=serialized if serialized else None,
             )
         )
 
@@ -535,12 +646,22 @@ class RunActorWorkflow:
                 ),
                 commit.action,
             )
-            next_offset = await self._append_turn_outcome_commit(
-                run_id=commit.run_id,
-                offset=commit.events[-1].commit_offset + 1,
-                turn_result=turn_result,
-                caused_by=commit.action.action_id,
-            )
+            try:
+                next_offset = await self._append_turn_outcome_commit(
+                    run_id=commit.run_id,
+                    offset=commit.events[-1].commit_offset + 1,
+                    turn_result=turn_result,
+                    caused_by=commit.action.action_id,
+                )
+            except Exception:
+                # Append failed after executor already ran. Roll back dedupe key
+                # from "dispatched" to "unknown_effect" so the next replay does
+                # not skip re-execution, preserving at-most-once semantics.
+                dedupe_key = turn_result.dispatch_dedupe_key
+                if dedupe_key is not None and self._dedupe_store is not None:
+                    with contextlib.suppress(Exception):
+                        self._dedupe_store.mark_unknown_effect(dedupe_key)
+                raise
             _assert_single_dispatch_attempt_in_turn(turn_result)
             if turn_result.outcome_kind == "dispatched":
                 # Notify circuit breaker of successful dispatch so it can

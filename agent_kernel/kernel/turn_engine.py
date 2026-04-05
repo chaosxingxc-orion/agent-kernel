@@ -695,8 +695,9 @@ class TurnEngine:
         dedupe_available = ctx._dedupe_available  # type: ignore[attr-defined]
         _dedupe_outcome = "degraded" if not dedupe_available else "accepted"
         ctx._dedupe_outcome = _dedupe_outcome  # type: ignore[attr-defined]
-        if dedupe_available:
-            self._dedupe_store.mark_dispatched(ti.dispatch_dedupe_key)
+        # mark_dispatched() is no longer called here: _reserve_with_degradation
+        # uses reserve_and_dispatch() which atomically combines reservation and
+        # dispatch state update, eliminating the non-atomic window (D-M3).
         if self._observability_hook is not None:
             with contextlib.suppress(Exception):
                 self._observability_hook.on_dedupe_hit(
@@ -1041,9 +1042,14 @@ def _reserve_with_degradation(
     host_kind: HostKind,
     emitted_events: list[TurnStateEvent],
 ) -> tuple[DedupeReservation, IdempotencyEnvelope, bool]:
-    """Reserves dedupe key and applies v6.4 degradation when store unavailable."""
+    """Atomically reserves-and-dispatches dedupe key; degrades on store failure.
+
+    Uses ``reserve_and_dispatch()`` to close the non-atomic window between
+    reservation and dispatch state update.  Falls back to graceful degradation
+    when the store is unavailable (idempotent_write effect class only).
+    """
     try:
-        return dedupe_store.reserve(envelope), envelope, True
+        return dedupe_store.reserve_and_dispatch(envelope), envelope, True
     except Exception as error:  # pylint: disable=broad-exception-caught
         if action.effect_class != "idempotent_write":
             raise
