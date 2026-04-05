@@ -6,7 +6,25 @@
 - 核心状态机与调用关系
 - 与规模化运行相关的约束与扩展点
 
+阅读建议：
+- 如果你是第一次接触这个仓库，先看第 1、2、4 节，建立整体心智模型。
+- 如果你在做平台接入，重点看第 4、5、6、7 节。
+- 如果你在做内核扩展，重点看第 3、6、8 节。
+
+先记住一句话：
+`agent-kernel` 的本质不是“执行器”，而是“带事件真相和恢复治理的 run 生命周期内核”。
+
 ## 1. 设计逻辑演进
+
+### 1.0 为什么这个内核存在
+
+普通的 agent 执行链在规模变大后，通常会遇到四类问题：
+- 一旦进程退出，长任务状态丢失。
+- 工具调用和内部状态混在一起，失败后难以判断是否已经产生副作用。
+- 查询面和执行面耦合，平台很难稳定展示“当前到底进行到哪里”。
+- 人工审批、外部回调、子任务并行等能力不断叠加后，逻辑迅速失控。
+
+`agent-kernel` 的设计就是围绕这四类问题逐步收敛出来的。
 
 ### 1.1 演进目标
 
@@ -91,6 +109,25 @@ graph TB
 - 业务读状态走 `Facade.query_*`，不直接读 event log。
 - 生命周期推进只由 `RunActorWorkflow` 驱动。
 
+可以把这些层理解成两条平行主线：
+- 控制线：`Platform -> Facade -> Gateway -> RunActor`
+- 执行线：`RunActor -> TurnEngine -> Admission/Executor/Recovery`
+
+前者负责“谁能发起、何时推进”；后者负责“这一轮具体怎么执行、失败后怎么办”。
+
+## 2.1 核心术语表
+
+| 术语 | 含义 | 为什么重要 |
+|---|---|---|
+| `run` | 内核管理的一个执行实例 | 所有生命周期、事件、查询都围绕 run 展开 |
+| `event` | append-only 的事实记录 | 用来回放和审计，不能随意修改 |
+| `projection` | 从事件重建出的当前视图 | 平台读状态时看它，而不是读内部变量 |
+| `signal` | 外部输入给 run 的触发消息 | signal 不是最终真相，通常会先映射为权威事件 |
+| `turn` | 一次决策-准入-执行-恢复回合 | run 是长期的，turn 是 run 内的一轮 |
+| `admission` | 执行前的准入检查 | 防止高风险副作用被直接放行 |
+| `recovery` | 失败后的恢复决策 | 明确补偿、人工介入或终止策略 |
+| `substrate` | 承载 run 的底座实现 | 当前支持 Temporal 和 LocalFSM |
+
 ## 3. 六权威职责模型
 
 | 权威组件 | 角色 | 关键责任 | 代码位置 |
@@ -134,6 +171,11 @@ sequenceDiagram
     RA->>EL: append turn/recovery outcome events
 ```
 
+这条链路最关键的设计点是：
+- 任何外部输入先进入 workflow，而不是直接改 projection。
+- `RunActorWorkflow` 先写事件，再推进视图，保证“先有事实，再有状态”。
+- `TurnEngine` 负责一轮执行闭环，但生命周期最终仍由 `RunActorWorkflow` 持有。
+
 ### 4.2 RunActor 内部依赖调用
 
 ```mermaid
@@ -150,6 +192,12 @@ graph LR
     TURN --> APPEND[append turn/recovery events]
     APPEND --> NEXT[Next projection state]
 ```
+
+这张图表达的是“一个 signal 不会直接变成一次工具调用”，中间至少要经过：
+- projection catch-up：先确认当前 run 已经追平到哪个 offset。
+- readiness 判断：当前状态是否允许继续推进。
+- dedupe 判断：这一轮是否已经被处理过。
+- admission / execution / recovery：真正的执行治理链。
 
 ### 4.3 信号到权威事件映射（关键片段）
 
@@ -191,6 +239,14 @@ stateDiagram-v2
 - `completed/aborted` 后不允许低优先级运行态事件覆盖。
 - `projection` 是查询真相，事件是重建来源。
 
+一个更容易理解的状态演进故事是：
+1. `created`：run 刚被接受，还没准备好执行。
+2. `ready`：可以进入下一轮调度。
+3. `dispatching / waiting_result`：某个动作正在被发出或等待结果。
+4. `waiting_external`：需要等外部世界，比如回调、审批、恢复输入。
+5. `recovering`：内核正在处理失败后的恢复策略。
+6. `completed / aborted`：run 进入终态，不再接受普通推进事件。
+
 ## 6. 接口边界与一致性约束
 
 1. 入口边界
@@ -206,6 +262,11 @@ stateDiagram-v2
 - 任何副作用先过 `Admission`。
 - 幂等状态通过 `DecisionDeduper/DedupeStore` 跟踪。
 - 失败后的处理必须形成 recovery 事件闭环。
+
+为什么要把这些边界说得这么硬：
+- 如果平台可以直接改状态，那么 event replay 就不再可信。
+- 如果 executor 可以绕过 admission，那么高风险副作用无法被治理。
+- 如果 recovery 不写事件，那么故障后的分析和重放会失真。
 
 ## 7. Substrate 选择与取舍
 
@@ -229,3 +290,8 @@ stateDiagram-v2
 3. 统一约束 signal taxonomy，避免 ad-hoc signal 语义漂移。
 4. 对 `task.*`、`human_gate.*`、`branch/stage` 事件建立监控面板。
 5. 将“事件 schema 版本 + 回放校验”纳入发布门禁。
+
+常见误区：
+- 把 `signal` 当成最终状态：不对，signal 更像外部刺激，真正状态要看 event replay 后的 projection。
+- 把 `LocalFSM` 当成生产默认选项：不合适，它适合本地测试和轻量嵌入，不提供跨进程 durability。
+- 直接在平台代码里拼 run 状态：不建议，应该统一读取 facade/query 暴露的视图。

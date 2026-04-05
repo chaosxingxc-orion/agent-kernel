@@ -8,6 +8,13 @@
 - 副作用准入与幂等治理
 - 多 substrate（Temporal / LocalFSM）统一抽象
 
+如果把一个智能体系统拆成三层，可以这样理解：
+- 平台层：接收用户请求、展示界面、编排业务流程。
+- 内核层：保证 run 如何启动、推进、恢复、终止，并把事实和视图管理清楚。
+- 执行层：真正去调工具、MCP、子智能体、外部系统。
+
+`agent-kernel` 处在中间这一层，解决的是“长期运行任务如何不乱、不丢、可追踪”。
+
 ## 1. 版本与范围
 
 - Kernel 版本：`0.2.0`
@@ -30,11 +37,22 @@ graph LR
     T --> C[RecoveryGate]
 ```
 
+上图可以按一条主线阅读：
+- 平台只和 `KernelFacade` 说话。
+- facade 通过 workflow gateway 把请求送进 `RunActorWorkflow`。
+- `RunActorWorkflow` 负责推进生命周期，同时把执行决策交给 `TurnEngine`。
+- `TurnEngine` 再分别调用准入、执行、恢复等权威组件。
+
 设计原则：
 - 单入口：平台只通过 `KernelFacade` 调用内核。
 - 双轨真相：事件是事实来源，projection 是查询视图。
 - 执行前治理：任何副作用先经过 admission 与 dedupe。
 - 恢复显式化：失败后必须经过 `RecoveryGate` 决策。
+
+如果只记三件事，可以记这三条：
+- 写入侧看事件：所有重要变化都先变成 event。
+- 读取侧看 projection：平台查询时看的是投影视图，不是内部临时状态。
+- 执行侧先治理：任何真正的外部副作用都要先过 admission、dedupe、recovery。
 
 ## 3. 核心能力
 
@@ -78,6 +96,12 @@ async with await KernelRuntime.start(KernelRuntimeConfig()) as kernel:
 - 接入与使用示例：[QUICKSTART.md](./QUICKSTART.md)
 - 缺陷台账（规模化修复基线）：[KERNEL_SCALE_DEFECT_LEDGER.md](./KERNEL_SCALE_DEFECT_LEDGER.md)
 
+建议阅读顺序：
+1. 先看 [README.md](./README.md)，建立整体定位。
+2. 再看 [QUICKSTART.md](./QUICKSTART.md)，知道平台实际怎么接。
+3. 然后看 [ARCHITECTURE.md](./ARCHITECTURE.md)，理解为什么这样设计。
+4. 最后查 [INTERFACES.md](./INTERFACES.md)，按接口和 DTO 精确对接。
+
 ## 6. Substrate 模式
 
 - `TemporalSubstrateConfig(mode="sdk")`：连接外部 Temporal 集群（生产推荐）
@@ -90,3 +114,8 @@ async with await KernelRuntime.start(KernelRuntimeConfig()) as kernel:
 python -m ruff check .
 python -m pytest -q python_tests/agent_kernel
 ```
+
+适合这个项目的典型使用场景：
+- 需要把一次任务拆成多个回合执行，并且中间可能等待外部回调或人工审批。
+- 需要在工具调用失败后做显式恢复，而不是简单重试。
+- 需要在平台侧追踪 run、task、branch、stage 的完整生命周期。
