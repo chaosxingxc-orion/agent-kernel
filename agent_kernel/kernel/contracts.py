@@ -35,6 +35,7 @@ EffectClass = Literal[
 ]
 ExternalIdempotencyLevel = Literal["guaranteed", "best_effort", "unknown"]
 RecoveryMode = Literal["static_compensation", "human_escalation", "abort", "reflect_and_retry"]
+CancellationPolicy = Literal["abandon", "compensate_then_continue"]
 
 InteractionTarget = Literal[
     "agent_peer",  # another agent kernel: A2A or any peer-agent protocol
@@ -1052,13 +1053,77 @@ class ExecutorService(Protocol):
 
 
 class TransientExecutionError(Exception):
-    """Raised by ExecutorService.execute() for retryable transient failures.
+    """Base class for retryable transient execution failures.
 
-    The kernel's ``RetryingExecutorService`` wrapper catches this error and
-    retries up to ``max_attempts`` before re-raising.  Raise this from custom
-    executor implementations to signal that the failure is not permanent and a
-    simple retry is safe.
+    Subclasses can attach metadata consumed by ``RetryingExecutorService`` to
+    adapt retry delay and idempotent replay behavior.
+
+    Attributes:
+        backoff_hint_ms: Optional minimum backoff hint in milliseconds.
+        may_have_executed: Whether the action may have partially executed.
     """
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        backoff_hint_ms: int | None = None,
+        may_have_executed: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.backoff_hint_ms = backoff_hint_ms
+        self.may_have_executed = may_have_executed
+
+
+class ConnectionTransientError(TransientExecutionError):
+    """Connection-level transient failure (DNS/TCP/TLS).
+
+    The request did not reach the remote service.
+    """
+
+    def __init__(self, message: str = "", **kwargs: Any) -> None:
+        super().__init__(message, may_have_executed=False, **kwargs)
+
+
+class TimeoutTransientError(TransientExecutionError):
+    """Request timeout transient failure.
+
+    Timeout can mean the remote service may have executed the action.
+    """
+
+    def __init__(self, message: str = "", **kwargs: Any) -> None:
+        super().__init__(message, may_have_executed=True, **kwargs)
+
+
+class RateLimitTransientError(TransientExecutionError):
+    """Rate-limit transient failure (e.g. HTTP 429).
+
+    Attributes:
+        retry_after_ms: Server-provided retry window, when available.
+    """
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        retry_after_ms: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        hint = retry_after_ms or kwargs.pop("backoff_hint_ms", None)
+        super().__init__(
+            message,
+            backoff_hint_ms=hint,
+            may_have_executed=False,
+            **kwargs,
+        )
+        self.retry_after_ms = retry_after_ms
+
+
+class ServiceOverloadTransientError(TransientExecutionError):
+    """Service-overload transient failure (e.g. HTTP 503)."""
+
+    def __init__(self, message: str = "", **kwargs: Any) -> None:
+        super().__init__(message, may_have_executed=False, **kwargs)
 
 
 class CircuitBreakerStore(Protocol):
@@ -1987,6 +2052,8 @@ class ParallelGroup:
         n: Required success count when ``join_strategy="n_of_m"``.
         timeout_ms: Optional group-level execution timeout.
         group_idempotency_key: Stable key for group-level dedup on retry.
+        cancellation_policy: Child-branch cancellation semantics when group
+            execution is interrupted.
 
     """
 
@@ -1995,6 +2062,7 @@ class ParallelGroup:
     n: int | None = None
     timeout_ms: int | None = None
     group_idempotency_key: str = ""
+    cancellation_policy: CancellationPolicy = "abandon"
 
 
 @dataclass(frozen=True, slots=True)
@@ -2135,11 +2203,14 @@ class SpeculativePlan:
         speculation_timeout_ms: Optional wall-clock timeout. On expiry all
             candidates are cancelled and the plan resolves as
             ``recovery_pending``.
+        cancellation_policy: Cancellation semantics for losing candidates
+            after winner commit.
 
     """
 
     candidates: tuple[SpeculativeCandidate, ...]
     speculation_timeout_ms: int | None = None
+    cancellation_policy: CancellationPolicy = "abandon"
 
 
 ExecutionPlan = SequentialPlan | ParallelPlan | ConditionalPlan | DependencyGraph | SpeculativePlan

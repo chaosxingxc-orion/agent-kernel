@@ -16,10 +16,16 @@ Design notes:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import random
 from typing import Any
 
-from agent_kernel.kernel.contracts import TransientExecutionError
+from agent_kernel.kernel.contracts import (
+    ConnectionTransientError,
+    ServiceOverloadTransientError,
+    TimeoutTransientError,
+    TransientExecutionError,
+)
 
 
 class RetryingExecutorService:
@@ -47,6 +53,7 @@ class RetryingExecutorService:
         max_attempts: int = 2,
         base_delay_ms: int = 100,
         jitter_ms: int = 50,
+        observability_hook: Any = None,
     ) -> None:
         """Initialize the instance with configured dependencies."""
         if max_attempts < 1:
@@ -55,6 +62,7 @@ class RetryingExecutorService:
         self._max_attempts = max_attempts
         self._base_delay_ms = base_delay_ms
         self._jitter_ms = jitter_ms
+        self._observability_hook = observability_hook
 
     async def execute(self, action: Any, **kwargs: Any) -> Any:
         """Execute *action* via the inner executor, retrying on transient errors.
@@ -79,8 +87,44 @@ class RetryingExecutorService:
             except TransientExecutionError as exc:
                 last_exc = exc
                 if attempt < self._max_attempts - 1:
-                    delay_ms = self._base_delay_ms * (2**attempt) + random.randint(
-                        0, self._jitter_ms
-                    )
+                    delay_ms = self._compute_delay(exc, attempt)
                     await asyncio.sleep(delay_ms / 1000.0)
+                    if (
+                        isinstance(exc, ServiceOverloadTransientError)
+                        and self._observability_hook is not None
+                    ):
+                        with contextlib.suppress(Exception):
+                            self._observability_hook.on_circuit_breaker_trip(
+                                run_id=getattr(action, "run_id", ""),
+                                effect_class=getattr(action, "effect_class", ""),
+                                failure_count=attempt + 1,
+                                tripped=False,
+                            )
         raise last_exc  # type: ignore[misc]
+
+    def _compute_delay(self, exc: TransientExecutionError, attempt: int) -> int:
+        """Compute one retry delay in milliseconds.
+
+        Args:
+            exc: The transient error that triggered this retry.
+            attempt: Zero-based retry attempt index.
+
+        Returns:
+            Delay before the next retry in milliseconds.
+        """
+        if exc.backoff_hint_ms is not None:
+            return max(exc.backoff_hint_ms, self._base_delay_ms) + random.randint(
+                0, self._jitter_ms
+            )
+
+        if isinstance(exc, ConnectionTransientError):
+            multiplier = 1
+        elif isinstance(exc, TimeoutTransientError):
+            multiplier = 4
+        elif isinstance(exc, ServiceOverloadTransientError):
+            multiplier = 2
+        else:
+            multiplier = 1
+
+        computed = self._base_delay_ms * multiplier * (2**attempt)
+        return computed + random.randint(0, self._jitter_ms)

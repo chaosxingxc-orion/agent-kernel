@@ -1513,6 +1513,7 @@ def _deserialize_execution_plan(payload: dict[str, Any]) -> Any:
                     n=group.get("n"),
                     timeout_ms=group.get("timeout_ms"),
                     group_idempotency_key=group.get("group_idempotency_key", ""),
+                    cancellation_policy=group.get("cancellation_policy", "abandon"),
                 )
             )
         return ParallelPlan(groups=tuple(groups))
@@ -1559,5 +1560,6 @@ def _deserialize_execution_plan(payload: dict[str, Any]) -> Any:
         return SpeculativePlan(
             candidates=tuple(candidates),
             speculation_timeout_ms=payload.get("speculation_timeout_ms"),
+            cancellation_policy=payload.get("cancellation_policy", "abandon"),
         )
     raise ValueError(f"Unsupported plan_type in payload: {plan_type!r}")

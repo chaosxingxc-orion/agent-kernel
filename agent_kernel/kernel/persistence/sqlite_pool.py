@@ -17,10 +17,12 @@ class SQLiteConnectionPool:
         self,
         database_path: str,
         read_pool_size: int = 4,
+        busy_timeout_ms: int = 5000,
     ) -> None:
         """Initialize connection pool."""
         self._database_path = database_path
         self._read_pool_size = max(read_pool_size, 1)
+        self._busy_timeout_ms = max(0, busy_timeout_ms)
         self._read_pool: queue.SimpleQueue[sqlite3.Connection] = queue.SimpleQueue()
         self._read_lock = threading.Lock()
         self._write_conn = self._open_connection(query_only=False)
@@ -99,6 +101,7 @@ class SQLiteConnectionPool:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute(f"PRAGMA busy_timeout={self._busy_timeout_ms}")
         if query_only:
             conn.execute("PRAGMA query_only=ON")
         return conn

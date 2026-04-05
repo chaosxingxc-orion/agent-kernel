@@ -1304,6 +1304,7 @@ def _serialize_execution_plan(
                     "n": group.n,
                     "timeout_ms": group.timeout_ms,
                     "group_idempotency_key": group.group_idempotency_key,
+                    "cancellation_policy": group.cancellation_policy,
                 }
                 for group in plan.groups
             ],
@@ -1348,6 +1349,7 @@ def _serialize_execution_plan(
                 for candidate in plan.candidates
             ],
             "speculation_timeout_ms": plan.speculation_timeout_ms,
+            "cancellation_policy": plan.cancellation_policy,
         }
     raise ValueError(f"Unsupported plan type for serialization: {type(plan).__name__}")
 

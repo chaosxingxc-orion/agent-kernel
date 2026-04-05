@@ -31,6 +31,7 @@ class SQLiteDedupeStore:
         self,
         database_path: str | Path = ":memory:",
         pool: SQLiteConnectionPool | None = None,
+        busy_timeout_ms: int = 5000,
     ) -> None:
         """Initialize one SQLite dedupe store.
 
@@ -38,6 +39,8 @@ class SQLiteDedupeStore:
             database_path: SQLite file path. Use ``":memory:"`` for
                 in-memory mode.
             pool: Optional shared SQLite connection pool.
+            busy_timeout_ms: SQLite busy-timeout window in milliseconds for
+                lock contention waits.
 
         """
         self._database_path = str(database_path)
@@ -53,6 +56,7 @@ class SQLiteDedupeStore:
             self._conn = self._pool.acquire_write()
         self._lock = threading.RLock()
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute(f"PRAGMA busy_timeout={max(0, busy_timeout_ms)}")
         if self._pool is None:
             # WAL mode allows concurrent readers while one writer is active.
             # NORMAL sync is safe with WAL and durable on OS crash for PoC use.

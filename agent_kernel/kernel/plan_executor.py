@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import graphlib
+import logging
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
@@ -24,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal
 if TYPE_CHECKING:
     from agent_kernel.kernel.branch_monitor import BranchMonitor
     from agent_kernel.kernel.dedupe_store import DedupeStorePort
+    from agent_kernel.kernel.recovery.compensation_registry import CompensationRegistry
 
 from agent_kernel.kernel.contracts import (
     Action,
@@ -41,6 +43,8 @@ from agent_kernel.kernel.contracts import (
     SpeculativePlan,
 )
 from agent_kernel.kernel.turn_engine import TurnResult
+
+_executor_logger = logging.getLogger(__name__)
 
 
 class UnsupportedPlanTypeError(Exception):
@@ -117,6 +121,7 @@ class PlanExecutor:
         branch_monitor: BranchMonitor | None = None,
         observability_hook: ObservabilityHook | None = None,
         dedupe_store: DedupeStorePort | None = None,
+        compensation_registry: CompensationRegistry | None = None,
     ) -> None:
         """Initialise PlanExecutor with an async turn-runner callable.
 
@@ -132,12 +137,16 @@ class PlanExecutor:
             dedupe_store: Optional ``DedupeStorePort`` for per-branch idempotency
                 checks.  When present, already-acknowledged branches are skipped
                 on crash-replay.  When ``None``, per-branch dedupe is disabled.
+            compensation_registry: Optional compensation registry used by
+                cancellation policies that compensate already-succeeded
+                branches before continuation.
 
         """
         self._turn_runner = turn_runner
         self._branch_monitor = branch_monitor
         self._observability_hook = observability_hook
         self._dedupe_store = dedupe_store
+        self._compensation_registry = compensation_registry
         # Per-execution speculative task registry.  Populated during
         # _execute_speculative and cleared after candidates settle.
         # A stack is used so that nested SpeculativePlan executions do not
@@ -148,7 +157,72 @@ class PlanExecutor:
         # surface it in the returned PlanResult for event-log recording.
         self._committed_winner_id: str | None = None
 
-    async def commit_speculation(self, winner_candidate_id: str) -> None:
+    async def _cancel_with_policy(
+        self,
+        tasks_to_cancel: dict[str, asyncio.Task[Any]],
+        succeeded_results: list[TurnResult],
+        cancellation_policy: str,
+        run_id: str,
+    ) -> None:
+        """Cancel tasks while honoring cancellation policy semantics.
+
+        Args:
+            tasks_to_cancel: Mapping from branch/candidate id to task.
+            succeeded_results: Already-succeeded branch results.
+            cancellation_policy: ``"abandon"`` or ``"compensate_then_continue"``.
+            run_id: Run identifier for observability and logging context.
+        """
+        for task in tasks_to_cancel.values():
+            if not task.done():
+                task.cancel()
+
+        if cancellation_policy != "compensate_then_continue":
+            return
+
+        if self._compensation_registry is None:
+            _executor_logger.warning(
+                "cancellation_policy=compensate_then_continue but "
+                "CompensationRegistry is not configured; falling back to abandon"
+            )
+            return
+
+        for result in succeeded_results:
+            commit = result.action_commit or {}
+            effect_class = commit.get("effect_class")
+            action_id = commit.get("action_id")
+            if not isinstance(effect_class, str) or not isinstance(action_id, str):
+                continue
+            if not self._compensation_registry.has_handler(effect_class):
+                continue
+            try:
+                compensation_action = Action(
+                    action_id=action_id,
+                    run_id=str(commit.get("run_id") or run_id),
+                    action_type="cancellation_compensation",
+                    effect_class=effect_class,  # type: ignore[arg-type]
+                    input_json={"action_commit": commit},
+                )
+                await self._compensation_registry.execute(
+                    compensation_action,
+                    dedupe_store=self._dedupe_store,
+                    run_id=run_id,
+                )
+            except Exception:
+                _executor_logger.warning(
+                    "Compensation failed during cancellation "
+                    "(run_id=%s, action_id=%s, effect_class=%s)",
+                    run_id,
+                    action_id,
+                    effect_class,
+                    exc_info=True,
+                )
+
+    async def commit_speculation(
+        self,
+        winner_candidate_id: str,
+        cancellation_policy: str = "abandon",
+        succeeded_results: list[TurnResult] | None = None,
+    ) -> None:
         """Cancel all speculative tasks except the winner and records the decision.
 
         Called when a ``speculation_committed`` signal identifies the winning
@@ -159,12 +233,22 @@ class PlanExecutor:
 
         Args:
             winner_candidate_id: ``candidate_id`` of the candidate to keep.
+            cancellation_policy: How to handle already-succeeded loser branches.
+            succeeded_results: Optional pre-resolved loser branch results.
 
         """
         self._committed_winner_id = winner_candidate_id
-        for cid, task in list(self._active_speculative_tasks.items()):
-            if cid != winner_candidate_id and not task.done():
-                task.cancel()
+        loser_tasks: dict[str, asyncio.Task[Any]] = {
+            cid: task
+            for cid, task in self._active_speculative_tasks.items()
+            if cid != winner_candidate_id
+        }
+        await self._cancel_with_policy(
+            tasks_to_cancel=loser_tasks,
+            succeeded_results=succeeded_results or [],
+            cancellation_policy=cancellation_policy,
+            run_id="",
+        )
 
     async def execute_plan(self, plan: ExecutionPlan, run_id: str) -> PlanResult:
         """Dispatches plan execution to the correct strategy.
@@ -306,10 +390,30 @@ class PlanExecutor:
 
         if group.timeout_ms is not None:
             timeout_s = group.timeout_ms / 1000.0
-            tasks = [asyncio.create_task(_monitored_run(action)) for action in group.actions]
+            task_by_action_id: dict[str, asyncio.Task[TurnResult]] = {
+                action.action_id: asyncio.create_task(_monitored_run(action))
+                for action in group.actions
+            }
+            tasks = [task_by_action_id[action.action_id] for action in group.actions]
             done, pending = await asyncio.wait(tasks, timeout=timeout_s)
-            for t in pending:
-                t.cancel()
+            succeeded_before_timeout: list[TurnResult] = []
+            for task in done:
+                if task.cancelled():
+                    continue
+                exc = task.exception()
+                if exc is None:
+                    result = task.result()
+                    if result.outcome_kind in ("dispatched", "noop"):
+                        succeeded_before_timeout.append(result)
+            pending_map: dict[str, asyncio.Task[Any]] = {
+                aid: task for aid, task in task_by_action_id.items() if task in pending
+            }
+            await self._cancel_with_policy(
+                tasks_to_cancel=pending_map,
+                succeeded_results=succeeded_before_timeout,
+                cancellation_policy=group.cancellation_policy,
+                run_id=run_id,
+            )
             await asyncio.gather(*pending, return_exceptions=True)
             raw_results = []
             for task in tasks:

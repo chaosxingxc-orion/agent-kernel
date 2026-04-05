@@ -34,12 +34,15 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
         self,
         database_path: str | Path,
         pool: SQLiteConnectionPool | None = None,
+        busy_timeout_ms: int = 5000,
     ) -> None:
         """Initialize one SQLite event log instance.
 
         Args:
             database_path: SQLite file path. Use ``":memory:"`` for in-memory mode.
             pool: Optional shared SQLite connection pool.
+            busy_timeout_ms: SQLite busy-timeout window in milliseconds for
+                lock contention waits.
         """
         self._database_path = str(database_path)
         self._lock = threading.Lock()
@@ -48,9 +51,11 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
             self._connection = sqlite3.connect(self._database_path, check_same_thread=False)
             self._connection.row_factory = sqlite3.Row
             self._connection.execute("PRAGMA foreign_keys = ON")
+            self._connection.execute(f"PRAGMA busy_timeout={max(0, busy_timeout_ms)}")
         else:
             self._connection = self._pool.acquire_write()
             self._connection.execute("PRAGMA foreign_keys = ON")
+            self._connection.execute(f"PRAGMA busy_timeout={max(0, busy_timeout_ms)}")
         self._initialize_schema()
 
     def close(self) -> None:

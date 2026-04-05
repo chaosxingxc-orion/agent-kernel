@@ -540,11 +540,17 @@ class ColocatedSQLiteBundle:
 
     """
 
-    def __init__(self, database_path: str | Path = ":memory:") -> None:
+    def __init__(
+        self,
+        database_path: str | Path = ":memory:",
+        busy_timeout_ms: int = 5000,
+    ) -> None:
         """Open the shared SQLite database and initializes schema.
 
         Args:
             database_path: SQLite file path. Use ``":memory:"`` for in-memory mode.
+            busy_timeout_ms: SQLite busy-timeout window in milliseconds for
+                lock contention waits.
 
         """
         self._database_path = str(database_path)
@@ -558,6 +564,7 @@ class ColocatedSQLiteBundle:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA foreign_keys = ON")
+        self._conn.execute(f"PRAGMA busy_timeout={max(0, busy_timeout_ms)}")
         self._initialize_schema()
 
         self.event_log = _SharedConnectionEventLog(self._conn, self._lock)

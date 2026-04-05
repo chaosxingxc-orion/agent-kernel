@@ -32,7 +32,9 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -240,5 +242,44 @@ def event_log_health_check(event_log: Any) -> HealthCheckFn:
             return HealthStatus.OK, f"EventLog reachable ({count} events)"
         except Exception as exc:  # pylint: disable=broad-exception-caught
             return HealthStatus.UNHEALTHY, f"EventLog unreachable: {exc}"
+
+    return _check
+
+
+def sqlite_lock_contention_health_check(
+    conn: sqlite3.Connection,
+    threshold_ms: int = 1000,
+) -> HealthCheckFn:
+    """Return a lock-contention health probe for SQLite write access.
+
+    The probe attempts ``BEGIN IMMEDIATE`` and measures lock acquisition time.
+    Slow acquisition indicates potential cross-process writer contention.
+
+    Args:
+        conn: SQLite connection to probe.
+        threshold_ms: Degraded threshold for lock acquisition latency.
+
+    Returns:
+        Health check callable returning ``(HealthStatus, message)``.
+    """
+
+    def _check() -> tuple[HealthStatus, str]:
+        start = time.monotonic()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("ROLLBACK")
+            elapsed_ms = (time.monotonic() - start) * 1000.0
+            if elapsed_ms > threshold_ms:
+                return (
+                    HealthStatus.DEGRADED,
+                    "SQLite lock acquired in "
+                    f"{elapsed_ms:.0f}ms (threshold {threshold_ms}ms); possible contention",
+                )
+            return HealthStatus.OK, f"SQLite lock acquired in {elapsed_ms:.1f}ms"
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            with contextlib.suppress(Exception):
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+            return HealthStatus.UNHEALTHY, f"SQLite lock probe failed: {exc}"
 
     return _check
