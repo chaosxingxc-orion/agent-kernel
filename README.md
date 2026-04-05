@@ -1,45 +1,64 @@
 ﻿# agent-kernel
 
-企业级智能体执行内核，面向“可恢复、可观测、可扩展”的长期运行场景。
+`agent-kernel` 是一个面向长期任务执行的智能体内核，强调可恢复、可观测、可治理。
 
-`agent-kernel` 的定位不是提示词框架，而是平台层与执行底座之间的**内核层**：
-- 统一生命周期管理（Run 启动、信号、恢复、终止）
-- 严格事件真相（append-only）与投影一致性
-- 副作用前置准入（admission）与幂等治理（dedupe）
-- 多 substrate 支持（Temporal / LocalFSM）
+它不是提示词编排层，而是平台与执行底座之间的内核层，负责：
+- run 生命周期权威推进
+- 事件事实（append-only）与投影视图分离
+- 副作用准入与幂等治理
+- 多 substrate（Temporal / LocalFSM）统一抽象
 
-## 1. 当前版本状态
+## 1. 版本与范围
 
 - Kernel 版本：`0.2.0`
 - 接口协议：`1.0.0`
-- Python：`3.14`
-- 文档基于当前实现刷新日期：`2026-04-05`
+- Python：`>=3.14`
+- 文档刷新日期：`2026-04-05`
 
-## 2. 核心能力
+## 2. 架构一览
+
+```mermaid
+graph LR
+    P[Platform] --> F[KernelFacade]
+    F --> G[WorkflowGateway]
+    G --> R[RunActorWorkflow]
+    R --> E[EventLog]
+    R --> J[Projection]
+    R --> T[TurnEngine]
+    T --> A[Admission]
+    T --> X[Executor]
+    T --> C[RecoveryGate]
+```
+
+设计原则：
+- 单入口：平台只通过 `KernelFacade` 调用内核。
+- 双轨真相：事件是事实来源，projection 是查询视图。
+- 执行前治理：任何副作用先经过 admission 与 dedupe。
+- 恢复显式化：失败后必须经过 `RecoveryGate` 决策。
+
+## 3. 核心能力
 
 - 六权威模型：`RunActor` / `EventLog` / `Projection` / `Admission` / `Executor` / `RecoveryGate`
-- 计划执行：`Sequential`、`Parallel`、`Conditional`、`DependencyGraph`、`Speculative`
-- 人机协同：`approval_submitted`、`human_gate_opened`、`trace_runtime_view`
-- 健康探针：liveness/readiness
-- 可观测性：事件流、trace 视图、任务视图（task view）
+- 五类计划：`Sequential` / `Parallel` / `Conditional` / `DependencyGraph` / `Speculative`
+- 人机协作：`approval_submitted`、`human_gate_opened`、`task_view`
+- 运行健康：liveness/readiness 探针
+- 观测能力：事件流、trace runtime view、task 生命周期事件
 
-## 3. 快速开始
+## 4. 快速启动
 
-安装（开发模式）：
+安装：
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-最小启动示例：
+最小示例：
 
 ```python
 from agent_kernel.runtime.kernel_runtime import KernelRuntime, KernelRuntimeConfig
 from agent_kernel.kernel.contracts import StartRunRequest
 
-config = KernelRuntimeConfig()
-
-async with await KernelRuntime.start(config) as kernel:
+async with await KernelRuntime.start(KernelRuntimeConfig()) as kernel:
     started = await kernel.facade.start_run(
         StartRunRequest(
             initiator="user",
@@ -50,31 +69,24 @@ async with await KernelRuntime.start(config) as kernel:
     print(started.run_id, started.lifecycle_state)
 ```
 
-更多可运行示例见 [QUICKSTART.md](./QUICKSTART.md)。
+完整上手流程见 [QUICKSTART.md](./QUICKSTART.md)。
 
-## 4. 文档导航
+## 5. 文档导航
 
-- 架构设计： [ARCHITECTURE.md](./ARCHITECTURE.md)
-- 接口与 DTO： [INTERFACES.md](./INTERFACES.md)
-- 快速接入与使用： [QUICKSTART.md](./QUICKSTART.md)
-- 路线图： [ROADMAP.md](./ROADMAP.md)
+- 架构设计与调用关系图：[ARCHITECTURE.md](./ARCHITECTURE.md)
+- 接口契约与 DTO：[INTERFACES.md](./INTERFACES.md)
+- 接入与使用示例：[QUICKSTART.md](./QUICKSTART.md)
+- 缺陷台账（规模化修复基线）：[KERNEL_SCALE_DEFECT_LEDGER.md](./KERNEL_SCALE_DEFECT_LEDGER.md)
 
-## 5. Substrate 模式
+## 6. Substrate 模式
 
 - `TemporalSubstrateConfig(mode="sdk")`：连接外部 Temporal 集群（生产推荐）
 - `TemporalSubstrateConfig(mode="host")`：本地内嵌 Temporal dev server（开发/CI）
-- `LocalSubstrateConfig(...)`：纯 in-process asyncio substrate（轻量部署/测试）
+- `LocalSubstrateConfig(...)`：纯 in-process 模式（轻量测试/嵌入）
 
-## 6. 测试与质量
+## 7. 质量检查
 
 ```bash
 python -m ruff check .
 python -m pytest -q python_tests/agent_kernel
 ```
-
-## 7. 设计原则
-
-- 平台只通过 `KernelFacade` 进入内核
-- DTO 全部使用不可变 dataclass（frozen + slots）
-- 事件与投影分离，事件是事实，投影是可重建视图
-- 恢复逻辑明确模式，不做隐式“吞错重试”
