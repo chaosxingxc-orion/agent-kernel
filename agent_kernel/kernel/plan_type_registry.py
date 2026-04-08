@@ -25,9 +25,18 @@ Usage::
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass, field
 
 _registry_logger = logging.getLogger(__name__)
+
+warnings.warn(
+    "agent_kernel.kernel.plan_type_registry is deprecated. "
+    "Plan types have moved to hi_agent.task_mgmt.plan_types. "
+    "This module will be removed in the next major version.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 @dataclass(frozen=True, slots=True)
