@@ -8,6 +8,7 @@ implementation is introduced.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -25,6 +26,7 @@ RunLifecycleState = Literal[
     "waiting_external",
     "recovering",
     "completed",
+    "failed",
     "aborted",
 ]
 EffectClass = Literal[
@@ -139,6 +141,11 @@ class Action:
     Orthogonal to effect_class which governs idempotency/recovery."""
 
 
+# Type alias used by execute_turn() across substrates.
+# A handler receives (action, sandbox_grant) and returns any result.
+AsyncActionHandler = Callable[["Action", str | None], Awaitable[Any]]
+
+
 @dataclass(frozen=True, slots=True)
 class SandboxGrant:
     """Represents a sandbox authorization returned by admission.
@@ -247,6 +254,8 @@ class RunPolicyVersions:
     """
 
     route_policy_version: str | None = None
+    acceptance_policy_version: str | None = None
+    memory_policy_version: str | None = None
     skill_policy_version: str | None = None
     evaluation_policy_version: str | None = None
     task_view_policy_version: str | None = None
@@ -742,6 +751,14 @@ class SpawnChildRunRequest:
     input_ref: str | None = None
     input_json: dict[str, Any] | None = None
     context_ref: str | None = None  # Inherited from parent run by KernelFacade
+    task_id: str | None = None
+    """Bind child run to a task registry entry (e.g. plan_step, parallel_branch)."""
+    inherit_policy_versions: bool = True
+    """Inherit parent's RunPolicyVersions into child.  Set False to use defaults."""
+    policy_version_overrides: dict[str, str] | None = None
+    """Selective overrides applied on top of inherited policy versions."""
+    notify_parent_on_complete: bool = True
+    """Signal parent run when child reaches a terminal state."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -2550,11 +2567,11 @@ class KernelManifest:
     substrate_type: str
     capability_snapshot_schema_version: str = "2"
     substrate_limitations: frozenset[str] = field(default_factory=frozenset)
-    trace_protocol_version: str = "1.2.1"
+    trace_protocol_version: str = "2.8"
     """TRACE architecture protocol version this kernel implements."""
     supported_trace_features: frozenset[str] = field(default_factory=frozenset)
     """TRACE-specific capabilities: branch_protocol, task_view_record,
-    policy_version_pinning, etc."""
+    policy_version_pinning, evolve_postmortem, child_run_orchestration, etc."""
 
 
 # ---------------------------------------------------------------------------
@@ -2704,6 +2721,58 @@ class HumanGateRequest:
     branch_id: str | None = None
     artifact_ref: str | None = None
     caused_by: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HumanGateResolution:
+    """Snapshot of one human gate resolution for postmortem aggregation."""
+
+    gate_ref: str
+    gate_type: HumanGateType
+    resolution: Literal["approved", "rejected"]
+    resolved_by: str | None = None
+    resolved_at: str | None = None
+    stage_id: str | None = None
+    branch_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RunPostmortemView:
+    """Aggregated run data for post-run analysis by hi-agent evolve.
+
+    This is a projection that scans the run's event log to aggregate action
+    counts, failure codes, timestamps, and human gate outcomes.  hi-agent's
+    evolve layer enriches it with task_family, quality_score, efficiency_score,
+    and trajectory_summary which are hi-agent-owned semantics.
+    """
+
+    run_id: str
+    task_id: str | None
+    run_kind: str
+    outcome: TraceRunState
+    stages: list[TraceStageView]
+    branches: list[TraceBranchView]
+    total_action_count: int
+    failure_codes: list[str]
+    duration_ms: int
+    human_gate_resolutions: list[HumanGateResolution]
+    policy_versions: RunPolicyVersions | None
+    event_count: int
+    created_at: str
+    completed_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ChildRunSummary:
+    """Summary status of one child run for parent aggregation queries."""
+
+    child_run_id: str
+    child_kind: str
+    task_id: str | None
+    lifecycle_state: RunLifecycleState
+    outcome: TraceRunState | None
+    created_at: str
+    completed_at: str | None
 
 
 # ---------------------------------------------------------------------------

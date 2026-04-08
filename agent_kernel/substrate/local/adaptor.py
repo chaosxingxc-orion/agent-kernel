@@ -34,6 +34,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent_kernel.kernel.contracts import (
+    Action,
+    AsyncActionHandler,
     RunProjection,
     RuntimeEvent,
     SignalRunRequest,
@@ -193,6 +195,7 @@ class LocalWorkflowGateway:
         self._workflow_id_prefix = workflow_id_prefix
         self._workflows: dict[str, RunActorWorkflow] = {}
         self._run_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._execute_turn_cache: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # TemporalWorkflowGateway interface
@@ -238,6 +241,48 @@ class LocalWorkflowGateway:
         await asyncio.sleep(0)
         _logger.debug("LocalWorkflowGateway: run started 鈥?run_id=%s", run_id)
         return {"run_id": run_id, "workflow_id": workflow_id}
+
+    async def execute_turn(
+        self,
+        run_id: str,
+        action: Action,
+        handler: AsyncActionHandler,
+        *,
+        idempotency_key: str,
+    ) -> Any:
+        """Execute one atomic turn: dedupe → handler → record.
+
+        Idempotent: returns the cached TurnResult if idempotency_key was
+        already executed.  Handler receives (action, sandbox_grant=None).
+        """
+        from agent_kernel.kernel.turn_engine import TurnResult
+
+        # Dedupe: return cached result for already-executed keys
+        if idempotency_key in self._execute_turn_cache:
+            return self._execute_turn_cache[idempotency_key]
+
+        # Execute the handler
+        import inspect
+
+        if inspect.iscoroutinefunction(handler):
+            output = await handler(action, None)
+        else:
+            output = handler(action, None)
+
+        result = TurnResult(
+            state="effect_recorded",
+            outcome_kind="dispatched",
+            decision_ref=idempotency_key,
+            decision_fingerprint=idempotency_key,
+            action_commit={"output": output},
+        )
+        self._execute_turn_cache[idempotency_key] = result
+        _logger.debug(
+            "LocalWorkflowGateway.execute_turn: run_id=%s key=%s",
+            run_id,
+            idempotency_key,
+        )
+        return result
 
     async def signal_workflow(
         self,
