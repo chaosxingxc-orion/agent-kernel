@@ -1,16 +1,14 @@
 """Task-level lifecycle management for agent-kernel.
 
-Provides TaskRegistry, TaskWatchdog, RestartPolicy, and ReflectionBridge
-to manage goal-oriented tasks that may span multiple Run attempts.
+Provides pure state-tracking components: TaskRegistry, TaskWatchdog,
+contracts (TaskDescriptor, TaskAttempt, etc.), and event log.
 
-A 'task' is a semantic unit of work above the Run level:
-- One task may require 1..N run attempts to complete
-- On failure: RestartPolicy decides retry vs reflect
-- On retry budget exhaustion: ReflectionBridge constructs LLM context
-  for model-driven recovery (reflect_and_replace mode)
+Business logic (RestartPolicyEngine, ReflectionOrchestrator, ReflectionBridge)
+has been migrated to hi-agent.
 """
 
 from agent_kernel.kernel.task_manager.contracts import (
+    ExhaustedPolicy,
     TaskAttempt,
     TaskDescriptor,
     TaskHealthStatus,
@@ -18,21 +16,12 @@ from agent_kernel.kernel.task_manager.contracts import (
     TaskRestartPolicy,
 )
 from agent_kernel.kernel.task_manager.event_log import InMemoryTaskEventLog, TaskEventAppender
-from agent_kernel.kernel.task_manager.reflection_bridge import ReflectionBridge
-from agent_kernel.kernel.task_manager.reflection_orchestrator import (
-    ReflectionOrchestrator,
-    reflection_context_to_recovery_dict,
-)
 from agent_kernel.kernel.task_manager.registry import TaskRegistry
-from agent_kernel.kernel.task_manager.restart_policy import RestartDecision, RestartPolicyEngine
 from agent_kernel.kernel.task_manager.watchdog import TaskWatchdog
 
 __all__ = [
+    "ExhaustedPolicy",
     "InMemoryTaskEventLog",
-    "ReflectionBridge",
-    "ReflectionOrchestrator",
-    "RestartDecision",
-    "RestartPolicyEngine",
     "TaskAttempt",
     "TaskDescriptor",
     "TaskEventAppender",
@@ -41,5 +30,4 @@ __all__ = [
     "TaskRegistry",
     "TaskRestartPolicy",
     "TaskWatchdog",
-    "reflection_context_to_recovery_dict",
 ]

@@ -13,7 +13,6 @@ from agent_kernel.kernel.task_manager.contracts import (
     TaskRestartPolicy,
 )
 from agent_kernel.kernel.task_manager.registry import TaskRegistry
-from agent_kernel.kernel.task_manager.restart_policy import RestartPolicyEngine
 from agent_kernel.kernel.task_manager.watchdog import TaskWatchdog
 
 # ---------------------------------------------------------------------------
@@ -52,13 +51,11 @@ def _make_registry_with_running_task(
 
 def _make_watchdog(
     registry: TaskRegistry,
-    facade: object | None = None,
+    on_stall: object | None = None,
 ) -> TaskWatchdog:
-    if facade is None:
-        facade = AsyncMock()
-        facade.start_run = AsyncMock(return_value=MagicMock(run_id="r-new"))
-    policy_engine = RestartPolicyEngine(registry=registry, facade=facade)
-    return TaskWatchdog(registry=registry, policy_engine=policy_engine)
+    if on_stall is None:
+        on_stall = AsyncMock()
+    return TaskWatchdog(registry=registry, on_stall=on_stall)
 
 
 # ---------------------------------------------------------------------------
@@ -111,18 +108,25 @@ class TestWatchdogOnce:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_policy_engine_error_does_not_propagate(self) -> None:
+    async def test_callback_error_does_not_propagate(self) -> None:
         reg = _make_registry_with_running_task(heartbeat_timeout_ms=1)
         entry = reg._tasks["t1"]
         entry.last_heartbeat_ms = int(time.monotonic() * 1000) - 10_000
-        facade = AsyncMock()
-        facade.start_run = AsyncMock(side_effect=RuntimeError("boom"))
-        watchdog = _make_watchdog(reg, facade=facade)
+        on_stall = AsyncMock(side_effect=RuntimeError("boom"))
+        watchdog = _make_watchdog(reg, on_stall=on_stall)
         # Should not raise; errors are swallowed and logged
         result = await watchdog.watchdog_once()
-        # Task was attempted to be processed (may or may not be in result
-        # depending on whether handle_failure raised before returning)
         assert isinstance(result, list)
+
+    @pytest.mark.asyncio
+    async def test_no_callback_still_reports_stalled(self) -> None:
+        """When on_stall is None, stalled tasks are still detected and listed."""
+        reg = _make_registry_with_running_task(heartbeat_timeout_ms=1)
+        entry = reg._tasks["t1"]
+        entry.last_heartbeat_ms = int(time.monotonic() * 1000) - 10_000
+        watchdog = TaskWatchdog(registry=reg, on_stall=None)
+        result = await watchdog.watchdog_once()
+        assert "t1" in result
 
 
 # ---------------------------------------------------------------------------
