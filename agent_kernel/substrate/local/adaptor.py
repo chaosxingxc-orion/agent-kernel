@@ -255,19 +255,15 @@ class LocalWorkflowGateway:
         Idempotent: returns the cached TurnResult if idempotency_key was
         already executed.  Handler receives (action, sandbox_grant=None).
         """
+        # Deferred import: turn_engine → contracts → adaptor would create a cycle
         from agent_kernel.kernel.turn_engine import TurnResult
 
         # Dedupe: return cached result for already-executed keys
         if idempotency_key in self._execute_turn_cache:
             return self._execute_turn_cache[idempotency_key]
 
-        # Execute the handler
-        import inspect
-
-        if inspect.iscoroutinefunction(handler):
-            output = await handler(action, None)
-        else:
-            output = handler(action, None)
+        # AsyncActionHandler is typed as Callable[..., Awaitable[Any]]; enforce the contract.
+        output = await handler(action, None)
 
         result = TurnResult(
             state="effect_recorded",
