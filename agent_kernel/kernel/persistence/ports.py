@@ -48,6 +48,9 @@ class DedupeStore(Protocol):
     def mark_succeeded(self, key: str) -> None:
         """Transition to succeeded state."""
 
+    def count_by_run(self, run_id: str) -> int:
+        """Count records whose key is prefixed by the run_id."""
+
     def mark_unknown_effect(self, key: str) -> None:
         """Transition to unknown_effect state."""
 

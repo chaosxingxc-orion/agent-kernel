@@ -351,6 +351,40 @@ async def put_task_view_decision(request: Request) -> JSONResponse:
         return _error(400, str(exc))
 
 
+async def post_run_turn(request: Request) -> JSONResponse:
+    """POST /runs/{run_id}/turn — execute_turn (in-process only)"""
+    return _error(501, "execute_turn requires in-process mode; use KernelDirectAdapter")
+
+
+async def post_tasks(request: Request) -> JSONResponse:
+    """POST /tasks — register_task"""
+    facade: KernelFacade = request.app.state.facade
+    data = await _json_body(request)
+    try:
+        from agent_kernel.kernel.task_manager.contracts import TaskDescriptor
+
+        descriptor = TaskDescriptor(**data)
+        facade.register_task(descriptor)
+        return JSONResponse({"ok": True}, status_code=201)
+    except Exception as exc:
+        logger.exception("register_task failed")
+        return _error(400, str(exc))
+
+
+async def get_task_status(request: Request) -> JSONResponse:
+    """GET /tasks/{task_id}/status — get_task_status"""
+    facade: KernelFacade = request.app.state.facade
+    task_id = request.path_params["task_id"]
+    try:
+        status = facade.get_task_status(task_id)
+        if status is None:
+            return _error(404, f"task {task_id!r} not found")
+        return JSONResponse(serialize_dataclass(status))
+    except Exception as exc:
+        logger.exception("get_task_status failed")
+        return _error(400, str(exc))
+
+
 async def get_manifest(request: Request) -> JSONResponse:
     """GET /manifest — get_manifest"""
     facade: KernelFacade = request.app.state.facade
@@ -449,6 +483,11 @@ def create_app(facade: KernelFacade) -> Starlette:
             put_task_view_decision,
             methods=["PUT"],
         ),
+        # Turn (in-process only)
+        Route("/runs/{run_id}/turn", post_run_turn, methods=["POST"]),
+        # Task registry
+        Route("/tasks", post_tasks, methods=["POST"]),
+        Route("/tasks/{task_id}/status", get_task_status, methods=["GET"]),
         # Manifest and health
         Route("/manifest", get_manifest, methods=["GET"]),
         Route("/health/liveness", get_health_liveness, methods=["GET"]),

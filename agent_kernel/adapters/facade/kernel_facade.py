@@ -7,6 +7,7 @@ Temporal-specific substrate details.
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import threading
 from contextlib import asynccontextmanager
@@ -985,24 +986,37 @@ class KernelFacade:
         # Count dispatched actions via dedupe store.
         total_action_count = 0
         if self._dedupe_store is not None:
-            import contextlib
-
-            with contextlib.suppress(AttributeError, NotImplementedError):
-                total_action_count = await self._dedupe_store.count_by_run(run_id)  # type: ignore[union-attr]
+            with contextlib.suppress(NotImplementedError):
+                total_action_count = self._dedupe_store.count_by_run(run_id)
 
         # Derive timing.
+        # NOTE: The facade does not hold a reference to the event log, so we
+        # cannot derive created_at / completed_at from the first/last event
+        # timestamps.  We fall back to the current wall-clock time.  A future
+        # enhancement could accept an optional event_log dependency or extend
+        # TemporalWorkflowGateway with an event-timestamp query.
         now = datetime.datetime.now(datetime.UTC).isoformat()
         created_at = now
         completed_at: str | None = None
         if trace.run_state in ("completed", "failed", "aborted"):
             completed_at = now
-        # Compute duration_ms: best effort from event data.
         duration_ms = 0
+
+        # task_id: QueryRunResponse does not carry task_id or
+        # task_contract_ref.  Best-effort extraction via getattr so callers
+        # that extend the response (e.g. hi-agent) still propagate the value.
+        task_id: str | None = getattr(response, "task_contract_ref", None) or getattr(
+            response, "task_id", None
+        )
+
+        # run_kind: QueryRunResponse does not have a run_kind field.
+        # Default to "default"; callers may enrich post-hoc.
+        run_kind: str = getattr(response, "run_kind", "default")
 
         return RunPostmortemView(
             run_id=run_id,
-            task_id=None,
-            run_kind=getattr(response, "run_kind", "default"),
+            task_id=task_id,
+            run_kind=run_kind,
             outcome=trace.run_state,
             stages=list(trace.stages),
             branches=list(trace.branches),
@@ -1039,19 +1053,32 @@ class KernelFacade:
             try:
                 child_resp = await self.query_run(QueryRunRequest(run_id=child_id))
                 # Map lifecycle to trace outcome.
-                _terminal = {"completed", "aborted"}
+                _terminal = {"completed", "failed", "aborted"}
                 outcome = None
                 if child_resp.lifecycle_state in _terminal:
                     outcome = child_resp.lifecycle_state
+
+                # child_kind: We do not have per-child metadata stored at
+                # the kernel level; default to "child".  hi-agent may enrich
+                # this with task-specific kinds post-hoc.
+                # task_id: Same limitation as query_run_postmortem — the
+                # QueryRunResponse does not expose task_id.
+                # created_at / completed_at: The facade lacks event-log
+                # access, so we use wall-clock time as a placeholder.
+                child_task_id: str | None = getattr(
+                    child_resp, "task_contract_ref", None
+                ) or getattr(child_resp, "task_id", None)
+                child_now = datetime.datetime.now(datetime.UTC).isoformat()
+                child_completed: str | None = child_now if outcome else None
                 summaries.append(
                     ChildRunSummary(
                         child_run_id=child_id,
                         child_kind="child",
-                        task_id=None,
+                        task_id=child_task_id,
                         lifecycle_state=child_resp.lifecycle_state,
                         outcome=outcome,
-                        created_at=datetime.datetime.now(datetime.UTC).isoformat(),
-                        completed_at=None,
+                        created_at=child_now,
+                        completed_at=child_completed,
                     )
                 )
             except Exception:  # pylint: disable=broad-exception-caught

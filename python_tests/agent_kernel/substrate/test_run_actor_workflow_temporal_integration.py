@@ -267,6 +267,19 @@ async def test_child_completion_signal_updates_parent_active_child_runs_in_tempo
                 )
             )
 
+            await gateway.signal_workflow(
+                parent_run_id,
+                SignalRunRequest(
+                    run_id=parent_run_id,
+                    signal_type="child_run_completed",
+                    signal_payload={
+                        "child_run_id": child_run_id,
+                        "outcome": "completed",
+                    },
+                    caused_by="test-child-completion",
+                ),
+            )
+
             completed_projection = None
             for _ in range(60):
                 completed_projection = await projection.get(parent_run_id)

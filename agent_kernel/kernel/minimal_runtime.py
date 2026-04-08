@@ -890,7 +890,11 @@ def _resolve_dynamic_transition(event_type: str) -> tuple[str, bool, bool, str |
     # Child lifecycle propagation uses signal envelopes in current workflow wiring.
     # These signals should only update child-run tracking and must not force
     # readiness transitions on the parent run.
-    if event_type in ("signal.child_spawned", "signal.child_completed"):
+    if event_type in (
+        "signal.child_spawned",
+        "signal.child_completed",
+        "signal.child_run_completed",
+    ):
         return None
     if event_type.startswith("signal."):
         return ("ready", False, True, None)
@@ -969,7 +973,12 @@ def _resolve_active_child_runs(projection: RunProjection, event: RuntimeEvent) -
         if child_run_id in projection.active_child_runs:
             return list(projection.active_child_runs)
         return [*projection.active_child_runs, child_run_id]
-    if event.event_type in ("run.child_completed", "signal.child_completed"):
+    if event.event_type in (
+        "run.child_completed",
+        "run.child_run_completed",
+        "signal.child_completed",
+        "signal.child_run_completed",
+    ):
         return [run_id for run_id in projection.active_child_runs if run_id != child_run_id]
     return list(projection.active_child_runs)
 

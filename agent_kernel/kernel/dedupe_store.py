@@ -185,6 +185,9 @@ class DedupeStorePort(Protocol):
 
         """
 
+    def count_by_run(self, run_id: str) -> int:
+        """Count records whose key is prefixed by the run_id."""
+
 
 class InMemoryDedupeStore:
     """In-memory dedupe store with monotonic state transitions.
@@ -381,6 +384,10 @@ class InMemoryDedupeStore:
 
         """
         return self._records_by_key.get(dispatch_idempotency_key)
+
+    def count_by_run(self, run_id: str) -> int:
+        """Count records whose key is prefixed by the run_id."""
+        return sum(1 for key in self._records_by_key if key.startswith(run_id))
 
     def _get_required_record(self, dispatch_idempotency_key: str) -> DedupeRecord:
         """Get record or raises state error when key is unknown.
