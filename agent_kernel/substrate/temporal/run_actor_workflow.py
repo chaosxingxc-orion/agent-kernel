@@ -17,7 +17,6 @@ Why a Temporal workflow?
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import inspect
 import logging
@@ -32,20 +31,13 @@ from agent_kernel.kernel.capability_snapshot_resolver import (
     ActionPayloadCapabilitySnapshotInputResolver,
 )
 from agent_kernel.kernel.contracts import (
-    Action,
     ActionCommit,
-    ConditionalBranch,
-    ConditionalPlan,
     DecisionDeduper,
     DecisionProjectionService,
-    DependencyGraph,
-    DependencyNode,
     DispatchAdmissionService,
     ExecutorService,
     KernelRuntimeEventLog,
     ObservabilityHook,
-    ParallelGroup,
-    ParallelPlan,
     RecoveryDecision,
     RecoveryGateService,
     RecoveryInput,
@@ -54,9 +46,6 @@ from agent_kernel.kernel.contracts import (
     RunPolicyVersions,
     RunProjection,
     RuntimeEvent,
-    SequentialPlan,
-    SpeculativeCandidate,
-    SpeculativePlan,
     TurnIntentLog,
     TurnIntentRecord,
 )
@@ -159,7 +148,6 @@ class RunActorDependencyBundle:
     output_parser: Any | None = None  # OutputParser Protocol
     reflection_policy: Any | None = None  # ReflectionPolicy
     reflection_builder: Any | None = None  # ReflectionContextBuilder
-    plan_executor: Any | None = None  # PlanExecutor 鈥?avoids circular import
 
 
 _RUN_ACTOR_CONFIG: ContextVar[RunActorDependencyBundle | None] = ContextVar(
@@ -301,7 +289,6 @@ class RunActorWorkflow:
             reasoning_loop=_reasoning_loop,
             observability_hook=dependencies.observability_hook,
         )
-        self._plan_executor: Any | None = dependencies.plan_executor
         self._workflow_id_prefix = dependencies.workflow_id_prefix
         self._run_id: str | None = None
         self._session_id: str | None = None
@@ -387,9 +374,8 @@ class RunActorWorkflow:
 
         # agent_kernel keeps lifecycle authority in projection state. The workflow-level
         # result only mirrors terminal intent and does not invent new state.
-        final_state = (
-            "aborted" if self._last_projection.lifecycle_state == "aborted" else "completed"
-        )
+        _terminal_map = {"aborted": "aborted", "failed": "failed"}
+        final_state = _terminal_map.get(self._last_projection.lifecycle_state, "completed")
         result = {
             "run_id": input_value.run_id,
             "final_state": final_state,
@@ -401,7 +387,7 @@ class RunActorWorkflow:
         """Best-effort notifies parent workflow that this child run completed.
 
         This callback closes the minimal parent/child lifecycle loop:
-          - parent receives ``child_completed`` signal,
+          - parent receives ``child_run_completed`` signal,
           - parent projection removes the child from ``active_child_runs``.
 
         The notification is intentionally soft-fail. Child completion should not
@@ -421,9 +407,19 @@ class RunActorWorkflow:
             parent_run_id,
             workflow_id_prefix=self._workflow_id_prefix,
         )
+        _tm = {"aborted": "aborted", "failed": "failed"}
+        _outcome = (
+            _tm.get(self._last_projection.lifecycle_state, "completed")
+            if self._last_projection
+            else "completed"
+        )
         child_signal_payload = {
-            "signal_type": "child_completed",
-            "signal_payload": {"child_run_id": self._run_id},
+            "signal_type": "child_run_completed",
+            "signal_payload": {
+                "child_run_id": self._run_id,
+                "outcome": _outcome,
+                "task_id": None,
+            },
             "caused_by": f"child:{self._run_id}",
         }
 
@@ -538,45 +534,6 @@ class RunActorWorkflow:
         await self.process_action_commit(signal_commit)
         # process_action_commit() refreshes _last_projection via catch_up().
         # Avoid awaiting here so query state remains driven by sync-safe cache.
-
-        # Dispatch speculation_committed to PlanExecutor when wired.
-        if input_value.signal_type == "speculation_committed":
-            if self._plan_executor is None:
-                _logger.warning(
-                    "speculation_committed signal received but plan_executor is not "
-                    "configured; run_id=%s",
-                    self._run_id,
-                )
-            else:
-                winner_id = (input_value.signal_payload or {}).get("winner_candidate_id")
-                if winner_id:
-                    _commit_task = asyncio.create_task(
-                        self._plan_executor.commit_speculation(winner_id)
-                    )
-                    del _commit_task  # reference kept by event loop; local var avoids RUF006
-        elif input_value.signal_type == "plan_submitted":
-            if self._plan_executor is None:
-                _logger.warning(
-                    "plan_submitted signal received but plan_executor is not configured; run_id=%s",
-                    self._run_id,
-                )
-            else:
-                serialized_plan = (input_value.signal_payload or {}).get("plan")
-                if serialized_plan is None:
-                    _logger.warning(
-                        "plan_submitted signal missing plan payload; run_id=%s",
-                        self._run_id,
-                    )
-                else:
-                    try:
-                        plan = _deserialize_execution_plan(serialized_plan)
-                        await self._plan_executor.execute_plan(plan, self._run_id)
-                    except Exception as exc:
-                        _logger.warning(
-                            "plan_submitted execution failed run_id=%s error=%s",
-                            self._run_id,
-                            exc,
-                        )
 
         # History safety: count rounds and continue_as_new when threshold hit.
         self._history_event_count += 1
@@ -1130,6 +1087,8 @@ _SIGNAL_EVENT_TYPE_MAP: dict[str, str] = {
     "plan_submitted": "run.plan_submitted",
     "approval_submitted": "run.approval_submitted",
     "speculation_committed": "run.speculation_committed",
+    # Child run lifecycle: parent is notified when a child reaches terminal state.
+    "child_run_completed": "run.child_run_completed",
 }
 
 
@@ -1424,7 +1383,6 @@ def _resolve_run_actor_dependencies(
             output_parser=configured_dependencies.output_parser,
             reflection_policy=configured_dependencies.reflection_policy,
             reflection_builder=configured_dependencies.reflection_builder,
-            plan_executor=configured_dependencies.plan_executor,
         )
     with _RUN_ACTOR_CONFIG_FALLBACK_LOCK:
         fallback_dependencies = _RUN_ACTOR_CONFIG_FALLBACK["dependencies"]
@@ -1459,7 +1417,6 @@ def _resolve_run_actor_dependencies(
             output_parser=fallback_dependencies.output_parser,
             reflection_policy=fallback_dependencies.reflection_policy,
             reflection_builder=fallback_dependencies.reflection_builder,
-            plan_executor=fallback_dependencies.plan_executor,
         )
 
     default_event_log = InMemoryKernelRuntimeEventLog()
@@ -1475,91 +1432,3 @@ def _resolve_run_actor_dependencies(
         deduper=InMemoryDecisionDeduper(),
         strict_mode=strict_mode or RunActorStrictModeConfig(),
     )
-
-
-def _deserialize_action(payload: dict[str, Any]) -> Action:
-    """Deserialize one Action from a signal-safe payload dictionary."""
-    return Action(
-        action_id=str(payload["action_id"]),
-        run_id=str(payload["run_id"]),
-        action_type=str(payload["action_type"]),
-        effect_class=payload["effect_class"],
-        external_idempotency_level=payload.get("external_idempotency_level"),
-        interaction_target=payload.get("interaction_target"),
-        input_ref=payload.get("input_ref"),
-        input_json=payload.get("input_json"),
-        policy_tags=list(payload.get("policy_tags", [])),
-        timeout_ms=payload.get("timeout_ms"),
-        side_effect_class=payload.get("side_effect_class"),
-    )
-
-
-def _deserialize_execution_plan(payload: dict[str, Any]) -> Any:
-    """Deserialize a plan payload produced by KernelFacade.submit_plan()."""
-    plan_type = payload.get("plan_type")
-    if plan_type == "sequential":
-        return SequentialPlan(
-            steps=tuple(_deserialize_action(step) for step in payload.get("steps", []))
-        )
-    if plan_type == "parallel":
-        groups = []
-        for group in payload.get("groups", []):
-            groups.append(
-                ParallelGroup(
-                    actions=tuple(
-                        _deserialize_action(action) for action in group.get("actions", [])
-                    ),
-                    join_strategy=group.get("join_strategy", "all"),
-                    n=group.get("n"),
-                    timeout_ms=group.get("timeout_ms"),
-                    group_idempotency_key=group.get("group_idempotency_key", ""),
-                    cancellation_policy=group.get("cancellation_policy", "abandon"),
-                )
-            )
-        return ParallelPlan(groups=tuple(groups))
-    if plan_type == "conditional":
-        branches = []
-        for branch in payload.get("branches", []):
-            branches.append(
-                ConditionalBranch(
-                    trigger_outcomes=tuple(branch.get("trigger_outcomes", [])),
-                    plan=_deserialize_execution_plan(branch["plan"]),
-                )
-            )
-        default_payload = payload.get("default_plan")
-        default_plan = (
-            _deserialize_execution_plan(default_payload)
-            if isinstance(default_payload, dict)
-            else None
-        )
-        return ConditionalPlan(
-            gating_action=_deserialize_action(payload["gating_action"]),
-            branches=tuple(branches),
-            default_plan=default_plan,
-        )
-    if plan_type == "dependency_graph":
-        nodes = []
-        for node in payload.get("nodes", []):
-            nodes.append(
-                DependencyNode(
-                    node_id=str(node["node_id"]),
-                    action=_deserialize_action(node["action"]),
-                    depends_on=tuple(node.get("depends_on", [])),
-                )
-            )
-        return DependencyGraph(nodes=tuple(nodes))
-    if plan_type == "speculative":
-        candidates = []
-        for candidate in payload.get("candidates", []):
-            candidates.append(
-                SpeculativeCandidate(
-                    candidate_id=str(candidate["candidate_id"]),
-                    plan=_deserialize_execution_plan(candidate["plan"]),
-                )
-            )
-        return SpeculativePlan(
-            candidates=tuple(candidates),
-            speculation_timeout_ms=payload.get("speculation_timeout_ms"),
-            cancellation_policy=payload.get("cancellation_policy", "abandon"),
-        )
-    raise ValueError(f"Unsupported plan_type in payload: {plan_type!r}")

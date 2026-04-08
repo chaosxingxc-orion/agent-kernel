@@ -19,10 +19,8 @@ from typing import Any
 from agent_kernel.kernel.contracts import (
     Action,
     EffectClass,
-    ExecutionPlan,
     InteractionTarget,
     ModelOutput,
-    SequentialPlan,
 )
 
 _LOG = logging.getLogger(__name__)
@@ -100,19 +98,6 @@ class ToolCallOutputParser:
                 )
             )
         return actions
-
-    def parse_plan(self, output: ModelOutput, run_id: str) -> ExecutionPlan:
-        """Parse tool_calls from ``ModelOutput`` into a ``SequentialPlan``.
-
-        Args:
-            output: Normalised model output.
-            run_id: Run identifier.
-
-        Returns:
-            ``SequentialPlan`` wrapping the parsed actions as sequential steps.
-
-        """
-        return SequentialPlan(steps=tuple(self.parse(output, run_id)))
 
     @staticmethod
     def _resolve_action_id(tool_call: dict[str, Any]) -> str:
@@ -206,19 +191,6 @@ class JSONModeOutputParser:
             if action is not None:
                 actions.append(action)
         return actions
-
-    def parse_plan(self, output: ModelOutput, run_id: str) -> ExecutionPlan:
-        """Parse JSON array from ``ModelOutput.raw_text`` into a ``SequentialPlan``.
-
-        Args:
-            output: Normalised model output.
-            run_id: Run identifier.
-
-        Returns:
-            ``SequentialPlan`` wrapping the parsed actions as sequential steps.
-
-        """
-        return SequentialPlan(steps=tuple(self.parse(output, run_id)))
 
     @staticmethod
     def _parse_item(

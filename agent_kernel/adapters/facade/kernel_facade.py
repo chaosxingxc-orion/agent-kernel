@@ -7,9 +7,7 @@ Temporal-specific substrate details.
 
 from __future__ import annotations
 
-import hashlib
 import inspect
-import json
 import threading
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -31,15 +29,10 @@ from agent_kernel.kernel.contracts import (
     BranchStateUpdateRequest,
     CancelRunRequest,
     ChildRunSummary,
-    ConditionalPlan,
-    DependencyGraph,
-    ExecutionPlan,
     HumanGateRequest,
     HumanGateResolution,
     KernelManifest,
     OpenBranchRequest,
-    ParallelPlan,
-    PlanSubmissionResponse,
     QueryRunDashboardResponse,
     QueryRunRequest,
     QueryRunResponse,
@@ -47,11 +40,9 @@ from agent_kernel.kernel.contracts import (
     RunPolicyVersions,
     RunPostmortemView,
     RuntimeEvent,
-    SequentialPlan,
     SignalRunRequest,
     SpawnChildRunRequest,
     SpawnChildRunResponse,
-    SpeculativePlan,
     StartRunRequest,
     StartRunResponse,
     TaskViewRecord,
@@ -62,7 +53,6 @@ from agent_kernel.kernel.contracts import (
     TraceStageView,
 )
 from agent_kernel.kernel.event_registry import KERNEL_EVENT_REGISTRY
-from agent_kernel.kernel.plan_type_registry import KERNEL_PLAN_TYPE_REGISTRY
 from agent_kernel.kernel.recovery.mode_registry import KERNEL_RECOVERY_MODE_REGISTRY
 from agent_kernel.kernel.turn_engine import TurnResult
 
@@ -630,9 +620,9 @@ class KernelFacade:
         """Return a frozen capability declaration for this kernel instance.
 
         Aggregates ``KERNEL_ACTION_TYPE_REGISTRY``, ``KERNEL_EVENT_REGISTRY``,
-        ``KERNEL_RECOVERY_MODE_REGISTRY``, and ``KERNEL_PLAN_TYPE_REGISTRY``
-        into a single ``KernelManifest`` snapshot.  Platform integrators call
-        this once at startup to detect which features the kernel supports.
+        and ``KERNEL_RECOVERY_MODE_REGISTRY`` into a single
+        ``KernelManifest`` snapshot.  Platform integrators call this once at
+        startup to detect which features the kernel supports.
 
         Returns:
             Immutable ``KernelManifest`` describing kernel capabilities.
@@ -641,7 +631,6 @@ class KernelFacade:
         return KernelManifest(
             kernel_version=self._kernel_version,
             protocol_version=_PROTOCOL_VERSION,
-            supported_plan_types=KERNEL_PLAN_TYPE_REGISTRY.known_types(),
             supported_action_types=KERNEL_ACTION_TYPE_REGISTRY.known_types(),
             supported_interaction_targets=_INTERACTION_TARGETS,
             supported_recovery_modes=frozenset(KERNEL_RECOVERY_MODE_REGISTRY.known_actions()),
@@ -722,80 +711,6 @@ class KernelFacade:
         async for event in self.stream_run_events(run_id):
             yield event
 
-    async def submit_plan(
-        self,
-        run_id: str,
-        plan: ExecutionPlan,
-    ) -> PlanSubmissionResponse:
-        """Submit a typed ExecutionPlan to an active run.
-
-        .. deprecated::
-            Plan scheduling is now owned by hi-agent's ``AsyncTaskScheduler``.
-            This method will be removed in a future version.
-
-        Validates the plan type against ``KERNEL_PLAN_TYPE_REGISTRY`` before
-        signalling the workflow.  Unknown plan types are rejected immediately
-        without reaching the substrate, giving platforms early feedback.
-
-        Args:
-            run_id: Target run identifier.
-            plan: An ``ExecutionPlan`` instance (any registered subtype).
-
-        Returns:
-            ``PlanSubmissionResponse`` indicating acceptance or rejection.
-
-        """
-        import warnings
-
-        warnings.warn(
-            "KernelFacade.submit_plan() is deprecated. Use AsyncTaskScheduler in hi-agent instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        async with self._guard_write_operation("submit_plan"):
-            # Normalise class name -> registry key (e.g. ConditionalPlan -> conditional)
-            _type_map = {
-                "sequentialplan": "sequential",
-                "parallelplan": "parallel",
-                "conditionalplan": "conditional",
-                "dependencygraph": "dependency_graph",
-                "speculativeplan": "speculative",
-            }
-            plan_type_key = _type_map.get(type(plan).__name__.lower(), type(plan).__name__)
-            descriptor = KERNEL_PLAN_TYPE_REGISTRY.get(plan_type_key)
-            if descriptor is None:
-                return PlanSubmissionResponse(
-                    run_id=run_id,
-                    plan_type=plan_type_key,
-                    accepted=False,
-                    rejection_reason=(
-                        f"Plan type '{plan_type_key}' is not registered in "
-                        "KERNEL_PLAN_TYPE_REGISTRY."
-                    ),
-                )
-            await self._workflow_gateway.signal_workflow(
-                run_id,
-                SignalRunRequest(
-                    run_id=run_id,
-                    signal_type="plan_submitted",
-                    signal_payload={
-                        "plan_type": plan_type_key,
-                        "plan": _serialize_execution_plan(plan, plan_type=plan_type_key),
-                        **self._build_signal_observability(
-                            operation="submit_plan",
-                            run_id=run_id,
-                            caused_by=None,
-                        ),
-                    },
-                    caused_by=_plan_submission_ref(run_id, plan),
-                ),
-            )
-            return PlanSubmissionResponse(
-                run_id=run_id,
-                plan_type=plan_type_key,
-                accepted=True,
-            )
-
     async def submit_approval(self, request: ApprovalRequest) -> None:
         """Submit a human actor approval decision for a gated action.
 
@@ -841,39 +756,6 @@ class KernelFacade:
                     caused_by=request.caused_by or f"approval:{request.approval_ref}",
                 ),
             )
-
-    async def commit_speculation(
-        self,
-        run_id: str,
-        winner_candidate_id: str,
-    ) -> None:
-        """Signals which speculative candidate won and should be committed.
-
-        The kernel uses this signal to promote the winning Child Workflow from
-        ``speculative`` to ``committed`` mode and cancel all other candidates.
-
-        Args:
-            run_id: The run executing the ``SpeculativePlan``.
-            winner_candidate_id: ``candidate_id`` of the winning
-                ``SpeculativeCandidate``.
-
-        """
-        await self._workflow_gateway.signal_workflow(
-            run_id,
-            SignalRunRequest(
-                run_id=run_id,
-                signal_type="speculation_committed",
-                signal_payload={
-                    "winner_candidate_id": winner_candidate_id,
-                    **self._build_signal_observability(
-                        operation="commit_speculation",
-                        run_id=run_id,
-                        caused_by=None,
-                    ),
-                },
-                caused_by="kernel_facade.commit_speculation",
-            ),
-        )
 
     def get_health(self) -> dict[str, Any]:
         """Return a liveness health status for this kernel instance.
@@ -1508,98 +1390,3 @@ def _serialize_action(action: Action) -> dict[str, Any]:
         "timeout_ms": action.timeout_ms,
         "side_effect_class": action.side_effect_class,
     }
-
-
-def _serialize_execution_plan(
-    plan: ExecutionPlan,
-    *,
-    plan_type: str | None = None,
-) -> dict[str, Any]:
-    """Serialize an ExecutionPlan to a transport payload."""
-    resolved_type = plan_type
-    if resolved_type is None:
-        if isinstance(plan, SequentialPlan):
-            resolved_type = "sequential"
-        elif isinstance(plan, ParallelPlan):
-            resolved_type = "parallel"
-        elif isinstance(plan, ConditionalPlan):
-            resolved_type = "conditional"
-        elif isinstance(plan, DependencyGraph):
-            resolved_type = "dependency_graph"
-        elif isinstance(plan, SpeculativePlan):
-            resolved_type = "speculative"
-        else:
-            raise ValueError(f"Unsupported plan type for serialization: {type(plan).__name__}")
-
-    if isinstance(plan, SequentialPlan):
-        return {
-            "plan_type": resolved_type,
-            "steps": [_serialize_action(step) for step in plan.steps],
-        }
-    if isinstance(plan, ParallelPlan):
-        return {
-            "plan_type": resolved_type,
-            "groups": [
-                {
-                    "actions": [_serialize_action(action) for action in group.actions],
-                    "join_strategy": group.join_strategy,
-                    "n": group.n,
-                    "timeout_ms": group.timeout_ms,
-                    "group_idempotency_key": group.group_idempotency_key,
-                    "cancellation_policy": group.cancellation_policy,
-                }
-                for group in plan.groups
-            ],
-        }
-    if isinstance(plan, ConditionalPlan):
-        return {
-            "plan_type": resolved_type,
-            "gating_action": _serialize_action(plan.gating_action),
-            "branches": [
-                {
-                    "trigger_outcomes": list(branch.trigger_outcomes),
-                    "plan": _serialize_execution_plan(branch.plan),
-                }
-                for branch in plan.branches
-            ],
-            "default_plan": (
-                _serialize_execution_plan(plan.default_plan)
-                if plan.default_plan is not None
-                else None
-            ),
-        }
-    if isinstance(plan, DependencyGraph):
-        return {
-            "plan_type": resolved_type,
-            "nodes": [
-                {
-                    "node_id": node.node_id,
-                    "action": _serialize_action(node.action),
-                    "depends_on": list(node.depends_on),
-                }
-                for node in plan.nodes
-            ],
-        }
-    if isinstance(plan, SpeculativePlan):
-        return {
-            "plan_type": resolved_type,
-            "candidates": [
-                {
-                    "candidate_id": candidate.candidate_id,
-                    "plan": _serialize_execution_plan(candidate.plan),
-                }
-                for candidate in plan.candidates
-            ],
-            "speculation_timeout_ms": plan.speculation_timeout_ms,
-            "cancellation_policy": plan.cancellation_policy,
-        }
-    raise ValueError(f"Unsupported plan type for serialization: {type(plan).__name__}")
-
-
-def _plan_submission_ref(run_id: str, plan: ExecutionPlan) -> str:
-    """Build a stable caused_by token for plan submissions."""
-    payload = _serialize_execution_plan(plan)
-    digest = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()[:16]
-    return f"kernel_facade.submit_plan:{run_id}:{digest}"

@@ -11,7 +11,6 @@ from agent_kernel.kernel.cognitive.output_parser import (
 from agent_kernel.kernel.contracts import (
     Action,
     ModelOutput,
-    SequentialPlan,
 )
 
 # ---------------------------------------------------------------------------
@@ -153,26 +152,6 @@ class TestToolCallOutputParser:
         assert len(result) == 2
         assert result[0].action_type == "search"
         assert result[1].action_type == "write_file"
-
-    def test_parse_plan_returns_sequential_plan(self) -> None:
-        """parse_plan() should return a SequentialPlan."""
-        parser = ToolCallOutputParser()
-        output = _make_output(tool_calls=[{"id": "tc-1", "name": "search", "arguments": {}}])
-
-        result = parser.parse_plan(output, "run-1")
-
-        assert isinstance(result, SequentialPlan)
-        assert len(result.steps) == 1
-
-    def test_parse_plan_empty_steps_when_no_tool_calls(self) -> None:
-        """parse_plan() should return SequentialPlan with empty steps."""
-        parser = ToolCallOutputParser()
-        output = _make_output(tool_calls=[])
-
-        result = parser.parse_plan(output, "run-1")
-
-        assert isinstance(result, SequentialPlan)
-        assert result.steps == ()
 
 
 # ---------------------------------------------------------------------------
@@ -390,27 +369,6 @@ class TestJSONModeOutputParser:
         result = parser.parse(output, "run-1")
 
         assert len(result) == 2
-
-    def test_parse_plan_returns_sequential_plan(self) -> None:
-        """parse_plan() should return a SequentialPlan."""
-        parser = JSONModeOutputParser()
-        payload = json.dumps([{"action_type": "search", "effect_class": "read_only"}])
-        output = _make_output(raw_text=payload)
-
-        result = parser.parse_plan(output, "run-1")
-
-        assert isinstance(result, SequentialPlan)
-        assert len(result.steps) == 1
-
-    def test_parse_plan_empty_when_invalid_json(self) -> None:
-        """parse_plan() should return empty SequentialPlan on invalid JSON."""
-        parser = JSONModeOutputParser()
-        output = _make_output(raw_text="not json")
-
-        result = parser.parse_plan(output, "run-1")
-
-        assert isinstance(result, SequentialPlan)
-        assert result.steps == ()
 
     def test_parse_non_dict_array_item_skipped(self) -> None:
         """Non-dict items in the JSON array should be silently skipped."""

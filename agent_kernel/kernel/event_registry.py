@@ -355,30 +355,10 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
         affects_replay=True,
     ),
     EventTypeDescriptor(
-        event_type="run.plan_submitted",
-        description=(
-            "An ExecutionPlan was submitted via KernelFacade.submit_plan(). "
-            "Recorded as an authoritative fact so the event log captures "
-            "the full delegation intent before execution begins."
-        ),
-        authority="RunActor",
-        affects_replay=True,
-    ),
-    EventTypeDescriptor(
         event_type="run.approval_submitted",
         description=(
             "A human-actor approval decision (approved or denied) was received "
             "via KernelFacade.submit_approval(). Recorded as authoritative fact."
-        ),
-        authority="RunActor",
-        affects_replay=True,
-    ),
-    EventTypeDescriptor(
-        event_type="run.speculation_committed",
-        description=(
-            "A winning speculative candidate was committed via "
-            "KernelFacade.commit_speculation(). Triggers cancellation of "
-            "all other speculative child runs."
         ),
         authority="RunActor",
         affects_replay=True,
@@ -492,6 +472,17 @@ _KERNEL_EVENTS: list[EventTypeDescriptor] = [
             "Terminal state — no further attempts will be made."
         ),
         authority="TaskManager",
+        affects_replay=True,
+    ),
+    # Child run orchestration events
+    EventTypeDescriptor(
+        event_type="run.child_run_completed",
+        description=(
+            "A child run reached a terminal state (completed, failed, aborted). "
+            "The parent run receives this signal to update its active_child_runs "
+            "and make orchestration decisions."
+        ),
+        authority="RunActor",
         affects_replay=True,
     ),
 ]

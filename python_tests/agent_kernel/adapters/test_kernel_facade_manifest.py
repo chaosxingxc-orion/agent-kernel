@@ -11,23 +11,8 @@ import pytest
 from agent_kernel.adapters.facade.kernel_facade import KernelFacade
 from agent_kernel.kernel.contracts import (
     ApprovalRequest,
-    DependencyGraph,
-    DependencyNode,
     KernelManifest,
-    SequentialPlan,
-    SpeculativePlan,
 )
-
-
-def _make_action(action_id: str = "a1"):
-    from agent_kernel.kernel.contracts import Action
-
-    return Action(
-        action_id=action_id,
-        run_id="run-1",
-        action_type="tool_call",
-        effect_class="read_only",
-    )
 
 
 def _make_facade(**kwargs) -> KernelFacade:
@@ -46,15 +31,6 @@ class TestGetManifest:
         facade = _make_facade()
         manifest = facade.get_manifest()
         assert isinstance(manifest, KernelManifest)
-
-    def test_manifest_includes_all_five_plan_types(self) -> None:
-        facade = _make_facade()
-        manifest = facade.get_manifest()
-        assert "sequential" in manifest.supported_plan_types
-        assert "parallel" in manifest.supported_plan_types
-        assert "conditional" in manifest.supported_plan_types
-        assert "dependency_graph" in manifest.supported_plan_types
-        assert "speculative" in manifest.supported_plan_types
 
     def test_manifest_includes_kernel_action_types(self) -> None:
         facade = _make_facade()
@@ -100,68 +76,6 @@ class TestGetManifest:
         assert "tool_executor" in manifest.supported_interaction_targets
         assert "human_actor" in manifest.supported_interaction_targets
         assert "agent_peer" in manifest.supported_interaction_targets
-
-
-# ---------------------------------------------------------------------------
-# submit_plan
-# ---------------------------------------------------------------------------
-
-
-class TestSubmitPlan:
-    def test_accepts_sequential_plan(self) -> None:
-        facade = _make_facade()
-        plan = SequentialPlan(steps=(_make_action(),))
-        response = asyncio.run(facade.submit_plan("run-1", plan))
-        assert response.accepted is True
-        assert response.plan_type == "sequential"
-        assert response.run_id == "run-1"
-
-    def test_accepts_dependency_graph(self) -> None:
-        facade = _make_facade()
-        plan = DependencyGraph(nodes=(DependencyNode("n1", _make_action("n1")),))
-        response = asyncio.run(facade.submit_plan("run-2", plan))
-        assert response.accepted is True
-        assert response.plan_type == "dependency_graph"
-
-    def test_accepts_speculative_plan(self) -> None:
-        from agent_kernel.kernel.contracts import SpeculativeCandidate
-
-        facade = _make_facade()
-        plan = SpeculativePlan(candidates=(SpeculativeCandidate("c1", SequentialPlan(steps=())),))
-        response = asyncio.run(facade.submit_plan("run-3", plan))
-        assert response.accepted is True
-        assert response.plan_type == "speculative"
-
-    def test_signals_workflow_on_acceptance(self) -> None:
-        facade = _make_facade()
-        plan = SequentialPlan(steps=())
-        asyncio.run(facade.submit_plan("run-x", plan))
-        facade._workflow_gateway.signal_workflow.assert_awaited_once()
-        call_args = facade._workflow_gateway.signal_workflow.call_args
-        signal_request = call_args[0][1]
-        assert signal_request.signal_type == "plan_submitted"
-        assert signal_request.signal_payload is not None
-        assert signal_request.signal_payload["plan"]["plan_type"] == "sequential"
-        assert signal_request.caused_by is not None
-        assert signal_request.caused_by.startswith("kernel_facade.submit_plan:run-x:")
-
-    def test_rejects_unregistered_plan_type(self) -> None:
-        """A custom object that is not a registered plan type is rejected."""
-
-        class WeirdPlan:
-            pass
-
-        facade = _make_facade()
-        response = asyncio.run(facade.submit_plan("run-y", WeirdPlan()))  # type: ignore[arg-type]
-        assert response.accepted is False
-        assert response.rejection_reason is not None
-        facade._workflow_gateway.signal_workflow.assert_not_awaited()
-
-    def test_submit_plan_rejected_while_draining(self) -> None:
-        facade = _make_facade()
-        facade.set_draining(True)
-        with pytest.raises(RuntimeError, match="draining"):
-            asyncio.run(facade.submit_plan("run-1", SequentialPlan(steps=())))
 
 
 # ---------------------------------------------------------------------------
@@ -237,23 +151,6 @@ class TestSubmitApproval:
         asyncio.run(facade.submit_approval(request))
         assert drain.enter_calls == 1
         assert drain.exit_calls == 1
-
-
-# ---------------------------------------------------------------------------
-# commit_speculation
-# ---------------------------------------------------------------------------
-
-
-class TestCommitSpeculation:
-    def test_signals_speculation_committed(self) -> None:
-        facade = _make_facade()
-        asyncio.run(facade.commit_speculation("run-1", "cand-42"))
-        facade._workflow_gateway.signal_workflow.assert_awaited_once()
-        call_args = facade._workflow_gateway.signal_workflow.call_args
-        signal_request = call_args[0][1]
-        assert signal_request.signal_type == "speculation_committed"
-        assert signal_request.signal_payload["winner_candidate_id"] == "cand-42"
-        assert signal_request.run_id == "run-1"
 
 
 # ---------------------------------------------------------------------------

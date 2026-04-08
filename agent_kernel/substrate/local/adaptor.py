@@ -7,7 +7,7 @@ This substrate requires no external processes.  It is suitable for:
 
 What it provides:
   - Full six-authority lifecycle (same TurnEngine, same services)
-  - Parallel execution via PlanExecutor / asyncio.gather
+  - Parallel execution via asyncio.gather
   - All observability hooks and OTel export
   - In-process signal routing via asyncio (no Temporal SDK required)
 

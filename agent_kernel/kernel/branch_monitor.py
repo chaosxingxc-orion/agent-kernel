@@ -3,7 +3,7 @@
 Implements Phase 3 (Parallel Execution) 鈥?BranchMonitor component.
 
 BranchMonitor is NOT an authority.  It does not write to the EventLog.
-It is a cooperative diagnostic tool used by PlanExecutor to detect stalled
+It is a cooperative diagnostic tool used to detect stalled
 or dead-loop parallel branches before the TurnEngine's RecoveryGateService
 is invoked.
 
@@ -83,7 +83,7 @@ _DEAD_LOOP_RATIO_THRESHOLD: float = 0.9
 class BranchMonitor:
     """Tracks per-branch heartbeat for parallel execution.
 
-    Used by PlanExecutor to detect stalled or dead-loop branches.
+    Used to detect stalled or dead-loop branches in parallel execution.
     NOT an authority 鈥?does not write to EventLog.
 
     The monitor tracks registered branches and detects:
