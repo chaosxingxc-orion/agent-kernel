@@ -16,7 +16,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, AsyncIterator
 
     from agent_kernel.kernel.task_manager.contracts import TaskDescriptor, TaskHealthStatus
     from agent_kernel.kernel.task_manager.registry import TaskRegistry
@@ -27,6 +27,7 @@ from agent_kernel.kernel.action_type_registry import KERNEL_ACTION_TYPE_REGISTRY
 from agent_kernel.kernel.contracts import (
     Action,
     ApprovalRequest,
+    AsyncActionHandler,
     BranchStateUpdateRequest,
     CancelRunRequest,
     ChildRunSummary,
@@ -63,6 +64,7 @@ from agent_kernel.kernel.contracts import (
 from agent_kernel.kernel.event_registry import KERNEL_EVENT_REGISTRY
 from agent_kernel.kernel.plan_type_registry import KERNEL_PLAN_TYPE_REGISTRY
 from agent_kernel.kernel.recovery.mode_registry import KERNEL_RECOVERY_MODE_REGISTRY
+from agent_kernel.kernel.turn_engine import TurnResult
 
 _KERNEL_VERSION = "0.2.0"
 _PROTOCOL_VERSION = "1.0.0"
@@ -664,6 +666,61 @@ class KernelFacade:
                 }
             ),
         )
+
+    async def execute_turn(
+        self,
+        run_id: str,
+        action: Action,
+        handler: AsyncActionHandler,
+        *,
+        idempotency_key: str,
+    ) -> TurnResult:
+        """Execute one atomic turn through the substrate gateway.
+
+        This is the primary execution primitive for hi-agent's AsyncTaskScheduler.
+        Kernel guarantees exactly-once execution via idempotency_key.
+
+        The LocalFSM substrate executes the handler in-process.
+        The Temporal substrate raises NotImplementedError until full Activity
+        integration is implemented.
+
+        Args:
+            run_id: Target run identifier.
+            action: The action being dispatched.
+            handler: Async callable provided by hi-agent business logic.
+            idempotency_key: Stable key for exactly-once execution guarantee.
+
+        Returns:
+            TurnResult with outcome_kind="dispatched".
+
+        """
+        async with self._guard_write_operation("execute_turn"):
+            return await self._workflow_gateway.execute_turn(
+                run_id,
+                action,
+                handler,
+                idempotency_key=idempotency_key,
+            )
+
+    async def subscribe_events(
+        self,
+        run_id: str,
+    ) -> AsyncIterator[RuntimeEvent]:
+        """Stream events for a run. Protocol-compatible alias for stream_run_events().
+
+        Allows MockKernelFacade and real KernelFacade to implement the same
+        protocol so hi-agent's AsyncTaskScheduler can use either without
+        code changes.
+
+        Args:
+            run_id: Target run identifier.
+
+        Yields:
+            RuntimeEvent instances as they are emitted.
+
+        """
+        async for event in self.stream_run_events(run_id):
+            yield event
 
     async def submit_plan(
         self,

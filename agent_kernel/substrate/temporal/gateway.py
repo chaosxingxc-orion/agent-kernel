@@ -320,6 +320,20 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
             f":{parent_run_id}:{child_run_id}"
         )
 
+    async def execute_turn(
+        self,
+        run_id: str,
+        action: Any,
+        handler: Any,
+        *,
+        idempotency_key: str,
+    ) -> Any:
+        """Not yet implemented — use LocalWorkflowGateway for execute_turn() support."""
+        raise NotImplementedError(
+            "TemporalSDKWorkflowGateway.execute_turn() requires Temporal Activity "
+            "registration. Use LocalWorkflowGateway (LocalSubstrateConfig) for now."
+        )
+
     def stream_run_events(self, run_id: str) -> AsyncIterator[RuntimeEvent]:
         """Streams runtime events for one run through optional query hook.
 
