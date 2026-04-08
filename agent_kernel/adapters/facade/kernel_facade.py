@@ -29,10 +29,12 @@ from agent_kernel.kernel.contracts import (
     ApprovalRequest,
     BranchStateUpdateRequest,
     CancelRunRequest,
+    ChildRunSummary,
     ConditionalPlan,
     DependencyGraph,
     ExecutionPlan,
     HumanGateRequest,
+    HumanGateResolution,
     KernelManifest,
     OpenBranchRequest,
     ParallelPlan,
@@ -41,6 +43,8 @@ from agent_kernel.kernel.contracts import (
     QueryRunRequest,
     QueryRunResponse,
     ResumeRunRequest,
+    RunPolicyVersions,
+    RunPostmortemView,
     RuntimeEvent,
     SequentialPlan,
     SignalRunRequest,
@@ -538,9 +542,46 @@ class KernelFacade:
         if self._context_adapter is not None and request.context_ref is None:
             parent_binding = self._context_adapter.resolve_run_context(request.parent_run_id)
             if parent_binding is not None:
-                from dataclasses import replace as _replace
+                request_for_gateway = replace(request, context_ref=parent_binding)
 
-                request_for_gateway = _replace(request, context_ref=parent_binding)
+        # Inherit parent's policy versions into the child run when requested.
+        if request.inherit_policy_versions:
+            try:
+                parent_resp = await self.query_run(QueryRunRequest(run_id=request.parent_run_id))
+                parent_pvs = parent_resp.policy_versions
+                if parent_pvs is not None:
+                    # Apply selective overrides on top of inherited versions.
+                    if request.policy_version_overrides:
+                        inherited = {
+                            k: v
+                            for k, v in {
+                                "route_policy_version": parent_pvs.route_policy_version,
+                                "acceptance_policy_version": parent_pvs.acceptance_policy_version,
+                                "memory_policy_version": parent_pvs.memory_policy_version,
+                                "skill_policy_version": parent_pvs.skill_policy_version,
+                                "evaluation_policy_version": parent_pvs.evaluation_policy_version,
+                                "task_view_policy_version": parent_pvs.task_view_policy_version,
+                            }.items()
+                            if v is not None
+                        }
+                        inherited.update(request.policy_version_overrides)
+                        child_pvs = RunPolicyVersions(**inherited)
+                    else:
+                        child_pvs = parent_pvs
+                    # Thread inherited policy versions into the gateway request
+                    # via input_json so the child workflow receives them at start.
+                    child_input = dict(request_for_gateway.input_json or {})
+                    child_input["_inherited_policy_versions"] = {
+                        "route_policy_version": child_pvs.route_policy_version,
+                        "acceptance_policy_version": child_pvs.acceptance_policy_version,
+                        "memory_policy_version": child_pvs.memory_policy_version,
+                        "skill_policy_version": child_pvs.skill_policy_version,
+                        "evaluation_policy_version": child_pvs.evaluation_policy_version,
+                        "task_view_policy_version": child_pvs.task_view_policy_version,
+                    }
+                    request_for_gateway = replace(request_for_gateway, input_json=child_input)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass  # Best-effort: proceed without inheritance on failure.
 
         workflow = await self._workflow_gateway.start_child_workflow(
             request.parent_run_id,
@@ -618,6 +659,8 @@ class KernelFacade:
                     "action_state_query",
                     "trace_failure_code",
                     "side_effect_class",
+                    "evolve_postmortem",
+                    "child_run_orchestration",
                 }
             ),
         )
@@ -628,6 +671,10 @@ class KernelFacade:
         plan: ExecutionPlan,
     ) -> PlanSubmissionResponse:
         """Submit a typed ExecutionPlan to an active run.
+
+        .. deprecated::
+            Plan scheduling is now owned by hi-agent's ``AsyncTaskScheduler``.
+            This method will be removed in a future version.
 
         Validates the plan type against ``KERNEL_PLAN_TYPE_REGISTRY`` before
         signalling the workflow.  Unknown plan types are rejected immediately
@@ -641,6 +688,13 @@ class KernelFacade:
             ``PlanSubmissionResponse`` indicating acceptance or rejection.
 
         """
+        import warnings
+
+        warnings.warn(
+            "KernelFacade.submit_plan() is deprecated. Use AsyncTaskScheduler in hi-agent instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         async with self._guard_write_operation("submit_plan"):
             # Normalise class name -> registry key (e.g. ConditionalPlan -> conditional)
             _type_map = {
@@ -943,6 +997,137 @@ class KernelFacade:
             projected_at=datetime.datetime.now(datetime.UTC).isoformat(),
             stages=stages,
         )
+
+    async def query_run_postmortem(self, run_id: str) -> RunPostmortemView:
+        """Aggregate run data for post-run analysis by hi-agent evolve.
+
+        Scans the run's event log to aggregate action counts, failure codes,
+        timestamps, and human gate outcomes.  hi-agent's evolve layer enriches
+        this with task_family, quality_score, efficiency_score, and
+        trajectory_summary which are hi-agent-owned semantics.
+
+        Args:
+            run_id: Target run identifier.
+
+        Returns:
+            ``RunPostmortemView`` with aggregated run metrics.
+
+        Raises:
+            ValueError: If the run is not found.
+
+        """
+        import datetime
+
+        response = await self.query_run(QueryRunRequest(run_id=run_id))
+        trace = await self.query_trace_runtime(run_id)
+
+        # Aggregate failure codes from stages and branches.
+        failure_codes: list[str] = []
+        for stage in trace.stages:
+            if stage.failure_code:
+                failure_codes.append(stage.failure_code)
+        for branch in trace.branches:
+            if branch.failure_code:
+                failure_codes.append(branch.failure_code)
+
+        # Aggregate human gate resolutions.
+        gate_resolutions: list[HumanGateResolution] = []
+        with self._human_gate_lock:
+            resolved = self._resolved_human_gates.get(run_id, set())
+            for gate_ref in resolved:
+                gate_resolutions.append(
+                    HumanGateResolution(
+                        gate_ref=gate_ref,
+                        gate_type="final_approval",
+                        resolution="approved",
+                    )
+                )
+
+        # Count dispatched actions via dedupe store.
+        total_action_count = 0
+        if self._dedupe_store is not None:
+            import contextlib
+
+            with contextlib.suppress(AttributeError, NotImplementedError):
+                total_action_count = await self._dedupe_store.count_by_run(run_id)  # type: ignore[union-attr]
+
+        # Derive timing.
+        now = datetime.datetime.now(datetime.UTC).isoformat()
+        created_at = now
+        completed_at: str | None = None
+        if trace.run_state in ("completed", "failed", "aborted"):
+            completed_at = now
+        # Compute duration_ms: best effort from event data.
+        duration_ms = 0
+
+        return RunPostmortemView(
+            run_id=run_id,
+            task_id=None,
+            run_kind=getattr(response, "run_kind", "default"),
+            outcome=trace.run_state,
+            stages=list(trace.stages),
+            branches=list(trace.branches),
+            total_action_count=total_action_count,
+            failure_codes=failure_codes,
+            duration_ms=duration_ms,
+            human_gate_resolutions=gate_resolutions,
+            policy_versions=trace.policy_versions,
+            event_count=response.projected_offset,
+            created_at=created_at,
+            completed_at=completed_at,
+        )
+
+    async def query_child_runs(self, parent_run_id: str) -> list[ChildRunSummary]:
+        """Return summary status of all child runs spawned by a parent.
+
+        Queries the parent run's projection for active_child_runs, then
+        resolves each child's current lifecycle state and outcome.
+
+        Args:
+            parent_run_id: The parent run identifier.
+
+        Returns:
+            List of ``ChildRunSummary`` for each known child run.
+
+        """
+        import datetime
+
+        response = await self.query_run(QueryRunRequest(run_id=parent_run_id))
+        child_run_ids = response.active_child_runs
+
+        summaries: list[ChildRunSummary] = []
+        for child_id in child_run_ids:
+            try:
+                child_resp = await self.query_run(QueryRunRequest(run_id=child_id))
+                # Map lifecycle to trace outcome.
+                _terminal = {"completed", "aborted"}
+                outcome = None
+                if child_resp.lifecycle_state in _terminal:
+                    outcome = child_resp.lifecycle_state
+                summaries.append(
+                    ChildRunSummary(
+                        child_run_id=child_id,
+                        child_kind="child",
+                        task_id=None,
+                        lifecycle_state=child_resp.lifecycle_state,
+                        outcome=outcome,
+                        created_at=datetime.datetime.now(datetime.UTC).isoformat(),
+                        completed_at=None,
+                    )
+                )
+            except Exception:  # pylint: disable=broad-exception-caught
+                summaries.append(
+                    ChildRunSummary(
+                        child_run_id=child_id,
+                        child_kind="child",
+                        task_id=None,
+                        lifecycle_state="created",
+                        outcome=None,
+                        created_at=datetime.datetime.now(datetime.UTC).isoformat(),
+                        completed_at=None,
+                    )
+                )
+        return summaries
 
     def record_task_view(self, record: TaskViewRecord) -> str:
         """Persist a TaskViewRecord to the injected task_view_log store.
