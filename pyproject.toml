@@ -1,3 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-kernel"
+version = "0.1.0"
+description = "Enterprise agent kernel — six-authority lifecycle protocol for durable agent runs"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "starlette>=0.37",
+    "uvicorn[standard]>=0.29",
+]
+
+[project.optional-dependencies]
+temporal = ["temporalio>=1.7"]
+pg = ["asyncpg>=0.30"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.4",
+    "pylint>=3.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent_kernel"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["python_tests"]

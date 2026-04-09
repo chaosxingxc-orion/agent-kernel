@@ -498,3 +498,42 @@ def create_app(facade: KernelFacade) -> Starlette:
     app = Starlette(routes=routes)
     app.state.facade = facade
     return app
+
+
+def create_app_default() -> Starlette:
+    """Create an ASGI app with default in-memory runtime.
+
+    Intended for container / uvicorn entrypoint when no external
+    facade is injected.  Uses LocalWorkflowGateway + in-memory stores.
+    """
+    from agent_kernel.adapters.facade.kernel_facade import KernelFacade
+    from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
+    from agent_kernel.kernel.minimal_runtime import (
+        AsyncExecutorService,
+        InMemoryDecisionDeduper,
+        InMemoryDecisionProjectionService,
+        InMemoryKernelRuntimeEventLog,
+        StaticDispatchAdmissionService,
+        StaticRecoveryGateService,
+    )
+    from agent_kernel.substrate.local.adaptor import LocalWorkflowGateway
+    from agent_kernel.substrate.temporal.run_actor_workflow import (
+        RunActorDependencyBundle,
+        RunActorStrictModeConfig,
+    )
+
+    event_log = InMemoryKernelRuntimeEventLog()
+    projection = InMemoryDecisionProjectionService(event_log)
+    deps = RunActorDependencyBundle(
+        event_log=event_log,
+        projection=projection,
+        admission=StaticDispatchAdmissionService(),
+        executor=AsyncExecutorService(),
+        recovery=StaticRecoveryGateService(),
+        deduper=InMemoryDecisionDeduper(),
+        dedupe_store=InMemoryDedupeStore(),
+        strict_mode=RunActorStrictModeConfig(enabled=False),
+    )
+    gateway = LocalWorkflowGateway(deps)
+    facade = KernelFacade(workflow_gateway=gateway)
+    return create_app(facade)

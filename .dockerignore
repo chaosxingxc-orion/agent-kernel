@@ -1,0 +1,10 @@
+python_tests/
+docs/
+external/
+.git/
+.github/
+.ruff_cache/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
