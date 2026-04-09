@@ -100,6 +100,7 @@ class SQLiteConnectionPool:
         conn = sqlite3.connect(self._database_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA wal_autocheckpoint=1000")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute(f"PRAGMA busy_timeout={self._busy_timeout_ms}")
         if query_only:

@@ -61,6 +61,7 @@ class SQLiteDedupeStore:
             # WAL mode allows concurrent readers while one writer is active.
             # NORMAL sync is safe with WAL and durable on OS crash for PoC use.
             self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA wal_autocheckpoint=1000")
             self._conn.execute("PRAGMA synchronous=NORMAL")
         self._ensure_schema()
 

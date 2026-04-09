@@ -562,6 +562,7 @@ class ColocatedSQLiteBundle:
         )
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA wal_autocheckpoint=1000")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.execute(f"PRAGMA busy_timeout={max(0, busy_timeout_ms)}")

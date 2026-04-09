@@ -46,6 +46,7 @@ class SQLiteCircuitBreakerStore:
         )
         self._lock = threading.Lock()
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA wal_autocheckpoint=1000")
         self._conn.execute(self._CREATE_TABLE)
         self._conn.commit()
 

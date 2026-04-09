@@ -19,6 +19,7 @@ _EXEMPT_PATHS: frozenset[str] = frozenset(
         "/health/liveness",
         "/health/readiness",
         "/manifest",
+        "/metrics",
     }
 )
 

@@ -24,6 +24,7 @@ class SQLiteTurnIntentLog(TurnIntentLog):
         self._lock = threading.RLock()
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA wal_autocheckpoint=1000")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._ensure_schema()
 

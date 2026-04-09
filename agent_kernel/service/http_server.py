@@ -416,6 +416,17 @@ async def get_health_readiness(request: Request) -> JSONResponse:
         return _error(503, str(exc))
 
 
+async def get_metrics(request: Request) -> JSONResponse:
+    """GET /metrics -- lightweight in-process metrics snapshot."""
+    collector = getattr(request.app.state, "metrics", None)
+    if collector is None:
+        return JSONResponse([], status_code=200)
+    from dataclasses import asdict
+
+    points = collector.snapshot()
+    return JSONResponse([asdict(p) for p in points])
+
+
 async def get_action_state(request: Request) -> JSONResponse:
     """GET /actions/{key}/state — get_action_state"""
     facade: KernelFacade = request.app.state.facade
@@ -435,6 +446,7 @@ def create_app(
     facade: KernelFacade,
     *,
     api_key: str | None = None,
+    metrics_collector: object | None = None,
 ) -> Starlette:
     """Create a Starlette ASGI app wrapping the given KernelFacade.
 
@@ -442,6 +454,8 @@ def create_app(
         facade: The KernelFacade instance to expose via HTTP.
         api_key: Optional API key for Bearer-token authentication.
             When *None*, all endpoints are open (no auth).
+        metrics_collector: Optional ``KernelMetricsCollector`` instance.
+            When provided, ``GET /metrics`` returns a JSON snapshot.
 
     Returns:
         A Starlette application ready to be served by uvicorn.
@@ -509,9 +523,12 @@ def create_app(
         Route("/health/readiness", get_health_readiness, methods=["GET"]),
         # Action state
         Route("/actions/{key}/state", get_action_state, methods=["GET"]),
+        # Metrics
+        Route("/metrics", get_metrics, methods=["GET"]),
     ]
     app = Starlette(routes=routes)
     app.state.facade = facade
+    app.state.metrics = metrics_collector
     app = ApiKeyMiddleware(app, api_key=api_key)
     return app
 
