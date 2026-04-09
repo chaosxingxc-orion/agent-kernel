@@ -125,6 +125,10 @@ class DispatchOutboxReconciler:
         Args:
             logger: Logger to use.  Defaults to the module-level logger when
                 ``None``.
+            event_schema_migrator: Optional schema migrator for normalizing
+                historical events before reconciliation.
+            target_event_schema_version: Optional target schema version used
+                by ``event_schema_migrator``.
 
         """
         self._log = logger if logger is not None else _DEFAULT_LOGGER
@@ -468,6 +472,7 @@ class ScheduledOutboxReconciler:
             interval_s: Sweep interval in seconds.
             observability_hook: Optional observability hook.
             run_ids_provider: Optional callable returning iterable run ids.
+
         """
         self._reconciler = reconciler
         self._event_log = event_log

@@ -123,6 +123,7 @@ class RemoteServiceVerifier:
     """Execute policy + dedupe lifecycle checks for remote-service scenarios."""
 
     def __init__(self, dedupe_store: DedupeStorePort) -> None:
+        """Initialize verifier with a dedupe store used in scenario checks."""
         self._dedupe_store = dedupe_store
 
     def run_all(

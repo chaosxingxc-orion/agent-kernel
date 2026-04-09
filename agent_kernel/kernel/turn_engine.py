@@ -112,13 +112,13 @@ class TurnInput:
 class TurnEngineDefaults:
     """Configurable defaults for TurnEngine phases.
 
-    These values are injected at construction time rather than hardcoded,
-    allowing the platform layer to control policy decisions.
+    Platform layer must provide these values — the kernel does not
+    assume any specific model, policy, or permission mode.
     """
 
-    model_ref: str = "echo"
-    tenant_policy_ref: str = "policy:default"
-    permission_mode: str = "strict"
+    model_ref: str
+    tenant_policy_ref: str
+    permission_mode: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -442,8 +442,8 @@ class TurnEngine:
                 failure.  When ``None`` (default), no per-phase timeout is
                 applied.
             defaults: Configurable defaults for business-policy values
-                used in turn phases.  When ``None``, uses built-in
-                ``TurnEngineDefaults()``.
+                used in turn phases.  When ``None``, falls back to
+                PoC/testing defaults (echo model, policy:default, strict).
 
         """
         self._snapshot_builder = snapshot_builder
@@ -457,7 +457,11 @@ class TurnEngine:
         self._phase_timeout_s: float | None = (
             phase_timeout_ms / 1000.0 if phase_timeout_ms is not None else None
         )
-        self._defaults = defaults or TurnEngineDefaults()
+        self._defaults = defaults or TurnEngineDefaults(
+            model_ref="echo",
+            tenant_policy_ref="policy:default",
+            permission_mode="strict",
+        )
 
     async def run_turn(
         self,
@@ -1273,6 +1277,7 @@ def _build_turn_identity(
     Args:
         input_value: Turn input with run identity and offsets.
         action: Action providing action identity for fingerprinting.
+        snapshot_hash: Optional snapshot hash used by idempotency policy.
 
     Returns:
         Immutable turn identity with decision references and dedupe key.

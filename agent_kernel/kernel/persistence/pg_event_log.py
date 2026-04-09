@@ -30,6 +30,7 @@ class PostgresKernelRuntimeEventLog(KernelRuntimeEventLog):
             pool_min: Connection-pool minimum size.
             pool_max: Connection-pool maximum size.
             bridge: Optional shared bridge for colocated bundle usage.
+
         """
         self._bridge = bridge or AsyncPGBridge(dsn=dsn, pool_min=pool_min, pool_max=pool_max)
         self._own_bridge = bridge is None

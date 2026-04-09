@@ -4,7 +4,8 @@
   "description": "Python-first agent kernel baseline",
   "scripts": {
     "test:py": "python -m pytest -q python_tests/agent_kernel",
-    "lint:py": "python -m ruff check python_src python_tests && python -m pylint python_src python_tests"
+    "lint:py": "python -m ruff check agent_kernel python_tests && python -m pylint agent_kernel python_tests",
+    "lint:py:docstring": "python -m ruff check agent_kernel --select D"
   },
   "keywords": [],
   "author": "",

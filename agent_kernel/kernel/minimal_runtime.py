@@ -174,6 +174,10 @@ class InMemoryDecisionProjectionService(DecisionProjectionService):
             reject_derived_diagnostic_authority_input: When ``True``, rejects
                 ``derived_diagnostic`` events from entering projection
                 authority replay path.
+            event_schema_migrator: Optional event-schema migrator applied
+                before projection replay.
+            target_event_schema_version: Optional target schema version used
+                by ``event_schema_migrator``.
 
         """
         self._event_log = event_log

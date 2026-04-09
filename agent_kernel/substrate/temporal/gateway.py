@@ -328,7 +328,7 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         *,
         idempotency_key: str,
     ) -> Any:
-        """Not yet implemented — use LocalWorkflowGateway for execute_turn() support."""
+        """Raise until Temporal execute-turn activity wiring is implemented."""
         raise NotImplementedError(
             "TemporalSDKWorkflowGateway.execute_turn() requires Temporal Activity "
             "registration. Use LocalWorkflowGateway (LocalSubstrateConfig) for now."

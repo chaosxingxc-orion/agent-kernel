@@ -27,6 +27,7 @@ class CircuitBreakerProbeScheduler:
             policy: Circuit-breaker policy with threshold and half-open interval.
             probe_fns: Mapping ``effect_class -> async health-check function``.
             interval_s: Probe sweep interval in seconds.
+
         """
         self._circuit_breaker_store = circuit_breaker_store
         self._policy = policy

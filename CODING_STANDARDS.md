@@ -1,24 +1,36 @@
 # Agent Kernel Coding Standards
 
-本项目从即日起采用以下两份规范作为强制编码风格基线：
+本仓库以 Google 风格为基准，要求新代码和修改代码遵循以下规范：
 
 1. Python: https://google.github.io/styleguide/pyguide.html
 2. TypeScript: https://google.github.io/styleguide/tsguide.html
 
 ## 适用范围
 
-- `python_src/` 与 `python_tests/` 必须遵循 Google Python Style Guide。
-- `src/` 与 `tests/` 必须遵循 Google TypeScript Style Guide。
+- `agent_kernel/` 与 `python_tests/` 使用 Python 规范。
+- 任何新增 JS/TS 代码使用 TypeScript 规范。
+
+## 注释与 Docstring 要求
+
+- 所有对外可见模块、类、函数、方法都应有清晰 docstring。
+- docstring 采用 Google 风格分段（`Args`、`Returns`、`Raises` 等）。
+- 参数说明必须与函数签名一致，避免遗漏或过时描述。
 
 ## 执行原则
 
-- 新增代码、重构代码、修复代码都必须遵循上述规范。
-- 若历史代码与规范冲突，修改触达处按“增量对齐”原则修正到规范风格。
-- 评审与合并以该规范为准，不再使用个人偏好作为风格依据。
+- 新增代码必须满足规范后再合并。
+- 改动历史代码时执行“增量对齐”，至少保证修改触达区域符合规范。
+- 禁止以个人偏好替代项目统一风格。
 
-## 本仓库执行命令
+## 本仓库检查命令
 
-- TypeScript 类型与风格门禁：`npm run lint:ts`
-- TypeScript 测试：`npm test`
-- Python 风格门禁：`npm run lint:py`
-- Python 测试：`python -m pytest -q`
+```bash
+python -m ruff check .
+python -m pytest -q python_tests/agent_kernel
+```
+
+严格 docstring 检查（推荐在源码目录执行）：
+
+```bash
+python -m ruff check agent_kernel --select D
+```

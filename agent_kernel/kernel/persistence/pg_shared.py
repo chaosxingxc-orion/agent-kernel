@@ -31,6 +31,7 @@ class AsyncPGBridge:
             dsn: PostgreSQL DSN.
             pool_min: Pool minimum size.
             pool_max: Pool maximum size.
+
         """
         self._dsn = dsn
         self._pool_min = pool_min

@@ -43,6 +43,7 @@ class SQLiteKernelRuntimeEventLog(KernelRuntimeEventLog):
             pool: Optional shared SQLite connection pool.
             busy_timeout_ms: SQLite busy-timeout window in milliseconds for
                 lock contention waits.
+
         """
         self._database_path = str(database_path)
         self._lock = threading.Lock()

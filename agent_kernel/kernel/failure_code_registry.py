@@ -16,6 +16,7 @@ class FailureCodeRegistry:
     """
 
     def __init__(self) -> None:
+        """Initialize empty recovery and gate mappings."""
         self._recovery_map: dict[TraceFailureCode, str] = {}
         self._gate_map: dict[TraceFailureCode, str | None] = {}
 

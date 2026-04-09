@@ -261,6 +261,7 @@ def sqlite_lock_contention_health_check(
 
     Returns:
         Health check callable returning ``(HealthStatus, message)``.
+
     """
 
     def _check() -> tuple[HealthStatus, str]:

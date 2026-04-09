@@ -111,6 +111,7 @@ class RetryingExecutorService:
 
         Returns:
             Delay before the next retry in milliseconds.
+
         """
         if exc.backoff_hint_ms is not None:
             return max(exc.backoff_hint_ms, self._base_delay_ms) + random.randint(

@@ -353,3 +353,40 @@ class TestSerialization:
         from agent_kernel.service.serialization import serialize_dataclass
 
         assert serialize_dataclass(None) == {}
+
+
+# ---------------------------------------------------------------------------
+# KernelConfig wiring
+# ---------------------------------------------------------------------------
+
+
+class TestKernelConfigWiring:
+    def test_create_app_default_uses_kernel_config(self) -> None:
+        """Verify create_app_default() propagates KernelConfig values."""
+        from agent_kernel.config import KernelConfig
+        from agent_kernel.service.http_server import create_app_default
+
+        cfg = KernelConfig(
+            api_key="test-key-42",
+            max_request_body_bytes=512,
+            max_turn_cache_size=99,
+        )
+        app = create_app_default(config=cfg)
+
+        # max_body_bytes is stored on the inner Starlette app's state.
+        # ApiKeyMiddleware wraps Starlette, so unwrap to reach state.
+        inner = app.app if hasattr(app, "app") else app
+        assert inner.state.max_body_bytes == 512
+
+        # Verify the gateway received the custom cache size.
+        facade = inner.state.facade
+        gateway = facade._workflow_gateway
+        assert gateway._max_cache_size == 99
+
+    def test_create_app_default_defaults_to_from_env(self) -> None:
+        """Without explicit config, from_env() is used (all defaults)."""
+        from agent_kernel.service.http_server import create_app_default
+
+        app = create_app_default()
+        inner = app.app if hasattr(app, "app") else app
+        assert inner.state.max_body_bytes == 1_048_576

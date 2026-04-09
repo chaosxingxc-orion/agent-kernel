@@ -158,3 +158,48 @@ class TestHumanGateStateSurvivesFacadeRestart:
         facade2 = _make_facade(event_log, gateway=gw)
         view = asyncio.run(facade2.query_trace_runtime("run-1"))
         assert view.review_state == "completed"
+
+
+class TestCrossFadeTraceMerge:
+    """Two facades sharing an event log must see each other's trace entries."""
+
+    def test_cross_facade_trace_merge(self) -> None:
+        """Facade A opens branch, Facade B opens stage (same run).
+
+        When Facade B queries trace for the run it must see both its own
+        stage AND Facade A's branch — even though Facade B already has
+        local state for the run.
+        """
+        event_log = InMemoryKernelRuntimeEventLog()
+        gw = _make_gateway()
+
+        facade_a = _make_facade(event_log, gateway=gw)
+        facade_b = _make_facade(event_log, gateway=gw)
+
+        # Facade A creates a branch.
+        asyncio.run(
+            facade_a.open_branch(
+                OpenBranchRequest(
+                    run_id="run-1",
+                    branch_id="branch-from-a",
+                    stage_id="route",
+                    parent_branch_id=None,
+                    proposed_by="facade-a",
+                )
+            )
+        )
+
+        # Facade B creates a stage (gives it local state for run-1).
+        asyncio.run(facade_b.open_stage("plan", "run-1", branch_id=None))
+
+        # Facade B queries — must see BOTH its own stage AND A's branch.
+        view = asyncio.run(facade_b.query_trace_runtime("run-1"))
+
+        branch_ids = {b.branch_id for b in view.branches}
+        stage_ids = {s.stage_id for s in view.stages}
+        assert "branch-from-a" in branch_ids, (
+            "Branch created by facade A is missing from facade B's trace view"
+        )
+        assert "plan" in stage_ids, (
+            "Stage created by facade B itself is missing from its trace view"
+        )

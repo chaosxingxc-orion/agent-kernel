@@ -707,14 +707,19 @@ class TestTurnEngineDispatchTableExtensibility:
 
 
 def test_turn_engine_uses_default_defaults() -> None:
-    """TurnEngine without explicit defaults uses TurnEngineDefaults()."""
+    """TurnEngine without explicit defaults uses PoC fallback values."""
     engine = TurnEngine(
         snapshot_builder=_StubSnapshotBuilder(),
         admission_service=_StubAdmissionService(admitted=True),
         dedupe_store=InMemoryDedupeStore(),
         executor=_StubExecutor(result={"acknowledged": True}),
     )
-    assert engine._defaults == TurnEngineDefaults()
+    expected = TurnEngineDefaults(
+        model_ref="echo",
+        tenant_policy_ref="policy:default",
+        permission_mode="strict",
+    )
+    assert engine._defaults == expected
     assert engine._defaults.model_ref == "echo"
     assert engine._defaults.tenant_policy_ref == "policy:default"
     assert engine._defaults.permission_mode == "strict"

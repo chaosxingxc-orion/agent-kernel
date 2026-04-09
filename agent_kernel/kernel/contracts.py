@@ -1090,6 +1090,7 @@ class TransientExecutionError(Exception):
     Attributes:
         backoff_hint_ms: Optional minimum backoff hint in milliseconds.
         may_have_executed: Whether the action may have partially executed.
+
     """
 
     def __init__(
@@ -1099,6 +1100,7 @@ class TransientExecutionError(Exception):
         backoff_hint_ms: int | None = None,
         may_have_executed: bool = False,
     ) -> None:
+        """Initialize transient execution error metadata."""
         super().__init__(message)
         self.backoff_hint_ms = backoff_hint_ms
         self.may_have_executed = may_have_executed
@@ -1111,6 +1113,7 @@ class ConnectionTransientError(TransientExecutionError):
     """
 
     def __init__(self, message: str = "", **kwargs: Any) -> None:
+        """Initialize connection-transient error with safe defaults."""
         super().__init__(message, may_have_executed=False, **kwargs)
 
 
@@ -1121,6 +1124,7 @@ class TimeoutTransientError(TransientExecutionError):
     """
 
     def __init__(self, message: str = "", **kwargs: Any) -> None:
+        """Initialize timeout-transient error with replay-aware defaults."""
         super().__init__(message, may_have_executed=True, **kwargs)
 
 
@@ -1129,6 +1133,7 @@ class RateLimitTransientError(TransientExecutionError):
 
     Attributes:
         retry_after_ms: Server-provided retry window, when available.
+
     """
 
     def __init__(
@@ -1138,6 +1143,7 @@ class RateLimitTransientError(TransientExecutionError):
         retry_after_ms: int | None = None,
         **kwargs: Any,
     ) -> None:
+        """Initialize rate-limit transient error with retry-after metadata."""
         hint = retry_after_ms or kwargs.pop("backoff_hint_ms", None)
         super().__init__(
             message,
@@ -1152,6 +1158,7 @@ class ServiceOverloadTransientError(TransientExecutionError):
     """Service-overload transient failure (e.g. HTTP 503)."""
 
     def __init__(self, message: str = "", **kwargs: Any) -> None:
+        """Initialize service-overload transient error defaults."""
         super().__init__(message, may_have_executed=False, **kwargs)
 
 

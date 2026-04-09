@@ -207,6 +207,11 @@ class KernelFacade:
         self._human_gate_lock = threading.Lock()
         # Bounded run tracking for memory-leak prevention.
         self._max_tracked_runs = max_tracked_runs
+        # Incremental rebuild offset: tracks the last commit_offset seen per
+        # run_id during _rebuild_trace_state_from_events.  Subsequent calls
+        # only load events after this offset, avoiding full replay on every
+        # query_trace_runtime() call.
+        self._rebuild_offsets: dict[str, int] = {}
         self._tracked_run_order: list[str] = []
         self._tracked_run_set: set[str] = set()
         self._tracked_run_lock = threading.Lock()
@@ -268,11 +273,13 @@ class KernelFacade:
         await self._event_log.append_action_commit(commit)
 
     async def _rebuild_trace_state_from_events(self, run_id: str) -> None:
-        """Rebuild branch/stage/human-gate registries from event log.
+        """Additively merge branch/stage/human-gate state from the event log.
 
-        Called on ``query_trace_runtime()`` when the run has no local state
-        yet (cold-start or new facade instance).  Only reads ``trace.*``
-        events and replays them into the in-memory registries.
+        Called on every ``query_trace_runtime()`` invocation.  Uses
+        ``_rebuild_offsets`` to load only events newer than the last rebuild,
+        avoiding a full replay on each call.  Merges are **additive**: entries
+        already present in the local registries are never overwritten, so
+        locally-created state (which may be more recent) takes precedence.
 
         Args:
             run_id: Run identifier to rebuild state for.
@@ -280,9 +287,13 @@ class KernelFacade:
         """
         if self._event_log is None:
             return
-        events = await self._event_log.load(run_id, after_offset=0)
+        after = self._rebuild_offsets.get(run_id, 0)
+        events = await self._event_log.load(run_id, after_offset=after)
         trace_events = [e for e in events if e.event_type.startswith("trace.")]
+        max_offset = after
         for ev in trace_events:
+            if ev.commit_offset > max_offset:
+                max_offset = ev.commit_offset
             p = ev.payload_json or {}
             if ev.event_type == "trace.branch_opened":
                 view = TraceBranchView(
@@ -294,7 +305,9 @@ class KernelFacade:
                     proposed_by=p.get("proposed_by"),
                 )
                 with self._branch_lock:
-                    self._branch_registry.setdefault(run_id, {})[p["branch_id"]] = view
+                    run_branches = self._branch_registry.setdefault(run_id, {})
+                    if p["branch_id"] not in run_branches:
+                        run_branches[p["branch_id"]] = view
             elif ev.event_type == "trace.branch_state_changed":
                 with self._branch_lock:
                     existing = self._branch_registry.get(run_id, {}).get(p["branch_id"])
@@ -302,7 +315,7 @@ class KernelFacade:
                         updated = replace(
                             existing,
                             state=p["new_state"],
-                            failure_code=p.get("failure_code") or existing.failure_code,
+                            failure_code=(p.get("failure_code") or existing.failure_code),
                         )
                         self._branch_registry[run_id][p["branch_id"]] = updated
             elif ev.event_type == "trace.stage_opened":
@@ -313,7 +326,9 @@ class KernelFacade:
                     branch_id=p.get("branch_id"),
                 )
                 with self._stage_lock:
-                    self._stage_registry.setdefault(run_id, {})[p["stage_id"]] = view_s
+                    run_stages = self._stage_registry.setdefault(run_id, {})
+                    if p["stage_id"] not in run_stages:
+                        run_stages[p["stage_id"]] = view_s
             elif ev.event_type == "trace.stage_state_changed":
                 with self._stage_lock:
                     existing_s = self._stage_registry.get(run_id, {}).get(p["stage_id"])
@@ -321,8 +336,8 @@ class KernelFacade:
                         updated_s = replace(
                             existing_s,
                             state=p["new_state"],
-                            exited_at=p.get("exited_at") or existing_s.exited_at,
-                            failure_code=p.get("failure_code") or existing_s.failure_code,
+                            exited_at=(p.get("exited_at") or existing_s.exited_at),
+                            failure_code=(p.get("failure_code") or existing_s.failure_code),
                         )
                         self._stage_registry[run_id][p["stage_id"]] = updated_s
             elif ev.event_type == "trace.human_gate_opened":
@@ -332,6 +347,7 @@ class KernelFacade:
                 with self._human_gate_lock:
                     self._open_human_gates.setdefault(run_id, set()).add(p["gate_ref"])
                     self._resolved_human_gates.setdefault(run_id, set()).add(p["gate_ref"])
+        self._rebuild_offsets[run_id] = max_offset
 
     # ------------------------------------------------------------------
     # Run lifecycle cleanup & bounded eviction
@@ -386,6 +402,7 @@ class KernelFacade:
         with self._human_gate_lock:
             self._open_human_gates.pop(run_id, None)
             self._resolved_human_gates.pop(run_id, None)
+        self._rebuild_offsets.pop(run_id, None)
 
     def cleanup_completed_run(self, run_id: str) -> None:
         """Remove ALL in-memory state for a completed run.
@@ -1108,15 +1125,11 @@ class KernelFacade:
         """
         import datetime
 
-        # Rebuild local registries from event log on cold start (no local
-        # state for this run yet).  This enables cross-instance consistency.
-        has_local = (
-            run_id in self._branch_registry
-            or run_id in self._stage_registry
-            or run_id in self._open_human_gates
-        )
-        if not has_local:
-            await self._rebuild_trace_state_from_events(run_id)
+        # Always merge from event log so that trace entries created by other
+        # facade instances (same run, different process) become visible.
+        # The rebuild is additive and incremental (offset-tracked), so local
+        # state that already exists is never overwritten.
+        await self._rebuild_trace_state_from_events(run_id)
 
         response = await self.query_run(QueryRunRequest(run_id=run_id))
         # Map kernel lifecycle state to TRACE run state.

@@ -115,6 +115,9 @@ class CompensationRegistry:
             effect_class: The ``EffectClass`` string to handle.
             compensate: Async callable accepting one ``Action`` argument.
             description: Optional human-readable description of the strategy.
+            timeout_ms: Per-attempt timeout in milliseconds.
+            max_attempts: Maximum number of compensation attempts.
+            backoff_base_ms: Base backoff interval in milliseconds.
 
         """
         self._entries[effect_class] = CompensationEntry(
@@ -151,6 +154,9 @@ class CompensationRegistry:
         Args:
             effect_class: The ``EffectClass`` string to handle.
             description: Optional human-readable description.
+            timeout_ms: Per-attempt timeout in milliseconds.
+            max_attempts: Maximum number of compensation attempts.
+            backoff_base_ms: Base backoff interval in milliseconds.
 
         Returns:
             Decorator that registers the wrapped callable and returns it
@@ -235,6 +241,8 @@ class CompensationRegistry:
                 execution.  When ``None`` the handler is called without
                 idempotency protection (backward-compatible default).
             run_id: Optional run identifier used for logging context.
+            raise_on_failure: When ``True``, raise
+                ``CompensationExhaustedError`` instead of returning ``False``.
 
         Returns:
             ``True`` when a handler was found and executed (or already

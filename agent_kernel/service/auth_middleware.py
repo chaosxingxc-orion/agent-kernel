@@ -1,8 +1,7 @@
 """API key authentication middleware for the kernel HTTP service.
 
-Validates Bearer tokens from the Authorization header. When no API key is
-configured (``api_key is None``), all requests pass through unchanged —
-authentication is opt-in.
+Validate Bearer tokens from the Authorization header. When no API key is
+configured (``api_key is None``), all requests pass through unchanged.
 """
 
 from __future__ import annotations
@@ -32,6 +31,7 @@ class ApiKeyMiddleware:
     """
 
     def __init__(self, app: ASGIApp, *, api_key: str | None) -> None:
+        """Initialize middleware with wrapped app and optional API key."""
         self._app = app
         self._api_key = api_key
 
@@ -41,6 +41,7 @@ class ApiKeyMiddleware:
         return self._app.state
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Authorize one ASGI request and forward to the wrapped app."""
         if scope["type"] != "http" or self._api_key is None:
             await self._app(scope, receive, send)
             return

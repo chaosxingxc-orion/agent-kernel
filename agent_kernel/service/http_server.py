@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import TYPE_CHECKING, Any
 
 from starlette.applications import Starlette
@@ -23,6 +22,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from agent_kernel.config import KernelConfig
 from agent_kernel.kernel.contracts import QueryRunRequest
 from agent_kernel.service.auth_middleware import ApiKeyMiddleware
 from agent_kernel.service.serialization import (
@@ -53,18 +53,21 @@ def _error(status: int, detail: str) -> JSONResponse:
     return JSONResponse({"error": detail}, status_code=status)
 
 
-_MAX_REQUEST_BODY_BYTES = 1_048_576  # 1 MB
+_MAX_REQUEST_BODY_BYTES = 1_048_576  # 1 MB — default; overridden via app.state
 
 
 async def _json_body(request: Request) -> dict[str, Any]:
     """Parse request body as JSON, returning {} for empty bodies."""
+    max_bytes: int = getattr(
+        getattr(request, "app", None) and request.app.state,
+        "max_body_bytes",
+        _MAX_REQUEST_BODY_BYTES,
+    )
     body = await request.body()
     if not body:
         return {}
-    if len(body) > _MAX_REQUEST_BODY_BYTES:
-        raise ValueError(
-            f"request body too large: {len(body)} bytes (max {_MAX_REQUEST_BODY_BYTES})"
-        )
+    if len(body) > max_bytes:
+        raise ValueError(f"request body too large: {len(body)} bytes (max {max_bytes})")
     return json.loads(body)
 
 
@@ -74,7 +77,7 @@ async def _json_body(request: Request) -> dict[str, Any]:
 
 
 async def post_runs(request: Request) -> JSONResponse:
-    """POST /runs — start_run"""
+    """POST /runs — start_run."""
     facade: KernelFacade = request.app.state.facade
     data = await _json_body(request)
     try:
@@ -87,7 +90,7 @@ async def post_runs(request: Request) -> JSONResponse:
 
 
 async def get_run(request: Request) -> JSONResponse:
-    """GET /runs/{run_id} — query_run"""
+    """GET /runs/{run_id} — query_run."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     try:
@@ -99,7 +102,7 @@ async def get_run(request: Request) -> JSONResponse:
 
 
 async def get_run_dashboard(request: Request) -> JSONResponse:
-    """GET /runs/{run_id}/dashboard — query_run_dashboard"""
+    """GET /runs/{run_id}/dashboard — query_run_dashboard."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     try:
@@ -111,7 +114,7 @@ async def get_run_dashboard(request: Request) -> JSONResponse:
 
 
 async def get_run_trace(request: Request) -> JSONResponse:
-    """GET /runs/{run_id}/trace — query_trace_runtime"""
+    """GET /runs/{run_id}/trace — query_trace_runtime."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     try:
@@ -123,7 +126,7 @@ async def get_run_trace(request: Request) -> JSONResponse:
 
 
 async def get_run_postmortem(request: Request) -> JSONResponse:
-    """GET /runs/{run_id}/postmortem — query_run_postmortem"""
+    """GET /runs/{run_id}/postmortem — query_run_postmortem."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     try:
@@ -135,7 +138,7 @@ async def get_run_postmortem(request: Request) -> JSONResponse:
 
 
 async def get_run_events(request: Request) -> Response:
-    """GET /runs/{run_id}/events — stream_run_events (SSE)"""
+    """GET /runs/{run_id}/events — stream_run_events (SSE)."""
     from starlette.responses import StreamingResponse
 
     facade: KernelFacade = request.app.state.facade
@@ -172,7 +175,7 @@ async def get_run_events(request: Request) -> Response:
 
 
 async def post_run_signal(request: Request) -> JSONResponse:
-    """POST /runs/{run_id}/signal — signal_run"""
+    """POST /runs/{run_id}/signal — signal_run."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     data = await _json_body(request)
@@ -186,7 +189,7 @@ async def post_run_signal(request: Request) -> JSONResponse:
 
 
 async def post_run_cancel(request: Request) -> JSONResponse:
-    """POST /runs/{run_id}/cancel — cancel_run"""
+    """POST /runs/{run_id}/cancel — cancel_run."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     data = await _json_body(request)
@@ -200,7 +203,7 @@ async def post_run_cancel(request: Request) -> JSONResponse:
 
 
 async def post_run_resume(request: Request) -> JSONResponse:
-    """POST /runs/{run_id}/resume — resume_run"""
+    """POST /runs/{run_id}/resume — resume_run."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     data = await _json_body(request)
@@ -214,7 +217,7 @@ async def post_run_resume(request: Request) -> JSONResponse:
 
 
 async def post_run_children(request: Request) -> JSONResponse:
-    """POST /runs/{run_id}/children — spawn_child_run"""
+    """POST /runs/{run_id}/children — spawn_child_run."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     data = await _json_body(request)
@@ -228,7 +231,7 @@ async def post_run_children(request: Request) -> JSONResponse:
 
 
 async def get_run_children(request: Request) -> JSONResponse:
-    """GET /runs/{run_id}/children — query_child_runs"""
+    """GET /runs/{run_id}/children — query_child_runs."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     try:
@@ -240,7 +243,7 @@ async def get_run_children(request: Request) -> JSONResponse:
 
 
 async def post_run_approval(request: Request) -> JSONResponse:
-    """POST /runs/{run_id}/approval — submit_approval"""
+    """POST /runs/{run_id}/approval — submit_approval."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     data = await _json_body(request)
@@ -254,7 +257,7 @@ async def post_run_approval(request: Request) -> JSONResponse:
 
 
 async def post_run_stage_open(request: Request) -> JSONResponse:
-    """POST /runs/{run_id}/stages/{stage_id}/open — open_stage"""
+    """POST /runs/{run_id}/stages/{stage_id}/open — open_stage."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     stage_id = request.path_params["stage_id"]
@@ -272,7 +275,7 @@ async def post_run_stage_open(request: Request) -> JSONResponse:
 
 
 async def put_run_stage_state(request: Request) -> JSONResponse:
-    """PUT /runs/{run_id}/stages/{stage_id}/state — mark_stage_state"""
+    """PUT /runs/{run_id}/stages/{stage_id}/state — mark_stage_state."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     stage_id = request.path_params["stage_id"]
@@ -291,7 +294,7 @@ async def put_run_stage_state(request: Request) -> JSONResponse:
 
 
 async def post_run_branches(request: Request) -> JSONResponse:
-    """POST /runs/{run_id}/branches — open_branch"""
+    """POST /runs/{run_id}/branches — open_branch."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     data = await _json_body(request)
@@ -305,7 +308,7 @@ async def post_run_branches(request: Request) -> JSONResponse:
 
 
 async def put_run_branch_state(request: Request) -> JSONResponse:
-    """PUT /runs/{run_id}/branches/{branch_id}/state — mark_branch_state"""
+    """PUT /runs/{run_id}/branches/{branch_id}/state — mark_branch_state."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     branch_id = request.path_params["branch_id"]
@@ -320,7 +323,7 @@ async def put_run_branch_state(request: Request) -> JSONResponse:
 
 
 async def post_run_human_gates(request: Request) -> JSONResponse:
-    """POST /runs/{run_id}/human-gates — open_human_gate"""
+    """POST /runs/{run_id}/human-gates — open_human_gate."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     data = await _json_body(request)
@@ -334,7 +337,7 @@ async def post_run_human_gates(request: Request) -> JSONResponse:
 
 
 async def post_run_task_views(request: Request) -> JSONResponse:
-    """POST /runs/{run_id}/task-views — record_task_view"""
+    """POST /runs/{run_id}/task-views — record_task_view."""
     facade: KernelFacade = request.app.state.facade
     run_id = request.path_params["run_id"]
     data = await _json_body(request)
@@ -348,7 +351,7 @@ async def post_run_task_views(request: Request) -> JSONResponse:
 
 
 async def put_task_view_decision(request: Request) -> JSONResponse:
-    """PUT /task-views/{task_view_id}/decision — bind_task_view_to_decision"""
+    """PUT /task-views/{task_view_id}/decision — bind_task_view_to_decision."""
     facade: KernelFacade = request.app.state.facade
     task_view_id = request.path_params["task_view_id"]
     data = await _json_body(request)
@@ -361,12 +364,12 @@ async def put_task_view_decision(request: Request) -> JSONResponse:
 
 
 async def post_run_turn(request: Request) -> JSONResponse:
-    """POST /runs/{run_id}/turn — execute_turn (in-process only)"""
+    """POST /runs/{run_id}/turn — execute_turn (in-process only)."""
     return _error(501, "execute_turn requires in-process mode; use KernelDirectAdapter")
 
 
 async def post_tasks(request: Request) -> JSONResponse:
-    """POST /tasks — register_task"""
+    """POST /tasks — register_task."""
     facade: KernelFacade = request.app.state.facade
     data = await _json_body(request)
     try:
@@ -381,7 +384,7 @@ async def post_tasks(request: Request) -> JSONResponse:
 
 
 async def get_task_status(request: Request) -> JSONResponse:
-    """GET /tasks/{task_id}/status — get_task_status"""
+    """GET /tasks/{task_id}/status — get_task_status."""
     facade: KernelFacade = request.app.state.facade
     task_id = request.path_params["task_id"]
     try:
@@ -395,19 +398,19 @@ async def get_task_status(request: Request) -> JSONResponse:
 
 
 async def get_manifest(request: Request) -> JSONResponse:
-    """GET /manifest — get_manifest"""
+    """GET /manifest — get_manifest."""
     facade: KernelFacade = request.app.state.facade
     manifest = facade.get_manifest()
     return JSONResponse(serialize_dataclass(manifest))
 
 
 async def get_health_liveness(request: Request) -> JSONResponse:
-    """GET /health/liveness — basic liveness probe"""
+    """GET /health/liveness — basic liveness probe."""
     return JSONResponse({"status": "alive"})
 
 
 async def get_health_readiness(request: Request) -> JSONResponse:
-    """GET /health/readiness — readiness probe via get_health"""
+    """GET /health/readiness — readiness probe via get_health."""
     facade: KernelFacade = request.app.state.facade
     try:
         health = facade.get_health()
@@ -428,7 +431,7 @@ async def get_metrics(request: Request) -> JSONResponse:
 
 
 async def get_action_state(request: Request) -> JSONResponse:
-    """GET /actions/{key}/state — get_action_state"""
+    """GET /actions/{key}/state — get_action_state."""
     facade: KernelFacade = request.app.state.facade
     key = request.path_params["key"]
     state = facade.get_action_state(key)
@@ -446,6 +449,7 @@ def create_app(
     facade: KernelFacade,
     *,
     api_key: str | None = None,
+    max_body_bytes: int = _MAX_REQUEST_BODY_BYTES,
     metrics_collector: object | None = None,
 ) -> Starlette:
     """Create a Starlette ASGI app wrapping the given KernelFacade.
@@ -528,16 +532,27 @@ def create_app(
     ]
     app = Starlette(routes=routes)
     app.state.facade = facade
+    app.state.max_body_bytes = max_body_bytes
     app.state.metrics = metrics_collector
     app = ApiKeyMiddleware(app, api_key=api_key)
     return app
 
 
-def create_app_default() -> Starlette:
+def create_app_default(
+    config: KernelConfig | None = None,
+) -> Starlette:
     """Create an ASGI app with default in-memory runtime.
 
     Intended for container / uvicorn entrypoint when no external
     facade is injected.  Uses LocalWorkflowGateway + in-memory stores.
+
+    Args:
+        config: Optional ``KernelConfig`` override.  When *None*,
+            ``KernelConfig.from_env()`` is used.
+
+    Returns:
+        A Starlette ASGI application.
+
     """
     from agent_kernel.adapters.facade.kernel_facade import KernelFacade
     from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
@@ -549,12 +564,17 @@ def create_app_default() -> Starlette:
         StaticDispatchAdmissionService,
         StaticRecoveryGateService,
     )
+    from agent_kernel.runtime.metrics import KernelMetricsCollector
     from agent_kernel.substrate.local.adaptor import LocalWorkflowGateway
     from agent_kernel.substrate.temporal.run_actor_workflow import (
         RunActorDependencyBundle,
         RunActorStrictModeConfig,
     )
 
+    if config is None:
+        config = KernelConfig.from_env()
+
+    collector = KernelMetricsCollector()
     event_log = InMemoryKernelRuntimeEventLog()
     projection = InMemoryDecisionProjectionService(event_log)
     deps = RunActorDependencyBundle(
@@ -566,8 +586,13 @@ def create_app_default() -> Starlette:
         deduper=InMemoryDecisionDeduper(),
         dedupe_store=InMemoryDedupeStore(),
         strict_mode=RunActorStrictModeConfig(enabled=False),
+        observability_hook=collector,
     )
-    gateway = LocalWorkflowGateway(deps)
+    gateway = LocalWorkflowGateway(deps, max_cache_size=config.max_turn_cache_size)
     facade = KernelFacade(workflow_gateway=gateway)
-    api_key = os.environ.get("AGENT_KERNEL_API_KEY")
-    return create_app(facade, api_key=api_key)
+    return create_app(
+        facade,
+        api_key=config.api_key,
+        max_body_bytes=config.max_request_body_bytes,
+        metrics_collector=collector,
+    )

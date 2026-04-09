@@ -167,9 +167,9 @@ class KernelMetricsCollector:
         self,
         *,
         run_id: str,
+        action_id: str,
         phase_name: str,
         elapsed_ms: int,
-        timestamp_ms: int,
     ) -> None:
         """Record a turn-phase duration sample (counter of phase invocations)."""
         self.inc("turn_phase_invocations_total", {"phase": phase_name})
@@ -200,7 +200,7 @@ class KernelMetricsCollector:
         run_id: str,
         model_ref: str,
         latency_ms: int,
-        token_usage: object | None,
+        token_usage: object | None = None,
     ) -> None:
         """Track LLM call counts per model."""
         self.inc("llm_calls_total", {"model_ref": model_ref})
@@ -231,11 +231,80 @@ class KernelMetricsCollector:
         self,
         *,
         run_id: str,
-        action_id: str | None = None,
-        admitted: bool = True,
-        reason: str | None = None,
-        timestamp_ms: int = 0,
+        action_id: str,
+        admitted: bool,
+        latency_ms: int,
     ) -> None:
         """Track admission evaluation counts."""
         outcome = "admitted" if admitted else "rejected"
         self.inc("admission_evaluations_total", {"outcome": outcome})
+
+    def on_dispatch_attempted(
+        self,
+        *,
+        run_id: str,
+        action_id: str,
+        dedupe_outcome: str,
+        latency_ms: int,
+    ) -> None:
+        """Track dispatch attempt counts by dedupe outcome."""
+        self.inc("dispatch_attempts_total", {"dedupe_outcome": dedupe_outcome})
+
+    def on_parallel_branch_result(
+        self,
+        *,
+        run_id: str,
+        group_idempotency_key: str,
+        action_id: str,
+        outcome: str,
+        failure_code: str | None = None,
+    ) -> None:
+        """Track parallel branch results by outcome."""
+        self.inc("parallel_branch_results_total", {"outcome": outcome})
+
+    def on_dedupe_hit(
+        self,
+        *,
+        run_id: str,
+        action_id: str,
+        outcome: str,
+    ) -> None:
+        """Track dedupe reservation outcomes."""
+        self.inc("dedupe_hits_total", {"outcome": outcome})
+
+    def on_reflection_round(
+        self,
+        *,
+        run_id: str,
+        action_id: str,
+        round_num: int,
+        corrected: bool,
+    ) -> None:
+        """Track reflection round counts."""
+        self.inc(
+            "reflection_rounds_total",
+            {"corrected": str(corrected).lower()},
+        )
+
+    def on_circuit_breaker_trip(
+        self,
+        *,
+        run_id: str,
+        effect_class: str,
+        failure_count: int,
+        tripped: bool,
+    ) -> None:
+        """Track circuit breaker trips."""
+        if tripped:
+            self.inc("circuit_breaker_trips_total", {"effect_class": effect_class})
+
+    def on_branch_rollback_triggered(
+        self,
+        *,
+        run_id: str,
+        group_idempotency_key: str,
+        action_id: str,
+        join_strategy: str,
+    ) -> None:
+        """Track branch rollback triggers."""
+        self.inc("branch_rollbacks_total", {"join_strategy": join_strategy})
