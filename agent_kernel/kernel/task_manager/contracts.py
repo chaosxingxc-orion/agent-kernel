@@ -35,8 +35,8 @@ class TaskRestartPolicy:
             Must be >= 1.
         backoff_base_ms: Base backoff in milliseconds between attempts.
             Actual delay is backoff_base_ms * attempt_seq (linear).
-        max_backoff_ms: Upper bound for computed backoff in milliseconds.
-            Prevents excessively long waits at high attempt counts.
+        max_backoff_ms: Maximum backoff in milliseconds. Actual delay is
+            min(backoff_base_ms * 2^(attempt-2), max_backoff_ms).
         on_exhausted: Action taken when attempt_seq reaches max_attempts.
             "reflect" passes failure history to ReflectionBridge for
             model-driven recovery; "escalate" triggers human_escalation;

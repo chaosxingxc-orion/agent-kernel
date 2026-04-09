@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "agent-kernel"
 version = "0.2.0"
-description = "Enterprise agent kernel — six-authority lifecycle protocol for durable agent runs"
+description = "Enterprise agent kernel: six-authority lifecycle protocol for durable agent runs"
 requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
@@ -22,6 +22,12 @@ dev = [
     "ruff>=0.4",
     "pylint>=3.2",
 ]
+
+[tool.hatch.build]
+skip-excluded-dirs = true
+
+[tool.hatch.build.targets.sdist]
+exclude = ["external/"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["agent_kernel"]
@@ -44,6 +50,9 @@ select = ["E", "F", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
 # E402 is intentional: several modules do optional-SDK detection (try/except import)
 # before their main imports; suppressing globally avoids per-line noqa noise.
 ignore = ["E402"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.ruff.format]
 quote-style = "double"
