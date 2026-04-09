@@ -53,11 +53,18 @@ def _error(status: int, detail: str) -> JSONResponse:
     return JSONResponse({"error": detail}, status_code=status)
 
 
+_MAX_REQUEST_BODY_BYTES = 1_048_576  # 1 MB
+
+
 async def _json_body(request: Request) -> dict[str, Any]:
     """Parse request body as JSON, returning {} for empty bodies."""
     body = await request.body()
     if not body:
         return {}
+    if len(body) > _MAX_REQUEST_BODY_BYTES:
+        raise ValueError(
+            f"request body too large: {len(body)} bytes (max {_MAX_REQUEST_BODY_BYTES})"
+        )
     return json.loads(body)
 
 

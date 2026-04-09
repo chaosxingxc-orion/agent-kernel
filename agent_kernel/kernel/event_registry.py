@@ -558,6 +558,51 @@ KERNEL_EVENT_REGISTRY.register(
     )
 )
 
+# Facade trace-consistency events — written by KernelFacade so that
+# branch/stage/human-gate state can be reconstructed from the event log
+# by any facade instance (cold-start consistency).
+_FACADE_TRACE_EVENTS: list[EventTypeDescriptor] = [
+    EventTypeDescriptor(
+        event_type="trace.branch_opened",
+        description="A TRACE branch was opened via KernelFacade.open_branch().",
+        authority="derived_replayable",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="trace.branch_state_changed",
+        description="A TRACE branch state was updated via KernelFacade.mark_branch_state().",
+        authority="derived_replayable",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="trace.stage_opened",
+        description="A TRACE stage was opened via KernelFacade.open_stage().",
+        authority="derived_replayable",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="trace.stage_state_changed",
+        description="A TRACE stage state was updated via KernelFacade.mark_stage_state().",
+        authority="derived_replayable",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="trace.human_gate_opened",
+        description="A human review gate was opened via KernelFacade.open_human_gate().",
+        authority="derived_replayable",
+        affects_replay=True,
+    ),
+    EventTypeDescriptor(
+        event_type="trace.human_gate_resolved",
+        description="A human review gate was resolved via KernelFacade.submit_approval().",
+        authority="derived_replayable",
+        affects_replay=True,
+    ),
+]
+
+for _facade_descriptor in _FACADE_TRACE_EVENTS:
+    KERNEL_EVENT_REGISTRY.register(_facade_descriptor)
+
 
 def recovery_allowed_event_types() -> frozenset[str]:
     """Return frozenset of event types permitted in the recovery append path.

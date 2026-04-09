@@ -561,7 +561,9 @@ class TurnEngine:
                 inference_config=inference_config,
                 idempotency_key=reasoning_idempotency_key,
             )
-        except Exception:
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            _logger.warning("reasoning phase failed, degrading to noop: %s", exc, exc_info=True)
+            ctx.emitted_events.append(TurnStateEvent(state="reasoning_failed"))
             ctx.emitted_events.append(TurnStateEvent(state="completed_noop"))
             ctx.result = TurnResult(
                 state="completed_noop",
@@ -831,9 +833,14 @@ class TurnEngine:
                 envelope=ctx.envelope,
                 execution_context=execution_context,
             )
-        except Exception:
-            # Ack-before-commit: executor raised before acknowledging 鈥?mark as
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            # Ack-before-commit: executor raised before acknowledging -- mark as
             # unknown_effect so the DedupeStore does not stay in "dispatched".
+            _logger.warning(
+                "executor raised before acknowledging, marking unknown_effect: %s",
+                exc,
+                exc_info=True,
+            )
             if dedupe_available:
                 with contextlib.suppress(Exception):
                     self._dedupe_store.mark_unknown_effect(ti.dispatch_dedupe_key)

@@ -25,6 +25,7 @@ from agent_kernel.adapters.agent_core.context_adapter import AgentCoreContextInp
 from agent_kernel.kernel.action_type_registry import KERNEL_ACTION_TYPE_REGISTRY
 from agent_kernel.kernel.contracts import (
     Action,
+    ActionCommit,
     ApprovalRequest,
     AsyncActionHandler,
     BranchStateUpdateRequest,
@@ -33,6 +34,7 @@ from agent_kernel.kernel.contracts import (
     HumanGateRequest,
     HumanGateResolution,
     KernelManifest,
+    KernelRuntimeEventLog,
     OpenBranchRequest,
     QueryRunDashboardResponse,
     QueryRunRequest,
@@ -130,6 +132,7 @@ class KernelFacade:
         dedupe_store: Any | None = None,
         drain_coordinator: Any | None = None,
         max_tracked_runs: int = 10_000,
+        event_log: KernelRuntimeEventLog | None = None,
     ) -> None:
         """Initialize facade with substrate gateway and optional adapters.
 
@@ -162,6 +165,11 @@ class KernelFacade:
                 tracked across in-memory registries.  When exceeded, the oldest
                 run_ids are evicted to prevent unbounded memory growth during
                 7x24 operation.  Defaults to ``10_000``.
+            event_log: Optional ``KernelRuntimeEventLog`` for persisting
+                trace-level events (branch/stage/human-gate).  When provided,
+                enables cross-instance consistency: a new facade instance can
+                reconstruct branch/stage/gate state from the event log on
+                first ``query_trace_runtime()`` call.
 
         """
         self._workflow_gateway = workflow_gateway
@@ -174,6 +182,7 @@ class KernelFacade:
         self._task_view_log = task_view_log
         self._dedupe_store = dedupe_store
         self._drain_coordinator = drain_coordinator
+        self._event_log = event_log
         self._draining = False
         # In-memory branch registry: run_id 鈫?{branch_id: TraceBranchView}.
         # Branch lifecycle events are also forwarded to the workflow as signals.
@@ -210,6 +219,119 @@ class KernelFacade:
     def set_draining(self, draining: bool) -> None:
         """Set draining mode for mutation request acceptance."""
         self._draining = draining
+
+    # ------------------------------------------------------------------
+    # Trace event persistence helpers (cross-instance consistency)
+    # ------------------------------------------------------------------
+
+    async def _append_trace_event(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """Append a trace-level event to the event log if available.
+
+        Silently skipped when no ``event_log`` was injected.
+
+        Args:
+            run_id: Run identifier.
+            event_type: One of the ``trace.*`` event types.
+            payload: JSON-serializable payload dict.
+
+        """
+        if self._event_log is None:
+            return
+        import datetime
+        import uuid
+
+        now = datetime.datetime.now(datetime.UTC).isoformat()
+        event = RuntimeEvent(
+            run_id=run_id,
+            event_id=str(uuid.uuid4()),
+            commit_offset=0,  # normalised by event log on append
+            event_type=event_type,
+            event_class="derived",
+            event_authority="derived_replayable",
+            ordering_key=now,
+            wake_policy="projection_only",
+            created_at=now,
+            payload_json=payload,
+        )
+        commit = ActionCommit(
+            run_id=run_id,
+            commit_id=str(uuid.uuid4()),
+            events=[event],
+            created_at=now,
+            caused_by=f"kernel_facade.{event_type}",
+        )
+        await self._event_log.append_action_commit(commit)
+
+    async def _rebuild_trace_state_from_events(self, run_id: str) -> None:
+        """Rebuild branch/stage/human-gate registries from event log.
+
+        Called on ``query_trace_runtime()`` when the run has no local state
+        yet (cold-start or new facade instance).  Only reads ``trace.*``
+        events and replays them into the in-memory registries.
+
+        Args:
+            run_id: Run identifier to rebuild state for.
+
+        """
+        if self._event_log is None:
+            return
+        events = await self._event_log.load(run_id, after_offset=0)
+        trace_events = [e for e in events if e.event_type.startswith("trace.")]
+        for ev in trace_events:
+            p = ev.payload_json or {}
+            if ev.event_type == "trace.branch_opened":
+                view = TraceBranchView(
+                    branch_id=p["branch_id"],
+                    stage_id=p["stage_id"],
+                    state=p.get("state", "active"),
+                    opened_at=p.get("opened_at", ev.created_at),
+                    parent_branch_id=p.get("parent_branch_id"),
+                    proposed_by=p.get("proposed_by"),
+                )
+                with self._branch_lock:
+                    self._branch_registry.setdefault(run_id, {})[p["branch_id"]] = view
+            elif ev.event_type == "trace.branch_state_changed":
+                with self._branch_lock:
+                    existing = self._branch_registry.get(run_id, {}).get(p["branch_id"])
+                    if existing is not None:
+                        updated = replace(
+                            existing,
+                            state=p["new_state"],
+                            failure_code=p.get("failure_code") or existing.failure_code,
+                        )
+                        self._branch_registry[run_id][p["branch_id"]] = updated
+            elif ev.event_type == "trace.stage_opened":
+                view_s = TraceStageView(
+                    stage_id=p["stage_id"],
+                    state=p.get("state", "active"),
+                    entered_at=p.get("entered_at", ev.created_at),
+                    branch_id=p.get("branch_id"),
+                )
+                with self._stage_lock:
+                    self._stage_registry.setdefault(run_id, {})[p["stage_id"]] = view_s
+            elif ev.event_type == "trace.stage_state_changed":
+                with self._stage_lock:
+                    existing_s = self._stage_registry.get(run_id, {}).get(p["stage_id"])
+                    if existing_s is not None:
+                        updated_s = replace(
+                            existing_s,
+                            state=p["new_state"],
+                            exited_at=p.get("exited_at") or existing_s.exited_at,
+                            failure_code=p.get("failure_code") or existing_s.failure_code,
+                        )
+                        self._stage_registry[run_id][p["stage_id"]] = updated_s
+            elif ev.event_type == "trace.human_gate_opened":
+                with self._human_gate_lock:
+                    self._open_human_gates.setdefault(run_id, set()).add(p["gate_ref"])
+            elif ev.event_type == "trace.human_gate_resolved":
+                with self._human_gate_lock:
+                    self._open_human_gates.setdefault(run_id, set()).add(p["gate_ref"])
+                    self._resolved_human_gates.setdefault(run_id, set()).add(p["gate_ref"])
 
     # ------------------------------------------------------------------
     # Run lifecycle cleanup & bounded eviction
@@ -839,6 +961,14 @@ class KernelFacade:
                     caused_by=request.caused_by or f"approval:{request.approval_ref}",
                 ),
             )
+            await self._append_trace_event(
+                request.run_id,
+                "trace.human_gate_resolved",
+                {
+                    "gate_ref": request.approval_ref,
+                    "approved": request.approved,
+                },
+            )
 
     def get_health(self) -> dict[str, Any]:
         """Return a liveness health status for this kernel instance.
@@ -977,6 +1107,16 @@ class KernelFacade:
 
         """
         import datetime
+
+        # Rebuild local registries from event log on cold start (no local
+        # state for this run yet).  This enables cross-instance consistency.
+        has_local = (
+            run_id in self._branch_registry
+            or run_id in self._stage_registry
+            or run_id in self._open_human_gates
+        )
+        if not has_local:
+            await self._rebuild_trace_state_from_events(run_id)
 
         response = await self.query_run(QueryRunRequest(run_id=run_id))
         # Map kernel lifecycle state to TRACE run state.
@@ -1293,6 +1433,16 @@ class KernelFacade:
                 caused_by="kernel_facade.open_stage",
             )
         )
+        await self._append_trace_event(
+            run_id,
+            "trace.stage_opened",
+            {
+                "stage_id": stage_id,
+                "state": "active",
+                "entered_at": view.entered_at,
+                "branch_id": branch_id,
+            },
+        )
 
     async def mark_stage_state(
         self,
@@ -1347,6 +1497,16 @@ class KernelFacade:
                 caused_by="kernel_facade.mark_stage_state",
             )
         )
+        await self._append_trace_event(
+            run_id,
+            "trace.stage_state_changed",
+            {
+                "stage_id": stage_id,
+                "new_state": new_state,
+                "exited_at": exited_at,
+                "failure_code": failure_code,
+            },
+        )
 
     async def open_branch(self, request: OpenBranchRequest) -> None:
         """Open a new trajectory branch within a run.
@@ -1383,6 +1543,18 @@ class KernelFacade:
                 },
                 caused_by="kernel_facade.open_branch",
             )
+        )
+        await self._append_trace_event(
+            request.run_id,
+            "trace.branch_opened",
+            {
+                "branch_id": request.branch_id,
+                "stage_id": request.stage_id,
+                "state": "active",
+                "opened_at": view.opened_at,
+                "parent_branch_id": request.parent_branch_id,
+                "proposed_by": request.proposed_by,
+            },
         )
 
     async def mark_branch_state(self, request: BranchStateUpdateRequest) -> None:
@@ -1429,6 +1601,15 @@ class KernelFacade:
                 caused_by="kernel_facade.mark_branch_state",
             )
         )
+        await self._append_trace_event(
+            request.run_id,
+            "trace.branch_state_changed",
+            {
+                "branch_id": request.branch_id,
+                "new_state": request.new_state,
+                "failure_code": (request.failure_code.value if request.failure_code else None),
+            },
+        )
 
     async def open_human_gate(self, request: HumanGateRequest) -> None:
         """Open a human review gate within a run.
@@ -1460,6 +1641,14 @@ class KernelFacade:
                 },
                 caused_by="kernel_facade.open_human_gate",
             )
+        )
+        await self._append_trace_event(
+            request.run_id,
+            "trace.human_gate_opened",
+            {
+                "gate_ref": request.gate_ref,
+                "gate_type": request.gate_type,
+            },
         )
 
     def get_action_state(self, dispatch_idempotency_key: str) -> str | None:

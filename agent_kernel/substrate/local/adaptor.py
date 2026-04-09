@@ -183,16 +183,21 @@ class LocalWorkflowGateway:
         self,
         deps: RunActorDependencyBundle,
         workflow_id_prefix: str = "run",
+        max_cache_size: int = 5000,
     ) -> None:
         """Initialise the gateway with kernel deps and optional prefix.
 
         Args:
             deps: Kernel dependency bundle (shared with adaptor).
             workflow_id_prefix: Prefix for workflow id construction.
+            max_cache_size: Maximum number of entries in the execute-turn
+                idempotency cache.  Oldest entries are evicted when the
+                limit is exceeded.
 
         """
         self._deps = deps
         self._workflow_id_prefix = workflow_id_prefix
+        self._max_cache_size = max_cache_size
         self._workflows: dict[str, RunActorWorkflow] = {}
         self._run_tasks: dict[str, asyncio.Task[Any]] = {}
         self._execute_turn_cache: dict[str, Any] = {}
@@ -273,6 +278,9 @@ class LocalWorkflowGateway:
             action_commit={"output": output},
         )
         self._execute_turn_cache[idempotency_key] = result
+        if len(self._execute_turn_cache) > self._max_cache_size:
+            oldest = next(iter(self._execute_turn_cache))
+            self._execute_turn_cache.pop(oldest)
         _logger.debug(
             "LocalWorkflowGateway.execute_turn: run_id=%s key=%s",
             run_id,
