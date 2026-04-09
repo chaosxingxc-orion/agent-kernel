@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agent_kernel.adapters.facade.kernel_facade import KernelFacade
-from agent_kernel.kernel.contracts import Action
+from agent_kernel.kernel.contracts import Action, EffectClass
 from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
 from agent_kernel.kernel.minimal_runtime import (
     AsyncExecutorService,
@@ -53,7 +53,7 @@ async def test_facade_execute_turn_returns_dispatched() -> None:
         action_id="act-001",
         run_id="run-001",
         action_type="trace_stage",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         input_json={"node_id": "S1"},
     )
 
@@ -80,7 +80,7 @@ async def test_facade_execute_turn_idempotent() -> None:
         action_id="act-002",
         run_id="run-002",
         action_type="trace_stage",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         input_json={},
     )
 

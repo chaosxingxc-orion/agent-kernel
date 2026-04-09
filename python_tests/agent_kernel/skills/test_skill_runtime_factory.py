@@ -6,6 +6,7 @@ import asyncio
 
 import pytest
 
+from agent_kernel.kernel.contracts import EffectClass
 from agent_kernel.skills.contracts import SkillDefinition, SkillRequest
 from agent_kernel.skills.runtime_factory import DefaultSkillRuntimeFactory
 
@@ -15,7 +16,7 @@ def _build_skill_definition() -> SkillDefinition:
         skill_id="skill.search",
         version="1.0.0",
         skill_kind="tool",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         input_schema_ref="schema://input",
         output_schema_ref="schema://output",
     )

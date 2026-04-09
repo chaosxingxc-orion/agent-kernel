@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent_kernel.kernel.contracts import Action
+from agent_kernel.kernel.contracts import Action, EffectClass
 from agent_kernel.kernel.idempotency_key_policy import IdempotencyKeyPolicy
 
 
@@ -15,7 +15,7 @@ def _action(
         action_id=action_id,
         run_id="run-1",
         action_type="tool_call",
-        effect_class="idempotent_write",
+        effect_class=EffectClass.IDEMPOTENT_WRITE,
         input_json=payload or {"x": 1},
         policy_tags=["tag-a"],
     )

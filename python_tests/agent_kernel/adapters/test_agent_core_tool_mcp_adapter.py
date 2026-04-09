@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass
 
 from agent_kernel.adapters.agent_core.tool_mcp_adapter import AgentCoreToolMCPAdapter
-from agent_kernel.kernel.contracts import Action
+from agent_kernel.kernel.contracts import Action, EffectClass
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,7 +25,7 @@ def _make_action(input_json: dict | None = None) -> Action:
         action_id="action-1",
         run_id="run-1",
         action_type="default_action",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         input_json=input_json,
     )
 

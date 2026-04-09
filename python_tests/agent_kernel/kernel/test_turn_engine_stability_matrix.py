@@ -12,7 +12,7 @@ from agent_kernel.kernel.capability_snapshot import (
     CapabilitySnapshot,
     CapabilitySnapshotBuildError,
 )
-from agent_kernel.kernel.contracts import Action
+from agent_kernel.kernel.contracts import Action, EffectClass
 from agent_kernel.kernel.dedupe_store import IdempotencyEnvelope, InMemoryDedupeStore
 from agent_kernel.kernel.turn_engine import TurnEngine, TurnInput
 
@@ -68,7 +68,7 @@ def _action(seed: int) -> Action:
         action_id=f"a-{seed}",
         run_id="run-matrix",
         action_type="tool.search",
-        effect_class="idempotent_write",
+        effect_class=EffectClass.IDEMPOTENT_WRITE,
         input_json={"query": f"q-{seed}"},
     )
 

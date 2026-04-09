@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from agent_kernel.kernel.contracts import Action, ActionCommit, RuntimeEvent
+from agent_kernel.kernel.contracts import Action, ActionCommit, EffectClass, RuntimeEvent
 
 # ---------------------------------------------------------------------------
 # Minimal mock OTel tracer infrastructure (no sdk dependency)
@@ -102,7 +102,7 @@ def _make_event(
 
 def _make_action(
     run_id: str,
-    effect_class: str = "idempotent_write",
+    effect_class: str = EffectClass.IDEMPOTENT_WRITE,
     action_type: str = "tool_call",
     interaction_target: str | None = None,
 ) -> Action:
@@ -188,7 +188,9 @@ class TestOTLPRunTraceExporter:
 
     def test_span_attributes_include_action_fields(self) -> None:
         exporter, tracer = _make_exporter()
-        action = _make_action("run-4", effect_class="compensatable_write", action_type="file_write")
+        action = _make_action(
+            "run-4", effect_class=EffectClass.COMPENSATABLE_WRITE, action_type="file_write"
+        )
         commit = _make_commit("run-4", action=action)
         asyncio.run(exporter.export_commit(commit))
         attrs = tracer.spans[0].attributes

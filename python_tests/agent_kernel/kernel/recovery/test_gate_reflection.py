@@ -11,6 +11,7 @@ from agent_kernel.kernel.cognitive.output_parser import ToolCallOutputParser
 from agent_kernel.kernel.contracts import (
     Action,
     ContextWindow,
+    EffectClass,
     InferenceConfig,
     RecoveryDecision,
     RecoveryInput,
@@ -378,7 +379,7 @@ class TestRecoveryDecisionBackwardCompatibility:
             action_id="act-corrected",
             run_id="run-1",
             action_type="corrected",
-            effect_class="read_only",
+            effect_class=EffectClass.READ_ONLY,
         )
         decision = RecoveryDecision(
             run_id="run-1",

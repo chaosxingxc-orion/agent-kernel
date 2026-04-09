@@ -29,12 +29,17 @@ RunLifecycleState = Literal[
     "failed",
     "aborted",
 ]
-EffectClass = Literal[
-    "read_only",
-    "idempotent_write",
-    "compensatable_write",
-    "irreversible_write",
-]
+
+
+class EffectClass(StrEnum):
+    """Classification of an action's effect on external state."""
+
+    READ_ONLY = "read_only"
+    IDEMPOTENT_WRITE = "idempotent_write"
+    COMPENSATABLE_WRITE = "compensatable_write"
+    IRREVERSIBLE_WRITE = "irreversible_write"
+
+
 ExternalIdempotencyLevel = Literal["guaranteed", "best_effort", "unknown"]
 RecoveryMode = Literal["static_compensation", "human_escalation", "abort", "reflect_and_retry"]
 CancellationPolicy = Literal["abandon", "compensate_then_continue"]
@@ -48,12 +53,14 @@ InteractionTarget = Literal[
     "event_stream",  # Kafka, Redis Streams, pub/sub, message queue
 ]
 
-SideEffectClass = Literal[
-    "read_only",
-    "local_write",
-    "external_write",
-    "irreversible_submit",
-]
+
+class SideEffectClass(StrEnum):
+    """Classification of an action's side-effect scope."""
+
+    READ_ONLY = "read_only"
+    LOCAL_WRITE = "local_write"
+    EXTERNAL_WRITE = "external_write"
+    IRREVERSIBLE_SUBMIT = "irreversible_submit"
 
 
 @dataclass(frozen=True, slots=True)
@@ -494,6 +501,11 @@ class TraceFailureCode(StrEnum):
     """CTS exploration budget 鈥?hi-agent decides, kernel reports the signal."""
     EXECUTION_BUDGET_EXHAUSTED = "execution_budget_exhausted"
     """Kernel-owned execution/runtime/timeout budget 鈥?kernel reports directly."""
+
+    @classmethod
+    def is_budget_exhausted(cls, code: TraceFailureCode) -> bool:
+        """Return True for any budget-exhaustion failure code."""
+        return code in (cls.EXPLORATION_BUDGET_EXHAUSTED, cls.EXECUTION_BUDGET_EXHAUSTED)
 
 
 @dataclass(frozen=True, slots=True)

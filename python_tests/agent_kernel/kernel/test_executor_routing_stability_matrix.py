@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from agent_kernel.kernel.contracts import Action, MCPActivityInput, ToolActivityInput
+from agent_kernel.kernel.contracts import Action, EffectClass, MCPActivityInput, ToolActivityInput
 from agent_kernel.kernel.minimal_runtime import ActivityBackedExecutorService
 
 _CASE_COUNT = 1000
@@ -34,7 +34,7 @@ def _action_for(seed: int) -> Action:
             action_id=f"a-{seed}",
             run_id=f"r-{seed}",
             action_type="mcp.query",
-            effect_class="read_only",
+            effect_class=EffectClass.READ_ONLY,
             input_json={},
         )
     if seed % 3 == 1:
@@ -42,7 +42,7 @@ def _action_for(seed: int) -> Action:
             action_id=f"a-{seed}",
             run_id=f"r-{seed}",
             action_type="tool.search",
-            effect_class="read_only",
+            effect_class=EffectClass.READ_ONLY,
             input_json={
                 "mcp": {
                     "server_name": "alpha",
@@ -54,7 +54,7 @@ def _action_for(seed: int) -> Action:
         action_id=f"a-{seed}",
         run_id=f"r-{seed}",
         action_type="tool.search",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         input_json={"query": f"q-{seed}"},
     )
 

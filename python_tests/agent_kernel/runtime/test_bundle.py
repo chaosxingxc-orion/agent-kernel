@@ -10,6 +10,7 @@ from typing import Any
 from agent_kernel.adapters.agent_core.session_adapter import AgentCoreCallbackInput
 from agent_kernel.kernel.contracts import (
     Action,
+    EffectClass,
     MCPActivityInput,
     RecoveryInput,
     RunProjection,
@@ -361,7 +362,7 @@ def test_bundle_enables_activity_backed_executor_and_uses_injected_gateway() -> 
                 action_id="action-tool-bundle-1",
                 run_id="run-bundle-1",
                 action_type="web_research",
-                effect_class="read_only",
+                effect_class=EffectClass.READ_ONLY,
                 input_json={"tool_name": "web.search", "arguments": {"q": "bundle"}},
             )
         )
@@ -372,7 +373,7 @@ def test_bundle_enables_activity_backed_executor_and_uses_injected_gateway() -> 
                 action_id="action-mcp-bundle-1",
                 run_id="run-bundle-1",
                 action_type="web_research",
-                effect_class="read_only",
+                effect_class=EffectClass.READ_ONLY,
                 input_json={"mcp": {"server_name": "docs", "operation": "fetch"}},
             )
         )
@@ -412,7 +413,7 @@ def test_bundle_builds_activity_gateway_from_handler_maps_and_routes() -> None:
                 action_id="action-tool-bundle-2",
                 run_id="run-bundle-2",
                 action_type="web_research",
-                effect_class="read_only",
+                effect_class=EffectClass.READ_ONLY,
                 input_json={"tool_name": "web.search", "arguments": {"q": "bundle"}},
             )
         )
@@ -423,7 +424,7 @@ def test_bundle_builds_activity_gateway_from_handler_maps_and_routes() -> None:
                 action_id="action-mcp-bundle-2",
                 run_id="run-bundle-2",
                 action_type="web_research",
-                effect_class="read_only",
+                effect_class=EffectClass.READ_ONLY,
                 input_json={"mcp": {"server_name": "docs", "operation": "fetch"}},
             )
         )

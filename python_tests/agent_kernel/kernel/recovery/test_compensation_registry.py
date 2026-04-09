@@ -10,6 +10,7 @@ import pytest
 
 from agent_kernel.kernel.contracts import (
     Action,
+    EffectClass,
     RecoveryInput,
     RunProjection,
 )
@@ -24,7 +25,7 @@ from agent_kernel.kernel.recovery.gate import PlannedRecoveryGateService
 # ---------------------------------------------------------------------------
 
 
-def _make_action(effect_class: str = "compensatable_write") -> Action:
+def _make_action(effect_class: str = EffectClass.COMPENSATABLE_WRITE) -> Action:
     return Action(
         action_id="act-1",
         run_id="run-1",

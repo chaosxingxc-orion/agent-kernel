@@ -13,6 +13,7 @@ import agent_kernel.substrate.temporal.run_actor_workflow as run_actor_workflow_
 from agent_kernel.kernel.contracts import (
     Action,
     ActionCommit,
+    EffectClass,
     FailureEnvelope,
     RecoveryDecision,
     RunProjection,
@@ -88,7 +89,7 @@ def make_commit(
             action_id="action-1",
             run_id="run-1",
             action_type="web_research",
-            effect_class="read_only",
+            effect_class=EffectClass.READ_ONLY,
             input_json=input_json,
         ),
         events=[
@@ -135,7 +136,7 @@ def make_remote_service_commit(
             action_id=f"action-remote-{offset}",
             run_id="run-1",
             action_type="web_research",
-            effect_class="idempotent_write",
+            effect_class=EffectClass.IDEMPOTENT_WRITE,
             external_idempotency_level="guaranteed",
             input_json=input_json,
         ),

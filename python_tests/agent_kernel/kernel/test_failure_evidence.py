@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from agent_kernel.kernel.capability_snapshot import CapabilitySnapshot
-from agent_kernel.kernel.contracts import Action, FailureEnvelope
+from agent_kernel.kernel.contracts import Action, EffectClass, FailureEnvelope
 from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
 from agent_kernel.kernel.failure_evidence import resolve_failure_evidence
 from agent_kernel.kernel.turn_engine import TurnEngine, TurnInput
@@ -59,7 +59,7 @@ def _action() -> Action:
         action_id="action-1",
         run_id="run-1",
         action_type="tool.search",
-        effect_class="idempotent_write",
+        effect_class=EffectClass.IDEMPOTENT_WRITE,
         input_json={"query": "kernel precedence"},
     )
 

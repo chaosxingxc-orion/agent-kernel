@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock
 
-from agent_kernel.kernel.contracts import Action, ActionCommit, RuntimeEvent
+from agent_kernel.kernel.contracts import Action, ActionCommit, EffectClass, RuntimeEvent
 from agent_kernel.kernel.event_export import (
     EventExportingEventLog,
     InMemoryRunTraceStore,
@@ -60,7 +60,7 @@ def _make_action(run_id: str, action_type: str = "tool_call") -> Action:
         action_id=f"act-{uuid.uuid4().hex[:8]}",
         run_id=run_id,
         action_type=action_type,
-        effect_class="idempotent_write",
+        effect_class=EffectClass.IDEMPOTENT_WRITE,
     )
 
 

@@ -11,7 +11,7 @@ from agent_kernel.kernel.capability_snapshot import (
 from agent_kernel.kernel.cognitive.context_port import InMemoryContextPort
 from agent_kernel.kernel.cognitive.llm_gateway import EchoLLMGateway
 from agent_kernel.kernel.cognitive.output_parser import ToolCallOutputParser
-from agent_kernel.kernel.contracts import Action, InferenceConfig
+from agent_kernel.kernel.contracts import Action, EffectClass, InferenceConfig
 from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
 from agent_kernel.kernel.minimal_runtime import (
     StaticDispatchAdmissionService,
@@ -50,7 +50,7 @@ def _make_action(run_id: str = "run-1") -> Action:
         action_id="act-1",
         run_id=run_id,
         action_type="test_action",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
     )
 
 

@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from agent_kernel.kernel.contracts import Action, RunProjection
+from agent_kernel.kernel.contracts import Action, EffectClass, RunProjection
 from agent_kernel.kernel.minimal_runtime import StaticDispatchAdmissionService
 
 _CASE_COUNT = 1000
@@ -29,7 +29,7 @@ def _action_for(seed: int) -> Action:
     timeout_ms: int | None = None
     input_json: dict[str, object] | None = {"estimated_cost": float(seed % 9)}
     external_level: str | None = None
-    effect_class = "read_only"
+    effect_class = EffectClass.READ_ONLY
 
     if seed % 13 == 0:
         policy_tags.append("requires_human_review")
@@ -38,7 +38,7 @@ def _action_for(seed: int) -> Action:
     if seed % 19 == 0:
         policy_tags.append("max_cost:2")
     if seed % 23 == 0:
-        effect_class = "idempotent_write"
+        effect_class = EffectClass.IDEMPOTENT_WRITE
         external_level = "guaranteed"
         input_json = {"remote_service": {"idempotency_contract": {"returns_stable_ack": False}}}
 

@@ -29,7 +29,7 @@ _LOG = logging.getLogger(__name__)
 # Default effect class for unknown tool names
 # ---------------------------------------------------------------------------
 
-_DEFAULT_EFFECT_CLASS: EffectClass = "read_only"
+_DEFAULT_EFFECT_CLASS: EffectClass = EffectClass.READ_ONLY
 
 # ---------------------------------------------------------------------------
 # ToolCallOutputParser
@@ -123,9 +123,7 @@ class ToolCallOutputParser:
 # JSONModeOutputParser
 # ---------------------------------------------------------------------------
 
-_VALID_EFFECT_CLASSES: frozenset[str] = frozenset(
-    ["read_only", "idempotent_write", "compensatable_write", "irreversible_write"]
-)
+_VALID_EFFECT_CLASSES: frozenset[str] = frozenset(EffectClass)
 
 _VALID_INTERACTION_TARGETS: frozenset[str] = frozenset(
     [

@@ -19,7 +19,7 @@ from agent_kernel.adapters.agent_core.session_adapter import (
     AgentCoreSessionAdapter,
 )
 from agent_kernel.adapters.agent_core.tool_mcp_adapter import AgentCoreToolMCPAdapter
-from agent_kernel.kernel.contracts import Action, RunProjection
+from agent_kernel.kernel.contracts import Action, EffectClass, RunProjection
 
 
 def test_runner_adapter_maps_runner_request_without_inventing_kernel_truth() -> None:
@@ -191,7 +191,7 @@ def test_tool_mcp_adapter_exposes_capability_adapter_methods() -> None:
         action_id="action-1",
         run_id="run-1",
         action_type="tool.search",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         input_json={
             "tool_name": "search",
             "mcp": {"server_name": "docs", "capability_id": "query"},

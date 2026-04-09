@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_kernel.kernel.contracts import Action
+from agent_kernel.kernel.contracts import Action, EffectClass
 from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
 from agent_kernel.kernel.minimal_runtime import (
     AsyncExecutorService,
@@ -42,7 +42,7 @@ def _make_action(run_id: str = "run-001", action_id: str = "act-001") -> Action:
         action_id=action_id,
         run_id=run_id,
         action_type="trace_stage",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         input_json={"node_id": "S1"},
     )
 

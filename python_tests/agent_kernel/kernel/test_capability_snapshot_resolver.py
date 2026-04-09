@@ -8,7 +8,7 @@ from agent_kernel.kernel.capability_snapshot import CapabilitySnapshotBuildError
 from agent_kernel.kernel.capability_snapshot_resolver import (
     ActionPayloadCapabilitySnapshotInputResolver,
 )
-from agent_kernel.kernel.contracts import Action
+from agent_kernel.kernel.contracts import Action, EffectClass
 from agent_kernel.kernel.turn_engine import TurnInput
 
 
@@ -29,7 +29,7 @@ def test_resolver_uses_structured_payload_and_applies_source_priority() -> None:
         action_id="action-1",
         run_id="run-1",
         action_type="tool.search",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         input_json={
             "capability_snapshot_input": {
                 "tenant_policy_ref": "flat-policy",
@@ -75,7 +75,7 @@ def test_resolver_falls_back_to_defaults_when_payload_missing() -> None:
         action_id="action-2",
         run_id="run-1",
         action_type="tool.search",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         input_json={"query": "hello"},
     )
 
@@ -93,7 +93,7 @@ def test_resolver_strict_mode_requires_declared_snapshot_payload() -> None:
         action_id="action-strict-missing-payload",
         run_id="run-1",
         action_type="tool.search",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         input_json={"query": "hello"},
     )
 
@@ -111,7 +111,7 @@ def test_resolver_strict_mode_requires_declarative_bundle_digest() -> None:
         action_id="action-strict-missing-digest",
         run_id="run-1",
         action_type="tool.search",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         input_json={
             "capability_snapshot_input": {
                 "tenant_policy_ref": "policy:v1",
@@ -134,7 +134,7 @@ def test_resolver_raises_when_declarative_bundle_digest_is_partial() -> None:
         action_id="action-partial-digest",
         run_id="run-1",
         action_type="tool.search",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         input_json={
             "capability_snapshot_input": {
                 "tenant_policy_ref": "policy:v1",

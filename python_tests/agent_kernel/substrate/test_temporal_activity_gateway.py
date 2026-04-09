@@ -12,6 +12,7 @@ from agent_kernel.kernel.contracts import (
     Action,
     AdmissionActivityInput,
     AdmissionResult,
+    EffectClass,
     MCPActivityInput,
     ReconciliationActivityInput,
     RunProjection,
@@ -39,7 +40,7 @@ def _make_action() -> Action:
         action_id="action-1",
         run_id="run-1",
         action_type="tool",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
     )
 
 

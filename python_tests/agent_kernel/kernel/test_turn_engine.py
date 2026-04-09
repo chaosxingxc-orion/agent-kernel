@@ -10,7 +10,7 @@ from agent_kernel.kernel.capability_snapshot import (
     CapabilitySnapshot,
     CapabilitySnapshotBuildError,
 )
-from agent_kernel.kernel.contracts import Action, ExecutionContext
+from agent_kernel.kernel.contracts import Action, EffectClass, ExecutionContext
 from agent_kernel.kernel.dedupe_store import (
     DedupeReservation,
     DedupeStorePort,
@@ -139,7 +139,7 @@ class _FailingReserveDedupeStore(DedupeStorePort):
 
 
 def _build_action(
-    effect_class: str = "idempotent_write",
+    effect_class: str = EffectClass.IDEMPOTENT_WRITE,
     *,
     external_idempotency_level: str | None = None,
     input_json: dict[str, Any] | None = None,

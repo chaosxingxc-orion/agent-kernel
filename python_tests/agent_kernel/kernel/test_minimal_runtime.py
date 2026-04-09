@@ -11,6 +11,7 @@ import pytest
 from agent_kernel.kernel.contracts import (
     Action,
     ActionCommit,
+    EffectClass,
     MCPActivityInput,
     RecoveryInput,
     RecoveryOutcome,
@@ -156,7 +157,7 @@ def test_admission_enforces_dispatch_readiness() -> None:
         action_id="action-1",
         run_id="run-3",
         action_type="web_research",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
     )
 
     non_ready_projection = asyncio.run(projection_service.get("run-3"))
@@ -184,7 +185,7 @@ def test_admission_denies_requires_human_review_policy_tag() -> None:
         action_id="action-1b",
         run_id="run-3b",
         action_type="web_research",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         policy_tags=["requires_human_review"],
     )
 
@@ -205,7 +206,7 @@ def test_admission_denies_timeout_over_five_minutes() -> None:
         action_id="action-1c",
         run_id="run-3c",
         action_type="web_research",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         timeout_ms=300001,
     )
 
@@ -226,7 +227,7 @@ def test_admission_denies_when_estimated_cost_exceeds_max_cost_tag() -> None:
         action_id="action-1d",
         run_id="run-3d",
         action_type="web_research",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         policy_tags=["max_cost:10"],
         input_json={"estimated_cost": 11},
     )
@@ -248,7 +249,7 @@ def test_admission_allows_when_estimated_cost_within_max_cost_tag() -> None:
         action_id="action-1e",
         run_id="run-3e",
         action_type="web_research",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         policy_tags=["max_cost:10"],
         input_json={"estimated_cost": 10},
     )
@@ -270,7 +271,7 @@ def test_admission_ignores_invalid_quota_inputs_and_keeps_existing_decision() ->
         action_id="action-1f",
         run_id="run-3f",
         action_type="web_research",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
         policy_tags=["max_cost:not-a-number"],
         input_json={"estimated_cost": "unknown"},
     )
@@ -292,7 +293,7 @@ def test_admission_denies_remote_service_guaranteed_when_contract_missing() -> N
         action_id="action-1g",
         run_id="run-3g",
         action_type="remote.write",
-        effect_class="idempotent_write",
+        effect_class=EffectClass.IDEMPOTENT_WRITE,
         external_idempotency_level="guaranteed",
         input_json={"host_kind": "remote_service"},
     )
@@ -314,7 +315,7 @@ def test_admission_denies_remote_service_guaranteed_when_contract_is_insufficien
         action_id="action-1h",
         run_id="run-3h",
         action_type="remote.write",
-        effect_class="idempotent_write",
+        effect_class=EffectClass.IDEMPOTENT_WRITE,
         external_idempotency_level="guaranteed",
         input_json={
             "host_kind": "remote_service",
@@ -344,7 +345,7 @@ def test_admission_allows_remote_service_guaranteed_when_contract_is_verified() 
         action_id="action-1i",
         run_id="run-3i",
         action_type="remote.write",
-        effect_class="idempotent_write",
+        effect_class=EffectClass.IDEMPOTENT_WRITE,
         external_idempotency_level="guaranteed",
         input_json={
             "host_kind": "remote_service",
@@ -375,7 +376,7 @@ def test_admission_keeps_explicit_local_hosts_unaffected_by_remote_guard() -> No
         action_id="action-1j",
         run_id="run-3j",
         action_type="local.write",
-        effect_class="idempotent_write",
+        effect_class=EffectClass.IDEMPOTENT_WRITE,
         external_idempotency_level="guaranteed",
         policy_tags=["host:local_process"],
     )
@@ -385,7 +386,7 @@ def test_admission_keeps_explicit_local_hosts_unaffected_by_remote_guard() -> No
         action_id="action-1k",
         run_id="run-3j",
         action_type="local.write",
-        effect_class="idempotent_write",
+        effect_class=EffectClass.IDEMPOTENT_WRITE,
         external_idempotency_level="guaranteed",
         policy_tags=["host:local_cli"],
     )
@@ -409,7 +410,7 @@ def test_executor_recovery_and_deduper_minimal_behaviors() -> None:
         action_id="action-2",
         run_id="run-4",
         action_type="inspect",
-        effect_class="read_only",
+        effect_class=EffectClass.READ_ONLY,
     )
     execute_result = asyncio.run(executor.execute(action, grant_ref="grant-2"))
     assert execute_result["action_id"] == "action-2"
@@ -480,7 +481,7 @@ def test_activity_backed_executor_routes_default_action_to_tool_gateway() -> Non
                 action_id="action-tool-1",
                 run_id="run-tool-1",
                 action_type="web_research",
-                effect_class="read_only",
+                effect_class=EffectClass.READ_ONLY,
                 input_json={
                     "tool_name": "web.search",
                     "arguments": {"q": "kernel"},
@@ -508,7 +509,7 @@ def test_activity_backed_executor_routes_input_json_mcp_payload_to_mcp_gateway()
                 action_id="action-mcp-1",
                 run_id="run-mcp-1",
                 action_type="web_research",
-                effect_class="read_only",
+                effect_class=EffectClass.READ_ONLY,
                 input_json={
                     "mcp": {
                         "server_name": "docs",
@@ -595,7 +596,7 @@ def test_run_actor_workflow_accepts_legacy_executor_result_without_fact_events()
             action_id="action-legacy-1",
             run_id="run-5b",
             action_type="inspect",
-            effect_class="read_only",
+            effect_class=EffectClass.READ_ONLY,
             input_json=_strict_snapshot_input_payload(),
         ),
         events=[
@@ -1328,7 +1329,7 @@ def test_workflow_failure_emits_recovery_event_and_updates_projection_reason() -
             action_id="action-fail-1",
             run_id="run-11",
             action_type="web_research",
-            effect_class="read_only",
+            effect_class=EffectClass.READ_ONLY,
             input_json={
                 "query": "failure path",
                 **_strict_snapshot_input_payload(),
