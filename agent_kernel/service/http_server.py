@@ -440,6 +440,13 @@ async def get_action_state(request: Request) -> JSONResponse:
     return JSONResponse({"state": state})
 
 
+async def get_openapi(request: Request) -> JSONResponse:
+    """GET /openapi.json — OpenAPI specification."""
+    from agent_kernel.service.openapi import generate_openapi_spec
+
+    return JSONResponse(generate_openapi_spec())
+
+
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
@@ -529,6 +536,8 @@ def create_app(
         Route("/actions/{key}/state", get_action_state, methods=["GET"]),
         # Metrics
         Route("/metrics", get_metrics, methods=["GET"]),
+        # OpenAPI spec
+        Route("/openapi.json", get_openapi, methods=["GET"]),
     ]
     app = Starlette(routes=routes)
     app.state.facade = facade

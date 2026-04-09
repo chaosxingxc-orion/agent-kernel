@@ -19,8 +19,10 @@ pg = ["asyncpg>=0.30"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
     "ruff>=0.4",
     "pylint>=3.2",
+    "pyright>=1.1",
 ]
 
 [tool.hatch.build]
@@ -82,3 +84,12 @@ disable = [
   "too-many-locals",
   "too-many-return-statements",
 ]
+
+[tool.pyright]
+pythonVersion = "3.12"
+pythonPlatform = "All"
+typeCheckingMode = "basic"
+include = ["agent_kernel"]
+exclude = ["python_tests", "external"]
+reportMissingImports = "warning"
+reportMissingTypeStubs = false
