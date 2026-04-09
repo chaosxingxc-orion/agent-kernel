@@ -20,6 +20,7 @@ from agent_kernel.kernel.dedupe_store import (
 from agent_kernel.kernel.idempotency_key_policy import IdempotencyKeyPolicy
 from agent_kernel.kernel.turn_engine import (
     TurnEngine,
+    TurnEngineDefaults,
     TurnInput,
 )
 
@@ -698,3 +699,42 @@ class TestTurnEngineDispatchTableExtensibility:
         )
         result = asyncio.run(engine.run_turn(_build_turn_input(), _build_action()))
         assert result.outcome_kind == "blocked"
+
+
+# ---------------------------------------------------------------------------
+# TurnEngineDefaults injection
+# ---------------------------------------------------------------------------
+
+
+def test_turn_engine_uses_default_defaults() -> None:
+    """TurnEngine without explicit defaults uses TurnEngineDefaults()."""
+    engine = TurnEngine(
+        snapshot_builder=_StubSnapshotBuilder(),
+        admission_service=_StubAdmissionService(admitted=True),
+        dedupe_store=InMemoryDedupeStore(),
+        executor=_StubExecutor(result={"acknowledged": True}),
+    )
+    assert engine._defaults == TurnEngineDefaults()
+    assert engine._defaults.model_ref == "echo"
+    assert engine._defaults.tenant_policy_ref == "policy:default"
+    assert engine._defaults.permission_mode == "strict"
+
+
+def test_turn_engine_uses_custom_defaults() -> None:
+    """TurnEngine with custom TurnEngineDefaults stores them correctly."""
+    custom = TurnEngineDefaults(
+        model_ref="gpt-4o",
+        tenant_policy_ref="policy:enterprise",
+        permission_mode="permissive",
+    )
+    engine = TurnEngine(
+        snapshot_builder=_StubSnapshotBuilder(),
+        admission_service=_StubAdmissionService(admitted=True),
+        dedupe_store=InMemoryDedupeStore(),
+        executor=_StubExecutor(result={"acknowledged": True}),
+        defaults=custom,
+    )
+    assert engine._defaults is custom
+    assert engine._defaults.model_ref == "gpt-4o"
+    assert engine._defaults.tenant_policy_ref == "policy:enterprise"
+    assert engine._defaults.permission_mode == "permissive"

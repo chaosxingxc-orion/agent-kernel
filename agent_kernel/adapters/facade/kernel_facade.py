@@ -129,6 +129,7 @@ class KernelFacade:
         task_view_log: Any | None = None,
         dedupe_store: Any | None = None,
         drain_coordinator: Any | None = None,
+        max_tracked_runs: int = 10_000,
     ) -> None:
         """Initialize facade with substrate gateway and optional adapters.
 
@@ -157,6 +158,10 @@ class KernelFacade:
                 When ``None``, ``get_action_state()`` always returns ``None``.
             drain_coordinator: Optional in-flight tracking coordinator used for
                 graceful runtime draining.
+            max_tracked_runs: Upper bound on the number of distinct run_ids
+                tracked across in-memory registries.  When exceeded, the oldest
+                run_ids are evicted to prevent unbounded memory growth during
+                7x24 operation.  Defaults to ``10_000``.
 
         """
         self._workflow_gateway = workflow_gateway
@@ -191,6 +196,11 @@ class KernelFacade:
         self._open_human_gates: dict[str, set[str]] = {}
         self._resolved_human_gates: dict[str, set[str]] = {}
         self._human_gate_lock = threading.Lock()
+        # Bounded run tracking for memory-leak prevention.
+        self._max_tracked_runs = max_tracked_runs
+        self._tracked_run_order: list[str] = []
+        self._tracked_run_set: set[str] = set()
+        self._tracked_run_lock = threading.Lock()
 
     @property
     def is_draining(self) -> bool:
@@ -200,6 +210,77 @@ class KernelFacade:
     def set_draining(self, draining: bool) -> None:
         """Set draining mode for mutation request acceptance."""
         self._draining = draining
+
+    # ------------------------------------------------------------------
+    # Run lifecycle cleanup & bounded eviction
+    # ------------------------------------------------------------------
+
+    def _touch_run(self, run_id: str) -> None:
+        """Register *run_id* for tracking and evict oldest if over limit.
+
+        Thread-safe.  Only the first touch per run_id adds to the order
+        list; subsequent touches are no-ops.
+
+        Args:
+            run_id: Run identifier to track.
+
+        """
+        with self._tracked_run_lock:
+            if run_id in self._tracked_run_set:
+                return
+            self._tracked_run_set.add(run_id)
+            self._tracked_run_order.append(run_id)
+            while len(self._tracked_run_set) > self._max_tracked_runs:
+                self._evict_oldest_run()
+
+    def _evict_oldest_run(self) -> None:
+        """Evict the oldest tracked run_id from all registries.
+
+        Must be called while ``_tracked_run_lock`` is held.
+
+        """
+        if not self._tracked_run_order:
+            return
+        oldest = self._tracked_run_order.pop(0)
+        self._tracked_run_set.discard(oldest)
+        self._purge_run_state(oldest)
+
+    def _purge_run_state(self, run_id: str) -> None:
+        """Remove all in-memory state for *run_id* from the five registries.
+
+        Acquires each registry lock individually to avoid holding multiple
+        locks simultaneously.
+
+        Args:
+            run_id: Run identifier whose state should be purged.
+
+        """
+        with self._branch_lock:
+            self._branch_registry.pop(run_id, None)
+        with self._stage_lock:
+            self._stage_registry.pop(run_id, None)
+        with self._approvals_lock:
+            self._submitted_approvals = {k for k in self._submitted_approvals if k[0] != run_id}
+        with self._human_gate_lock:
+            self._open_human_gates.pop(run_id, None)
+            self._resolved_human_gates.pop(run_id, None)
+
+    def cleanup_completed_run(self, run_id: str) -> None:
+        """Remove ALL in-memory state for a completed run.
+
+        Should be called after a run reaches a terminal lifecycle state
+        (``completed``, ``failed``, ``cancelled``) to free memory.  Calling
+        with a non-existent *run_id* is a safe no-op.
+
+        Args:
+            run_id: Run identifier to clean up.
+
+        """
+        with self._tracked_run_lock:
+            self._tracked_run_set.discard(run_id)
+            with contextlib.suppress(ValueError):
+                self._tracked_run_order.remove(run_id)
+        self._purge_run_state(run_id)
 
     @asynccontextmanager
     async def _guard_write_operation(self, operation: str) -> Any:
@@ -727,6 +808,7 @@ class KernelFacade:
 
         """
         async with self._guard_write_operation("submit_approval"):
+            self._touch_run(request.run_id)
             dedup_key = (request.run_id, request.approval_ref)
             with self._approvals_lock:
                 if dedup_key in self._submitted_approvals:
@@ -1191,6 +1273,7 @@ class KernelFacade:
         """
         import datetime
 
+        self._touch_run(run_id)
         view = TraceStageView(
             stage_id=stage_id,
             state="active",  # type: ignore[arg-type]
@@ -1236,6 +1319,7 @@ class KernelFacade:
         import dataclasses
         import datetime
 
+        self._touch_run(run_id)
         with self._stage_lock:
             run_stages = self._stage_registry.get(run_id, {})
             existing = run_stages.get(stage_id)
@@ -1276,6 +1360,7 @@ class KernelFacade:
         """
         import datetime
 
+        self._touch_run(request.run_id)
         view = TraceBranchView(
             branch_id=request.branch_id,
             stage_id=request.stage_id,
@@ -1313,6 +1398,7 @@ class KernelFacade:
             KeyError: If the branch_id is not found for this run.
 
         """
+        self._touch_run(request.run_id)
         with self._branch_lock:
             run_branches = self._branch_registry.get(request.run_id, {})
             existing = run_branches.get(request.branch_id)
@@ -1355,6 +1441,7 @@ class KernelFacade:
             request: Human gate open request.
 
         """
+        self._touch_run(request.run_id)
         with self._human_gate_lock:
             self._open_human_gates.setdefault(request.run_id, set()).add(request.gate_ref)
         await self._workflow_gateway.signal_run(

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import TYPE_CHECKING, Any
 
 from starlette.applications import Starlette
@@ -23,6 +24,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from agent_kernel.kernel.contracts import QueryRunRequest
+from agent_kernel.service.auth_middleware import ApiKeyMiddleware
 from agent_kernel.service.serialization import (
     deserialize_approval,
     deserialize_branch_state_update,
@@ -422,11 +424,17 @@ async def get_action_state(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 
-def create_app(facade: KernelFacade) -> Starlette:
+def create_app(
+    facade: KernelFacade,
+    *,
+    api_key: str | None = None,
+) -> Starlette:
     """Create a Starlette ASGI app wrapping the given KernelFacade.
 
     Args:
         facade: The KernelFacade instance to expose via HTTP.
+        api_key: Optional API key for Bearer-token authentication.
+            When *None*, all endpoints are open (no auth).
 
     Returns:
         A Starlette application ready to be served by uvicorn.
@@ -497,6 +505,7 @@ def create_app(facade: KernelFacade) -> Starlette:
     ]
     app = Starlette(routes=routes)
     app.state.facade = facade
+    app = ApiKeyMiddleware(app, api_key=api_key)
     return app
 
 
@@ -536,4 +545,5 @@ def create_app_default() -> Starlette:
     )
     gateway = LocalWorkflowGateway(deps)
     facade = KernelFacade(workflow_gateway=gateway)
-    return create_app(facade)
+    api_key = os.environ.get("AGENT_KERNEL_API_KEY")
+    return create_app(facade, api_key=api_key)

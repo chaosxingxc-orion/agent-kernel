@@ -109,6 +109,19 @@ class TurnInput:
 
 
 @dataclass(frozen=True, slots=True)
+class TurnEngineDefaults:
+    """Configurable defaults for TurnEngine phases.
+
+    These values are injected at construction time rather than hardcoded,
+    allowing the platform layer to control policy decisions.
+    """
+
+    model_ref: str = "echo"
+    tenant_policy_ref: str = "policy:default"
+    permission_mode: str = "strict"
+
+
+@dataclass(frozen=True, slots=True)
 class TurnResult:
     """Represents deterministic result produced by one turn execution.
 
@@ -403,6 +416,7 @@ class TurnEngine:
         reasoning_loop: ReasoningLoop | None = None,
         observability_hook: Any | None = None,
         phase_timeout_ms: int | None = None,
+        defaults: TurnEngineDefaults | None = None,
     ) -> None:
         """Initialize TurnEngine with required service dependencies.
 
@@ -427,6 +441,9 @@ class TurnEngine:
                 caller so RunActorWorkflow can treat it as a recoverable
                 failure.  When ``None`` (default), no per-phase timeout is
                 applied.
+            defaults: Configurable defaults for business-policy values
+                used in turn phases.  When ``None``, uses built-in
+                ``TurnEngineDefaults()``.
 
         """
         self._snapshot_builder = snapshot_builder
@@ -440,6 +457,7 @@ class TurnEngine:
         self._phase_timeout_s: float | None = (
             phase_timeout_ms / 1000.0 if phase_timeout_ms is not None else None
         )
+        self._defaults = defaults or TurnEngineDefaults()
 
     async def run_turn(
         self,
@@ -524,7 +542,7 @@ class TurnEngine:
             )
             return
         ctx.emitted_events.append(TurnStateEvent(state="reasoning"))
-        inference_config = InferenceConfig(model_ref="echo")
+        inference_config = InferenceConfig(model_ref=self._defaults.model_ref)
         reasoning_idempotency_key = (
             f"{ctx.input_value.run_id}:{ctx.input_value.based_on_offset}:reasoning"
         )
@@ -535,8 +553,8 @@ class TurnEngine:
                     CapabilitySnapshotInput(
                         run_id=ctx.input_value.run_id,
                         based_on_offset=ctx.input_value.based_on_offset,
-                        tenant_policy_ref="policy:default",
-                        permission_mode="strict",
+                        tenant_policy_ref=self._defaults.tenant_policy_ref,
+                        permission_mode=self._defaults.permission_mode,
                     )
                 ),
                 history=list(ctx.input_value.history),
