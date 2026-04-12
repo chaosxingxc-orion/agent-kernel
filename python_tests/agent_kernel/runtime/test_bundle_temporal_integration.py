@@ -128,7 +128,7 @@ if TEMPORAL_AVAILABLE:
                 raw_expected_signals = input_json.get("expected_signals", 1)
             try:
                 expected_signals = max(1, int(raw_expected_signals))
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 expected_signals = 1
 
             await temporal_workflow.wait_condition(

@@ -1435,7 +1435,7 @@ class KernelFacade:
         )
         with self._stage_lock:
             self._stage_registry.setdefault(run_id, {})[stage_id] = view
-        await self._workflow_gateway.signal_run(
+        await self._workflow_gateway.signal_workflow(
             SignalRunRequest(
                 run_id=run_id,
                 signal_type="stage_opened",
@@ -1498,7 +1498,7 @@ class KernelFacade:
                 failure_code=failure_code if failure_code is not None else existing.failure_code,
             )
             run_stages[stage_id] = updated
-        await self._workflow_gateway.signal_run(
+        await self._workflow_gateway.signal_workflow(
             SignalRunRequest(
                 run_id=run_id,
                 signal_type="stage_state_updated",
@@ -1544,7 +1544,7 @@ class KernelFacade:
         )
         with self._branch_lock:
             self._branch_registry.setdefault(request.run_id, {})[request.branch_id] = view
-        await self._workflow_gateway.signal_run(
+        await self._workflow_gateway.signal_workflow(
             SignalRunRequest(
                 run_id=request.run_id,
                 signal_type="branch_opened",
@@ -1601,7 +1601,7 @@ class KernelFacade:
                 else existing.failure_code,
             )
             run_branches[request.branch_id] = updated
-        await self._workflow_gateway.signal_run(
+        await self._workflow_gateway.signal_workflow(
             SignalRunRequest(
                 run_id=request.run_id,
                 signal_type="branch_state_updated",
@@ -1638,7 +1638,7 @@ class KernelFacade:
         self._touch_run(request.run_id)
         with self._human_gate_lock:
             self._open_human_gates.setdefault(request.run_id, set()).add(request.gate_ref)
-        await self._workflow_gateway.signal_run(
+        await self._workflow_gateway.signal_workflow(
             SignalRunRequest(
                 run_id=request.run_id,
                 signal_type="human_gate_opened",

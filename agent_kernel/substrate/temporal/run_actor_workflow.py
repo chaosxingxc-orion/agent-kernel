@@ -426,7 +426,7 @@ class RunActorWorkflow:
         try:
             parent_handle = temporal_workflow.get_external_workflow_handle(parent_workflow_id)
             await parent_handle.signal("signal", child_signal_payload)
-        except TemporalError, RuntimeError:
+        except (TemporalError, RuntimeError):
             # Parent notification is best-effort; do not fail child completion.
             return
 
