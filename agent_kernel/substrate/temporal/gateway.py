@@ -348,12 +348,12 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         Args:
             run_id: Identifier of the target run.
             action: Kernel action DTO; must carry an ``action_type`` attribute.
-            _handler: Not used by this implementation. In ``LocalWorkflowGateway``,
-                this handler is called directly for in-process capability dispatch.
-                In ``TemporalSDKWorkflowGateway``, execution routes through
-                ``activity_gateway`` instead — the handler is never invoked.
-                A runtime warning is emitted when a non-None handler is passed,
-                to surface this divergence at call time.
+            _handler: Fallback handler for action types not natively supported by this
+                gateway (i.e., anything other than ``"tool_call"`` and ``"mcp_call"``).
+                When provided and the action type is unrecognised, the handler is called
+                as ``await _handler(action, None)``, preserving Local↔Temporal parity
+                for custom action types.  A ``logger.warning`` is still emitted when any
+                handler is passed, to make the routing path visible in logs.
             idempotency_key: Used as ``action_id`` when constructing activity
                 input DTOs.
 
@@ -397,13 +397,18 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
                     arguments=getattr(action, "arguments", {}),
                 )
             )
+        # For action types not natively routed through activity_gateway, fall back to
+        # the caller-provided handler (same dispatch path as LocalWorkflowGateway).
+        # This preserves Local↔Temporal behavioural parity for custom action types.
+        if _handler is not None:
+            return await _handler(action, None)
         raise ValueError(
             f"execute_turn: unsupported action_type={action_type!r}. "
             f"TemporalSDKWorkflowGateway routes only 'tool_call' (via execute_tool) "
             f"and 'mcp_call' (via execute_mcp) through activity_gateway. "
-            f"For other action types, register a dedicated Temporal activity and "
-            f"route it through activity_gateway, or use LocalWorkflowGateway for "
-            f"in-process handler dispatch via the handler parameter."
+            f"For other action types either provide a handler= at call time, register "
+            f"a dedicated Temporal activity and route it through activity_gateway, or "
+            f"use LocalWorkflowGateway for in-process dispatch."
         )
 
     def stream_run_events(self, run_id: str) -> AsyncIterator[RuntimeEvent]:

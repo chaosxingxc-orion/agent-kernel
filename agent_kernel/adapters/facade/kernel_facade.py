@@ -1391,7 +1391,12 @@ class KernelFacade:
                         completed_at=child_completed,
                     )
                 )
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                _logger.warning(
+                    "query_child_runs: failed to query child run %s: %s",
+                    child_id,
+                    exc,
+                )
                 summaries.append(
                     ChildRunSummary(
                         child_run_id=child_id,
@@ -1401,6 +1406,7 @@ class KernelFacade:
                         outcome=None,
                         created_at=self._run_created_at.get(child_id),
                         completed_at=None,
+                        query_error=str(exc),
                     )
                 )
         return summaries

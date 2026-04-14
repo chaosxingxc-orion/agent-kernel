@@ -2583,6 +2583,8 @@ class ChildRunSummary:
     outcome: TraceRunState | None
     created_at: str
     completed_at: str | None
+    query_error: str | None = None
+    """Set to the exception string when the child run query failed; None on success."""
 
 
 # ---------------------------------------------------------------------------
