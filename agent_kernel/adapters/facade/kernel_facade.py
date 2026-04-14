@@ -205,6 +205,11 @@ class KernelFacade:
         # "_resolved" suffix tracks gate_refs resolved by submit_approval().
         self._open_human_gates: dict[str, set[str]] = {}
         self._resolved_human_gates: dict[str, set[str]] = {}
+        # Per-gate metadata for postmortem accuracy.
+        self._gate_types: dict[str, dict[str, str]] = {}  # run_id -> gate_ref -> gate_type
+        self._gate_resolutions: dict[
+            str, dict[str, str]
+        ] = {}  # run_id -> gate_ref -> "approved"|"rejected"
         self._human_gate_lock = threading.Lock()
         # Bounded run tracking for memory-leak prevention.
         self._max_tracked_runs = max_tracked_runs
@@ -222,6 +227,10 @@ class KernelFacade:
         self._run_completed_at: dict[str, str] = {}
         # Per-child metadata tracked at spawn time.
         self._child_kind: dict[str, str] = {}
+        self._all_child_runs: dict[
+            str, list[str]
+        ] = {}  # parent_run_id -> all child run ids ever spawned
+        self._child_run_lock = threading.Lock()
 
     @property
     def is_draining(self) -> bool:
@@ -409,6 +418,8 @@ class KernelFacade:
         with self._human_gate_lock:
             self._open_human_gates.pop(run_id, None)
             self._resolved_human_gates.pop(run_id, None)
+            self._gate_types.pop(run_id, None)
+            self._gate_resolutions.pop(run_id, None)
         self._rebuild_offsets.pop(run_id, None)
 
     def cleanup_completed_run(self, run_id: str) -> None:
@@ -815,6 +826,10 @@ class KernelFacade:
 
         self._run_created_at[child_run_id] = datetime.datetime.now(datetime.UTC).isoformat()
         self._child_kind[child_run_id] = request.child_kind
+        with self._child_run_lock:
+            registry = self._all_child_runs.setdefault(request.parent_run_id, [])
+            if child_run_id not in registry:
+                registry.append(child_run_id)
         # Minimal closed-loop behavior: notify parent run projection that a new
         # child has been created. The parent workflow converts this signal into
         # a replayable runtime event, so projection can track active children.
@@ -973,6 +988,9 @@ class KernelFacade:
                 self._resolved_human_gates.setdefault(request.run_id, set()).add(
                     request.approval_ref
                 )
+                self._gate_resolutions.setdefault(request.run_id, {})[request.approval_ref] = (
+                    "approved" if request.approved else "rejected"
+                )
             await self._workflow_gateway.signal_workflow(
                 request.run_id,
                 SignalRunRequest(
@@ -1033,8 +1051,14 @@ class KernelFacade:
 
         Delegates to the injected ``KernelHealthProbe.readiness()`` when
         available.  Falls back to the same minimal static response as
-        ``get_health()`` when no probe is injected 鈥?callers should treat
-        the absence of a probe as ``"ready"`` for PoC/test environments.
+        ``get_health()`` when no probe is injected.
+
+        Note:
+            When ``health_probe`` is ``None``, the response is "assumed healthy"
+            with no active probing.  No backing stores are interrogated and no
+            latency checks are performed.  Callers must not treat this static
+            response as verified liveness; it is only appropriate for PoC and
+            test environments where a real probe has not been wired in.
 
         Returns:
             Dict with at minimum ``{"status": "ok" | "degraded" | "unhealthy"}``.
@@ -1137,8 +1161,6 @@ class KernelFacade:
             ValueError: If the run is not found.
 
         """
-        import datetime
-
         # Always merge from event log so that trace entries created by other
         # facade instances (same run, different process) become visible.
         # The rebuild is additive and incremental (offset-tracked), so local
@@ -1149,12 +1171,14 @@ class KernelFacade:
         # Map kernel lifecycle state to TRACE run state.
         _lifecycle_to_trace: dict[str, str] = {
             "created": "created",
-            "running": "active",
-            "waiting_callback": "waiting",
-            "waiting_human": "waiting",
+            "ready": "active",
+            "dispatching": "active",
+            "waiting_result": "active",
+            "waiting_external": "waiting",
+            "recovering": "active",
             "completed": "completed",
             "failed": "failed",
-            "cancelled": "aborted",
+            "aborted": "aborted",
         }
         run_state = _lifecycle_to_trace.get(response.lifecycle_state, "active")
         wait_state: str = "none"
@@ -1183,7 +1207,7 @@ class KernelFacade:
             active_stage_id=response.active_stage_id,
             branches=branches,
             policy_versions=response.policy_versions,
-            projected_at=datetime.datetime.now(datetime.UTC).isoformat(),
+            projected_at=None,
             stages=stages,
         )
 
@@ -1223,12 +1247,14 @@ class KernelFacade:
         gate_resolutions: list[HumanGateResolution] = []
         with self._human_gate_lock:
             resolved = self._resolved_human_gates.get(run_id, set())
+            run_gate_types = self._gate_types.get(run_id, {})
+            run_gate_resolutions = self._gate_resolutions.get(run_id, {})
             for gate_ref in resolved:
                 gate_resolutions.append(
                     HumanGateResolution(
                         gate_ref=gate_ref,
-                        gate_type="final_approval",
-                        resolution="approved",
+                        gate_type=run_gate_types.get(gate_ref, "final_approval"),
+                        resolution=run_gate_resolutions.get(gate_ref, "approved"),
                     )
                 )
 
@@ -1302,7 +1328,17 @@ class KernelFacade:
         import datetime
 
         response = await self.query_run(QueryRunRequest(run_id=parent_run_id))
-        child_run_ids = response.active_child_runs
+        # Merge active child runs from projection with all locally tracked child runs
+        # so completed children remain visible.
+        active_ids: list[str] = list(response.active_child_runs or [])
+        with self._child_run_lock:
+            all_spawned = list(self._all_child_runs.get(parent_run_id, []))
+        seen: set[str] = set(active_ids)
+        child_run_ids = list(active_ids)
+        for cid in all_spawned:
+            if cid not in seen:
+                child_run_ids.append(cid)
+                seen.add(cid)
 
         summaries: list[ChildRunSummary] = []
         for child_id in child_run_ids:
@@ -1666,6 +1702,7 @@ class KernelFacade:
         self._touch_run(request.run_id)
         with self._human_gate_lock:
             self._open_human_gates.setdefault(request.run_id, set()).add(request.gate_ref)
+            self._gate_types.setdefault(request.run_id, {})[request.gate_ref] = request.gate_type
         await self._workflow_gateway.signal_workflow(
             request.run_id,
             SignalRunRequest(

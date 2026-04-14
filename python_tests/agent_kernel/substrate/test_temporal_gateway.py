@@ -6,6 +6,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+import pytest
+
 from agent_kernel.kernel.contracts import (
     QueryRunResponse,
     RunProjection,
@@ -192,8 +194,13 @@ def test_start_child_workflow_uses_child_workflow_id_namespace() -> None:
     assert client.start_calls[0]["kwargs"]["id"] == "run:child:parent-1:child-1"
 
 
-def test_stream_run_events_returns_empty_stream_without_query_hook() -> None:
-    """Gateway stream API should stay safe when hook is not configured."""
+def test_stream_run_events_raises_when_query_hook_not_configured() -> None:
+    """Gateway stream API must raise NotImplementedError when hook is not configured.
+
+    Silent empty streams cause event-driven execution loops to stop functioning
+    without any visible signal. Raising NotImplementedError surfaces the
+    misconfiguration at call time so callers can fix the gateway config.
+    """
     client = _FakeClient()
     gateway = TemporalSDKWorkflowGateway(client)
 
@@ -203,8 +210,8 @@ def test_stream_run_events_returns_empty_stream_without_query_hook() -> None:
             collected_events.append(event)
         return collected_events
 
-    collected_events = asyncio.run(_collect())
-    assert collected_events == []
+    with pytest.raises(NotImplementedError, match="event_stream_query_method_name"):
+        asyncio.run(_collect())
 
 
 def test_stream_run_events_uses_query_hook_and_normalizes_payload() -> None:

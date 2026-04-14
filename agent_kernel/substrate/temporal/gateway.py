@@ -277,6 +277,7 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
                 parent_run_id=parent_run_id,
                 input_ref=request.input_ref,
                 input_json=request.input_json,
+                session_id=((request.input_json or {}).get("_session_id") or None),
             ),
             id=workflow_id,
             task_queue=self._config.task_queue,
@@ -396,7 +397,14 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
                     arguments=getattr(action, "arguments", {}),
                 )
             )
-        raise ValueError(f"execute_turn: unsupported action_type={action_type!r}")
+        raise ValueError(
+            f"execute_turn: unsupported action_type={action_type!r}. "
+            f"TemporalSDKWorkflowGateway routes only 'tool_call' (via execute_tool) "
+            f"and 'mcp_call' (via execute_mcp) through activity_gateway. "
+            f"For other action types, register a dedicated Temporal activity and "
+            f"route it through activity_gateway, or use LocalWorkflowGateway for "
+            f"in-process handler dispatch via the handler parameter."
+        )
 
     def stream_run_events(self, run_id: str) -> AsyncIterator[RuntimeEvent]:
         """Streams runtime events for one run through optional query hook.
@@ -417,7 +425,13 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         """
         query_name = self._config.event_stream_query_method_name
         if query_name is None:
-            return
+            raise NotImplementedError(
+                "stream_run_events requires TemporalGatewayConfig.event_stream_query_method_name "
+                "to be set to the Temporal workflow query method name that returns the event "
+                "stream payload. Without it, no events can be streamed and event-driven "
+                "execution loops will silently receive no events. "
+                "Configure it at TemporalSDKWorkflowGateway construction time."
+            )
         handle = self._client.get_workflow_handle(
             self._workflow_id_for_run(run_id),
         )

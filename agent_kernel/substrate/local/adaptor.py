@@ -383,6 +383,7 @@ class LocalWorkflowGateway:
                 parent_run_id=parent_run_id,
                 input_ref=request.input_ref,
                 input_json={**(request.input_json or {}), "child_run_id": child_run_id},
+                session_id=((request.input_json or {}).get("_session_id") or None),
             )
         )
 

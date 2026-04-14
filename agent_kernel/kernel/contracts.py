@@ -2432,7 +2432,7 @@ class TraceRuntimeView:
     active_stage_id: str | None
     branches: list[TraceBranchView]
     policy_versions: RunPolicyVersions | None
-    projected_at: str
+    projected_at: str | None
     stages: list[TraceStageView] = field(default_factory=list)
 
 
