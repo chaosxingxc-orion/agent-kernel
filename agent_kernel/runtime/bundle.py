@@ -301,12 +301,18 @@ class AgentKernelRuntimeBundle:
                 strict ``TemporalSDKActivityGateway`` when an
                 explicit ``activity_gateway`` is not provided.
 
-            circuit_breaker_policy: Parameter from function signature.
-            context_port: Parameter from function signature.
-            llm_gateway: Parameter from function signature.
-            observability_hook: Parameter from function signature.
-            output_parser: Parameter from function signature.
-            reflection_policy: Parameter from function signature.
+            circuit_breaker_policy: Optional policy governing cross-run
+                circuit-breaker behaviour in ``PlannedRecoveryGateService``.
+            context_port: Optional cognitive context port forwarded to
+                ``ReasoningLoop`` for reflect-and-retry recovery.
+            llm_gateway: Optional LLM gateway forwarded to ``ReasoningLoop``
+                for reflect-and-retry recovery.
+            observability_hook: Optional hook fanned out to ``TurnEngine``
+                and ``ReasoningLoop`` for telemetry callbacks.
+            output_parser: Optional output parser forwarded to
+                ``ReasoningLoop`` for reflect-and-retry recovery.
+            reflection_policy: Optional policy controlling when reflect-and-retry
+                is attempted, forwarded to ``PlannedRecoveryGateService``.
 
         Returns:
             A fully wired runtime bundle using the selected event
@@ -474,7 +480,8 @@ class AgentKernelRuntimeBundle:
             observability_hook: Optional hook fanned out to
                 ReasoningLoop and PlannedRecoveryGateService.
 
-            circuit_breaker_policy: Parameter from function signature.
+            circuit_breaker_policy: Optional policy governing cross-run
+                circuit-breaker behaviour in ``PlannedRecoveryGateService``.
 
         Returns:
             Dictionary of kernel core service instances for
