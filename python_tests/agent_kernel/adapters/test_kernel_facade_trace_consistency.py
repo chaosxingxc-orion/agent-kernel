@@ -123,10 +123,10 @@ class TestHumanGateStateSurvivesFacadeRestart:
             )
         )
 
-        # Facade2 should see the open gate as pending.
+        # Facade2 should see the open gate as requested (unresolved).
         facade2 = _make_facade(event_log, gateway=gw)
         view = asyncio.run(facade2.query_trace_runtime("run-1"))
-        assert view.review_state == "pending"
+        assert view.review_state == "requested"
 
     def test_resolved_gate_survives_facade_restart(self) -> None:
         event_log = InMemoryKernelRuntimeEventLog()
@@ -157,7 +157,7 @@ class TestHumanGateStateSurvivesFacadeRestart:
 
         facade2 = _make_facade(event_log, gateway=gw)
         view = asyncio.run(facade2.query_trace_runtime("run-1"))
-        assert view.review_state == "completed"
+        assert view.review_state == "approved"
 
 
 class TestCrossFadeTraceMerge:

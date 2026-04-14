@@ -726,7 +726,13 @@ class QueryRunRequest:
 
 @dataclass(frozen=True, slots=True)
 class QueryRunResponse:
-    """Represents the projection view exported from the facade."""
+    """Represents the projection view exported from the facade.
+
+    Note:
+        This dataclass uses ``slots=True``.  The instance ``__dict__`` attribute
+        is not available.  Use ``dataclasses.asdict(result)`` for dict conversion
+        instead of ``result.__dict__``.
+    """
 
     run_id: str
     lifecycle_state: RunLifecycleState
@@ -2423,6 +2429,11 @@ class TraceRuntimeView:
     This is a derived view built on top of RunProjection (which remains the
     authoritative kernel-internal projection).  hi-agent consumes this view
     for routing, pruning, and evolution decisions.
+
+    Note:
+        This dataclass uses ``slots=True``.  The instance ``__dict__`` attribute
+        is not available.  Use ``dataclasses.asdict(result)`` for dict conversion
+        instead of ``result.__dict__``.
     """
 
     run_id: str

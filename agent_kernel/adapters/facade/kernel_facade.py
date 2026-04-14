@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import logging
 import threading
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -59,6 +60,8 @@ from agent_kernel.kernel.contracts import (
 from agent_kernel.kernel.event_registry import KERNEL_EVENT_REGISTRY
 from agent_kernel.kernel.recovery.mode_registry import KERNEL_RECOVERY_MODE_REGISTRY
 from agent_kernel.kernel.turn_engine import TurnResult
+
+_logger = logging.getLogger(__name__)
 
 _KERNEL_VERSION = "0.2.0"
 _PROTOCOL_VERSION = "1.0.0"
@@ -814,8 +817,12 @@ class KernelFacade:
                         "task_view_policy_version": child_pvs.task_view_policy_version,
                     }
                     request_for_gateway = replace(request_for_gateway, input_json=child_input)
-            except Exception:  # pylint: disable=broad-exception-caught
-                pass  # Best-effort: proceed without inheritance on failure.
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                _logger.warning(
+                    "spawn_child_run: policy version inheritance failed for parent_run_id=%s: %s",
+                    request.parent_run_id,
+                    exc,
+                )
 
         workflow = await self._workflow_gateway.start_child_workflow(
             request.parent_run_id,
@@ -983,7 +990,7 @@ class KernelFacade:
                     return
                 self._submitted_approvals.add(dedup_key)
             # Mark the gate as resolved so query_trace_runtime() can derive
-            # review_state = "completed" instead of "pending".
+            # review_state = "approved" or "rejected" instead of "requested".
             with self._human_gate_lock:
                 self._resolved_human_gates.setdefault(request.run_id, set()).add(
                     request.approval_ref
@@ -1187,9 +1194,17 @@ class KernelFacade:
         with self._human_gate_lock:
             open_gates = self._open_human_gates.get(run_id, set())
             resolved_gates = self._resolved_human_gates.get(run_id, set())
+            run_gate_resolutions = self._gate_resolutions.get(run_id, {})
         if open_gates:
             unresolved = open_gates - resolved_gates
-            review_state: str = "pending" if unresolved else "completed"
+            if unresolved:
+                review_state: str = "requested"
+            else:
+                # All gates resolved — derive final state from actual resolution records.
+                any_rejected = any(
+                    run_gate_resolutions.get(g) == "rejected" for g in resolved_gates
+                )
+                review_state = "rejected" if any_rejected else "approved"
         else:
             review_state = "not_required"
 
