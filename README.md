@@ -16,7 +16,7 @@
 | Protocol version | `1.0.0` |
 | Python | `>=3.12` |
 | 构建工具 | hatchling |
-| Temporal Python SDK | `>=1.7,<2`（已测试：`1.24.x`） |
+| Temporal Python SDK | `==1.24.0`（通过 git subtree 供应商化至 `external/temporal-sdk-python`） |
 | Temporal Server | `>=1.20`（Docker Compose 固定：`1.25.2`） |
 
 ## 目录概览
@@ -279,6 +279,8 @@ cfg = KernelConfig.from_env()
 | `AGENT_KERNEL_SCRIPT_TIMEOUT_S` | `script_timeout_s` | `30.0` | 脚本超时（秒）。`LocalProcessScriptRuntime` 内建 30 s 兜底；`InProcessPythonScriptRuntime` 需调用方手动将 `int(script_timeout_s * 1000)` 传给 `default_timeout_ms` 构造参数 |
 
 完整字段列表见 `agent_kernel/config.py`。
+
+> **供应商化 SDK 说明**：Temporal Python SDK 1.24.0 通过 `git subtree` 嵌入至 `external/temporal-sdk-python/`，升级流程、双开发模式（vendored 优先 / wheel 回退）详见 [`external/VENDORS.md`](./external/VENDORS.md)。
 
 ## LLM 网关与脚本运行时
 

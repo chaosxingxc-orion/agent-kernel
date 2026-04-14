@@ -167,7 +167,7 @@ KernelFacade.submit_approval() -> EventLog.append(trace.human_gate_resolved)
 
 新的 Facade 实例通过增量重放事件日志重建 branch/stage/gate 内存状态，实现冷启动一致性。
 
-`KernelFacade` also holds a `task_registry: TaskRegistry` reference (constructed with `InMemoryTaskEventLog` in `_build_boundary_components()`). This is a **platform-facing API** for task lifecycle tracking; `TurnEngine` and `RunActorWorkflow` do not interact with `TaskRegistry` directly — it is not part of the six-authority kernel FSM.
+`KernelFacade` 还持有一个 `task_registry: TaskRegistry` 引用（在 `_build_boundary_components()` 中以 `InMemoryTaskEventLog` 构造）。这是面向平台的**任务生命周期追踪 API**；`TurnEngine` 和 `RunActorWorkflow` 不直接与 `TaskRegistry` 交互 — 它不属于六权限内核 FSM 的一部分。
 
 ---
 
@@ -307,20 +307,20 @@ stateDiagram-v2
 
 `FailureCodeRegistry` 提供 `TraceFailureCode -> recovery_action / gate_type` 映射框架。内核默认注册表为空，具体映射由平台层 (如 hi-agent) 在启动时注入。
 
-### 7.5 Escalation Resolution
+### 7.5 人工升级解决
 
-When `human_escalation` recovery is chosen, the workflow writes a `run.waiting_external` event and suspends. An operator resolves the escalation via:
+当选择 `human_escalation` 恢复模式时，工作流写入 `run.waiting_external` 事件并挂起。运维人员通过以下方式解决升级：
 
 ```
 POST /runs/{run_id}/resolve-escalation
   Body: {"resolution_notes": "...", "caused_by": "..."}
     -> KernelFacade.resolve_escalation(run_id, resolution_notes=..., caused_by=...)
-    -> sends recovery_succeeded signal to RunActorWorkflow
-    -> appends trace.escalation_resolved event
-    -> workflow resumes next turn
+    -> 向 RunActorWorkflow 发送 recovery_succeeded 信号
+    -> 写入 trace.escalation_resolved 事件
+    -> 工作流恢复执行下一轮 turn
 ```
 
-`resolve_escalation` is a platform-facing `KernelFacade` method; it does not bypass the six-authority FSM — it re-enters via the standard signal path.
+`resolve_escalation` 是面向平台的 `KernelFacade` 方法；它不绕过六权限 FSM — 而是通过标准信号路径重新进入。
 
 ---
 
@@ -535,6 +535,16 @@ docker run -p 8400:8400 agent-kernel
 
 LocalFSM 已知限制: `no_child_workflow_isolation`, `no_temporal_history`, `no_cross_process_speculation`。
 
+### 12.3.1 供应商化 Temporal SDK
+
+`external/temporal-sdk-python/` 通过 `git subtree add --squash` 嵌入，版本 1.24.0。
+
+`agent_kernel/substrate/temporal/_sdk_source.py` 中的 `ensure_vendored_source()` 在每次导入 `temporalio` 前被调用，将供应商目录预置到 `temporalio.__path__`（纯 Python 优先，Rust 扩展回退到已安装 wheel）。
+
+升级流程与双开发模式见 `external/VENDORS.md`。
+
+生产环境可省略 `external/` 目录，只需 `pip install ".[temporal]"` 安装 wheel 即可。
+
 ### 12.4 CLI 入口与独立 Worker
 
 打包后提供两个 CLI 入口点:
@@ -551,8 +561,9 @@ LocalFSM 已知限制: `no_child_workflow_isolation`, `no_temporal_history`, `no
 4. 连接 Temporal (`AGENT_KERNEL_TEMPORAL_HOST`)
 5. 按需构建 LLM 网关：`AGENT_KERNEL_LLM_PROVIDER` 非空时实例化 `AnthropicLLMGateway` 或 `OpenAILLMGateway`，否则认知服务禁用
 6. 以 SQLite 后端 build `AgentKernelRuntimeBundle`（传入 strict_mode、heartbeat_monitor、circuit_breaker_policy、llm_gateway）
-7. 启动 Temporal Worker（`worker.run()` 内置 SIGTERM/SIGINT 处理）
-8. 并发运行 HeartbeatWatchdog asyncio 任务（轮询间隔 = `heartbeat_min_interval_s`）
+7. 以 `config.script_timeout_s × 1000` 调用 `configure_local_process_timeout()`，更新 `local_process` 运行时默认超时
+8. 启动 Temporal Worker（`worker.run()` 内置 SIGTERM/SIGINT 处理）
+9. 并发运行 HeartbeatWatchdog asyncio 任务（轮询间隔 = `heartbeat_min_interval_s`）
 
 生产建议: 将 HTTP 服务和 Worker 分开部署，以便独立扩缩容。
 
@@ -656,8 +667,8 @@ class SubprocessScriptConfig:
 
 **生产安全注册表**（`kernel/cognitive/script_runtime.py`）:
 
-- `ScriptRuntimeRegistry.enable_production_mode()` — called at process startup; blocks dispatch of any runtime not marked production-safe (e.g. `EchoScriptRuntime`), raising `ProductionSafetyViolation`.
-- `configure_local_process_timeout(ms)` — re-registers `local_process` with a custom `default_timeout_ms`; called by `KernelRuntime.start()` using `int(KernelRuntimeConfig.script_timeout_s * 1000)`.
+- `ScriptRuntimeRegistry.enable_production_mode()` — 在进程启动时调用；阻止分发任何未标记为生产安全的运行时（如 `EchoScriptRuntime`），抛出 `ProductionSafetyViolation`。
+- `configure_local_process_timeout(ms)` — 以自定义 `default_timeout_ms` 重新注册 `local_process`；由 `KernelRuntime.start()` 以 `int(KernelRuntimeConfig.script_timeout_s * 1000)` 调用。
 
 **注册表内置运行时 timeout 对称性**（`kernel/cognitive/script_runtime.py`）:
 
