@@ -696,7 +696,7 @@ class RunActorWorkflow:
                 _on_success = getattr(self._recovery, "on_action_success", None)
                 if callable(_on_success):
                     with contextlib.suppress(Exception):
-                        _result = _on_success(commit.action.effect_class)
+                        _result = _on_success(commit.action.effect_class)  # pylint: disable=not-callable
                         # on_action_success is sync; if a mock returns a
                         # coroutine, discard it cleanly to avoid ResourceWarning.
                         if hasattr(_result, "close"):
