@@ -53,6 +53,7 @@ enforcement = "strict"
 line-length = 100
 target-version = "py314"
 src = [".", "python_tests"]
+exclude = ["external"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
