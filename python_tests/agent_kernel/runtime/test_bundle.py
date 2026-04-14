@@ -37,6 +37,7 @@ from agent_kernel.kernel.persistence.sqlite_turn_intent_log import (
     SQLiteTurnIntentLog,
 )
 from agent_kernel.kernel.recovery import PlannedRecoveryGateService
+from agent_kernel.kernel.task_manager.registry import TaskRegistry
 from agent_kernel.runtime.bundle import (
     AgentKernelRuntimeBundle,
     RuntimeDecisionDedupeConfig,
@@ -587,3 +588,39 @@ def test_bundle_prod_safety_rejects_in_memory_decision_deduper(
                 environment="prod",
             ),
         )
+
+
+class TestBundleTaskRegistryWiring:
+    """Tests for task_registry field wiring in AgentKernelRuntimeBundle."""
+
+    def test_bundle_has_task_registry_field(self) -> None:
+        """Bundle should expose a non-None task_registry after build."""
+        bundle = AgentKernelRuntimeBundle.build_minimal_complete(
+            temporal_client=_FakeTemporalClient()
+        )
+
+        assert bundle.task_registry is not None
+
+    def test_bundle_task_registry_wired_to_facade(self) -> None:
+        """Facade's _task_registry should be the same object as bundle.task_registry."""
+        bundle = AgentKernelRuntimeBundle.build_minimal_complete(
+            temporal_client=_FakeTemporalClient()
+        )
+
+        assert bundle.facade._task_registry is bundle.task_registry  # pylint: disable=protected-access
+
+    def test_bundle_task_registry_is_task_registry_instance(self) -> None:
+        """bundle.task_registry should be a TaskRegistry instance."""
+        bundle = AgentKernelRuntimeBundle.build_minimal_complete(
+            temporal_client=_FakeTemporalClient()
+        )
+
+        assert isinstance(bundle.task_registry, TaskRegistry)
+
+    def test_bundle_task_registry_has_event_log(self) -> None:
+        """TaskRegistry should be constructed with a non-None event appender."""
+        bundle = AgentKernelRuntimeBundle.build_minimal_complete(
+            temporal_client=_FakeTemporalClient()
+        )
+
+        assert bundle.task_registry._event_appender is not None  # pylint: disable=protected-access

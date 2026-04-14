@@ -167,6 +167,8 @@ KernelFacade.submit_approval() -> EventLog.append(trace.human_gate_resolved)
 
 新的 Facade 实例通过增量重放事件日志重建 branch/stage/gate 内存状态，实现冷启动一致性。
 
+`KernelFacade` also holds a `task_registry: TaskRegistry` reference (constructed with `InMemoryTaskEventLog` in `_build_boundary_components()`). This is a **platform-facing API** for task lifecycle tracking; `TurnEngine` and `RunActorWorkflow` do not interact with `TaskRegistry` directly — it is not part of the six-authority kernel FSM.
+
 ---
 
 ## 4. TurnEngine FSM
@@ -304,6 +306,21 @@ stateDiagram-v2
 ### 7.4 FailureCodeRegistry
 
 `FailureCodeRegistry` 提供 `TraceFailureCode -> recovery_action / gate_type` 映射框架。内核默认注册表为空，具体映射由平台层 (如 hi-agent) 在启动时注入。
+
+### 7.5 Escalation Resolution
+
+When `human_escalation` recovery is chosen, the workflow writes a `run.waiting_external` event and suspends. An operator resolves the escalation via:
+
+```
+POST /runs/{run_id}/resolve-escalation
+  Body: {"resolution_notes": "...", "caused_by": "..."}
+    -> KernelFacade.resolve_escalation(run_id, resolution_notes=..., caused_by=...)
+    -> sends recovery_succeeded signal to RunActorWorkflow
+    -> appends trace.escalation_resolved event
+    -> workflow resumes next turn
+```
+
+`resolve_escalation` is a platform-facing `KernelFacade` method; it does not bypass the six-authority FSM — it re-enters via the standard signal path.
 
 ---
 
@@ -541,6 +558,8 @@ LocalFSM 已知限制: `no_child_workflow_isolation`, `no_temporal_history`, `no
 
 ### 12.5 HTTP API 概览
 
+HTTP 路由实现在 `service/http_server.py`（`create_app` / `create_app_temporal` factory）。所有路由通过 `KernelFacade` 调用，不直接访问内核服务。
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/runs` | 启动 run |
@@ -560,6 +579,7 @@ LocalFSM 已知限制: `no_child_workflow_isolation`, `no_temporal_history`, `no
 | POST | `/runs/{run_id}/branches` | 打开 branch |
 | PUT | `/runs/{run_id}/branches/{branch_id}/state` | 更新 branch 状态 |
 | POST | `/runs/{run_id}/human-gates` | 打开人工审查门 |
+| POST | `/runs/{run_id}/resolve-escalation` | 解决人工升级 (`resolve_escalation`) |
 | POST | `/runs/{run_id}/task-views` | 记录 task view |
 | PUT | `/task-views/{task_view_id}/decision` | 绑定决策 |
 | POST | `/tasks` | 注册 task |
@@ -633,6 +653,11 @@ class SubprocessScriptConfig:
 行为:
 - `validate_script(script, host_kind) -> bool`: 通过 `ast.parse` 在隔离子进程中验证脚本语法
 - `execute_script(input) -> ScriptResult`: 在独立子进程中执行，强制 timeout，WAL 清理
+
+**生产安全注册表**（`kernel/cognitive/script_runtime.py`）:
+
+- `ScriptRuntimeRegistry.enable_production_mode()` — called at process startup; blocks dispatch of any runtime not marked production-safe (e.g. `EchoScriptRuntime`), raising `ProductionSafetyViolation`.
+- `configure_local_process_timeout(ms)` — re-registers `local_process` with a custom `default_timeout_ms`; called by `KernelRuntime.start()` using `int(KernelRuntimeConfig.script_timeout_s * 1000)`.
 
 **注册表内置运行时 timeout 对称性**（`kernel/cognitive/script_runtime.py`）:
 

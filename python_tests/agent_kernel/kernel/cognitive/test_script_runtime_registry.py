@@ -6,10 +6,12 @@ import asyncio
 
 import pytest
 
+from agent_kernel.kernel.cognitive.script_runtime import LocalProcessScriptRuntime
 from agent_kernel.kernel.cognitive.script_runtime_registry import (
     KERNEL_SCRIPT_RUNTIME_REGISTRY,
     ScriptRuntimeDescriptor,
     ScriptRuntimeRegistry,
+    configure_local_process_timeout,
     validate_host_kind,
 )
 from agent_kernel.kernel.contracts import ScriptActivityInput, ScriptResult
@@ -238,3 +240,82 @@ class TestValidateHostKind:
 
     def test_strict_does_not_raise_on_known(self) -> None:
         assert validate_host_kind("in_process_python", strict=True) is True
+
+
+# ---------------------------------------------------------------------------
+# ScriptRuntimeRegistry — production mode
+# ---------------------------------------------------------------------------
+
+
+class TestProductionMode:
+    def test_enable_production_mode_blocks_unsafe_dispatch(self) -> None:
+        reg = ScriptRuntimeRegistry()
+        reg.register("unsafe_kind", _StubRuntime(), is_safe_for_production=False)
+        reg.enable_production_mode()
+        with pytest.raises(RuntimeError, match="not production-safe"):
+            asyncio.run(reg.dispatch(_make_input(host_kind="unsafe_kind")))
+
+    def test_enable_production_mode_allows_safe_dispatch(self) -> None:
+        reg = ScriptRuntimeRegistry()
+        stub = _StubRuntime(exit_code=0)
+        reg.register("safe_kind", stub, is_safe_for_production=True)
+        reg.enable_production_mode()
+        result = asyncio.run(reg.dispatch(_make_input(host_kind="safe_kind")))
+        assert result.exit_code == 0
+        assert len(stub.calls) == 1
+
+    def test_enable_production_mode_idempotent(self) -> None:
+        reg = ScriptRuntimeRegistry()
+        reg.enable_production_mode()
+        reg.enable_production_mode()  # second call must not raise
+        assert reg._production_mode is True
+
+    def test_production_mode_off_by_default(self) -> None:
+        reg = ScriptRuntimeRegistry()
+        stub = _StubRuntime(exit_code=0)
+        reg.register("unsafe_kind", stub, is_safe_for_production=False)
+        # No enable_production_mode() call — dispatch must succeed
+        result = asyncio.run(reg.dispatch(_make_input(host_kind="unsafe_kind")))
+        assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# configure_local_process_timeout
+# ---------------------------------------------------------------------------
+
+
+class TestConfigureLocalProcessTimeout:
+    def test_configure_local_process_timeout_updates_registry(self) -> None:
+        original = KERNEL_SCRIPT_RUNTIME_REGISTRY._runtimes.get("local_process")
+        try:
+            configure_local_process_timeout(5000)
+            runtime = KERNEL_SCRIPT_RUNTIME_REGISTRY._runtimes["local_process"]
+            assert isinstance(runtime, LocalProcessScriptRuntime)
+            assert runtime._default_timeout_ms == 5000
+        finally:
+            # Restore original runtime to avoid polluting other tests.
+            if original is not None:
+                KERNEL_SCRIPT_RUNTIME_REGISTRY.register(
+                    "local_process",
+                    original,
+                    description="asyncio subprocess runtime for local shell scripts.",
+                    is_safe_for_production=True,
+                    supports_timeout=True,
+                )
+
+    def test_configure_local_process_timeout_is_production_safe(self) -> None:
+        original = KERNEL_SCRIPT_RUNTIME_REGISTRY._runtimes.get("local_process")
+        try:
+            configure_local_process_timeout(1000)
+            descriptor = KERNEL_SCRIPT_RUNTIME_REGISTRY.get_descriptor("local_process")
+            assert descriptor is not None
+            assert descriptor.is_safe_for_production is True
+        finally:
+            if original is not None:
+                KERNEL_SCRIPT_RUNTIME_REGISTRY.register(
+                    "local_process",
+                    original,
+                    description="asyncio subprocess runtime for local shell scripts.",
+                    is_safe_for_production=True,
+                    supports_timeout=True,
+                )
