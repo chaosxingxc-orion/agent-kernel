@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from importlib import import_module
 from typing import Any
 
+from agent_kernel.substrate.temporal._sdk_source import ensure_vendored_source
 from agent_kernel.substrate.temporal.run_actor_workflow import (
     RunActorDependencyBundle,
     RunActorWorkflow,
@@ -64,6 +65,7 @@ class TemporalKernelWorker:
             RuntimeError: If Temporal Python SDK is not installed.
 
         """
+        ensure_vendored_source()
         try:
             worker_module = import_module("temporalio.worker")
             worker_cls = worker_module.Worker

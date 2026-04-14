@@ -336,6 +336,23 @@ async def post_run_human_gates(request: Request) -> JSONResponse:
         return _error(400, str(exc))
 
 
+async def post_run_resolve_escalation(request: Request) -> JSONResponse:
+    """POST /runs/{run_id}/resolve-escalation — resolve_escalation."""
+    facade: KernelFacade = request.app.state.facade
+    run_id = request.path_params["run_id"]
+    data = await _json_body(request)
+    try:
+        await facade.resolve_escalation(
+            run_id,
+            resolution_notes=data.get("resolution_notes"),
+            caused_by=data.get("caused_by"),
+        )
+        return JSONResponse({"ok": True})
+    except Exception as exc:
+        logger.exception("resolve_escalation failed")
+        return _error(400, str(exc))
+
+
 async def post_run_task_views(request: Request) -> JSONResponse:
     """POST /runs/{run_id}/task-views — record_task_view."""
     facade: KernelFacade = request.app.state.facade
@@ -492,6 +509,12 @@ def _build_routes() -> list[Route]:
         Route(
             "/runs/{run_id}/human-gates",
             post_run_human_gates,
+            methods=["POST"],
+        ),
+        # Escalation resolution
+        Route(
+            "/runs/{run_id}/resolve-escalation",
+            post_run_resolve_escalation,
             methods=["POST"],
         ),
         # Task views

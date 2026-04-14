@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from agent_kernel.substrate.temporal.gateway import TemporalSDKWorkflowGateway
     from agent_kernel.substrate.temporal.run_actor_workflow import RunActorDependencyBundle
 
+from agent_kernel.substrate.temporal._sdk_source import ensure_vendored_source
 from agent_kernel.substrate.temporal.gateway import (
     TemporalGatewayConfig,
     TemporalSDKWorkflowGateway,
@@ -285,6 +286,7 @@ class TemporalAdaptor:
             RuntimeError: If ``temporalio`` is not installed.
 
         """
+        ensure_vendored_source()
         try:
             client_module = import_module("temporalio.client")
         except ImportError as exc:
@@ -309,6 +311,7 @@ class TemporalAdaptor:
             RuntimeError: If ``temporalio[testing]`` is not installed.
 
         """
+        ensure_vendored_source()
         try:
             testing_module = import_module("temporalio.testing")
         except ImportError as exc:

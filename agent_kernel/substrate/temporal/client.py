@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from importlib import import_module
 from typing import Any
 
+from agent_kernel.substrate.temporal._sdk_source import ensure_vendored_source
+
 
 @dataclass(frozen=True, slots=True)
 class TemporalClientConfig:
@@ -44,6 +46,7 @@ async def create_temporal_client(
 
     """
     active_config = config or TemporalClientConfig()
+    ensure_vendored_source()
     try:
         client_module = import_module("temporalio.client")
         client_cls = client_module.Client

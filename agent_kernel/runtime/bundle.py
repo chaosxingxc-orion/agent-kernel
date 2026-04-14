@@ -65,6 +65,8 @@ from agent_kernel.kernel.recovery import (
     RecoveryPlanner,
 )
 from agent_kernel.kernel.recovery.reflection_builder import ReflectionContextBuilder
+from agent_kernel.kernel.task_manager.event_log import InMemoryTaskEventLog
+from agent_kernel.kernel.task_manager.registry import TaskRegistry
 from agent_kernel.substrate.temporal.activity_gateway import (
     MCPActivityCallable,
     MCPHandlerKey,
@@ -209,6 +211,7 @@ class AgentKernelRuntimeBundle:
         context_adapter: Agent-core context adapter for context management.
         checkpoint_adapter: Agent-core checkpoint adapter for checkpoint views.
         tool_mcp_adapter: Agent-core tool/MCP adapter for binding resolution.
+        task_registry: Task registry for task-level lifecycle tracking.
 
     """
 
@@ -229,6 +232,7 @@ class AgentKernelRuntimeBundle:
     context_adapter: AgentCoreContextAdapter
     checkpoint_adapter: AgentCoreCheckpointAdapter
     tool_mcp_adapter: AgentCoreToolMCPAdapter
+    task_registry: TaskRegistry
     # Optional cognitive services 鈥?typed as Any to avoid circular imports.
     cognitive_context_port: Any | None = None  # ContextPort Protocol
     cognitive_llm_gateway: Any | None = None  # LLMGateway Protocol
@@ -366,6 +370,7 @@ class AgentKernelRuntimeBundle:
             context_adapter=boundary["context_adapter"],
             checkpoint_adapter=boundary["checkpoint_adapter"],
             tool_mcp_adapter=boundary["tool_mcp_adapter"],
+            task_registry=boundary["task_registry"],
             cognitive_context_port=context_port,
             cognitive_llm_gateway=llm_gateway,
             cognitive_output_parser=output_parser,
@@ -408,6 +413,15 @@ class AgentKernelRuntimeBundle:
         llm_gateway_name = type(llm_gateway).__name__ if llm_gateway is not None else None
         if llm_gateway_name == "EchoLLMGateway":
             violations.append("llm_gateway EchoLLMGateway is not allowed in prod")
+
+        # Enable production-mode guard on the script runtime registry so
+        # unsafe runtimes (echo, in_process_python) are blocked at dispatch
+        # time for the lifetime of this process.
+        from agent_kernel.kernel.cognitive.script_runtime_registry import (
+            KERNEL_SCRIPT_RUNTIME_REGISTRY,
+        )
+
+        KERNEL_SCRIPT_RUNTIME_REGISTRY.enable_production_mode()
 
         if violations:
             joined = "; ".join(violations)
@@ -733,10 +747,13 @@ class AgentKernelRuntimeBundle:
         session_adapter = AgentCoreSessionAdapter()
         runner_adapter = AgentCoreRunnerAdapter()
         tool_mcp_adapter = AgentCoreToolMCPAdapter()
+        task_event_log = InMemoryTaskEventLog()
+        task_registry = TaskRegistry(event_appender=task_event_log)
         facade = KernelFacade(
             workflow_gateway=gateway,
             context_adapter=context_adapter,
             checkpoint_adapter=checkpoint_adapter,
+            task_registry=task_registry,
         )
         return {
             "gateway": gateway,
@@ -746,6 +763,8 @@ class AgentKernelRuntimeBundle:
             "context_adapter": context_adapter,
             "checkpoint_adapter": checkpoint_adapter,
             "tool_mcp_adapter": tool_mcp_adapter,
+            "task_registry": task_registry,
+            "task_event_log": task_event_log,
         }
 
     def create_run_actor_dependency_bundle(

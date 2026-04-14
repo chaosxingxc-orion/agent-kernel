@@ -101,6 +101,13 @@ async def main() -> None:
 
     config = KernelConfig.from_env()
 
+    # Wire script_timeout_s into the LocalProcessScriptRuntime singleton.
+    from agent_kernel.kernel.cognitive.script_runtime_registry import (
+        configure_local_process_timeout,
+    )
+
+    configure_local_process_timeout(int(config.script_timeout_s * 1000))
+
     heartbeat_policy = HeartbeatPolicy(
         state_timeout_s={
             "dispatching": config.heartbeat_dispatching_timeout_s,

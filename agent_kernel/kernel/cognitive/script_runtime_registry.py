@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from agent_kernel.kernel.contracts import ScriptActivityInput, ScriptResult
 
-
 # ---------------------------------------------------------------------------
 # Descriptor
 # ---------------------------------------------------------------------------
@@ -59,6 +58,7 @@ class ScriptRuntimeRegistry:
         """Initialize the instance with configured dependencies."""
         self._runtimes: dict[str, Any] = {}
         self._descriptors: dict[str, ScriptRuntimeDescriptor] = {}
+        self._production_mode: bool = False
 
     # ------------------------------------------------------------------
     # Registration
@@ -92,6 +92,15 @@ class ScriptRuntimeRegistry:
             is_safe_for_production=is_safe_for_production,
             supports_timeout=supports_timeout,
         )
+
+    def enable_production_mode(self) -> None:
+        """Enable production mode, blocking dispatch of unsafe runtimes.
+
+        Once called, any ``dispatch()`` call targeting a runtime whose
+        descriptor has ``is_safe_for_production=False`` will raise
+        ``RuntimeError``.  This method is idempotent.
+        """
+        self._production_mode = True
 
     # ------------------------------------------------------------------
     # Lookup
@@ -163,6 +172,16 @@ class ScriptRuntimeRegistry:
                 f"No ScriptRuntime registered for host_kind={input_value.host_kind!r}. "
                 f"Registered: {registered}"
             )
+        descriptor = self._descriptors.get(input_value.host_kind)
+        if (
+            self._production_mode
+            and descriptor is not None
+            and not descriptor.is_safe_for_production
+        ):
+            raise RuntimeError(
+                f"ScriptRuntime {input_value.host_kind!r} is not production-safe; "
+                "cannot dispatch in production mode"
+            )
         return await runtime.execute_script(input_value)
 
 
@@ -210,6 +229,32 @@ def _register_builtin_runtimes(registry: ScriptRuntimeRegistry) -> None:
 #: Kernel-level singleton registry.  Import and use directly.
 KERNEL_SCRIPT_RUNTIME_REGISTRY = ScriptRuntimeRegistry()
 _register_builtin_runtimes(KERNEL_SCRIPT_RUNTIME_REGISTRY)
+
+# ---------------------------------------------------------------------------
+# Configuration helpers
+# ---------------------------------------------------------------------------
+
+
+def configure_local_process_timeout(timeout_ms: int) -> None:
+    """Replace the ``"local_process"`` registration with the given timeout.
+
+    Must be called at application startup (before any dispatch) to wire
+    ``KernelConfig.script_timeout_s`` into the singleton registry.
+
+    Args:
+        timeout_ms: Timeout in milliseconds forwarded to
+            ``LocalProcessScriptRuntime(default_timeout_ms=timeout_ms)``.
+
+    """
+    from agent_kernel.kernel.cognitive.script_runtime import LocalProcessScriptRuntime
+
+    KERNEL_SCRIPT_RUNTIME_REGISTRY.register(
+        "local_process",
+        LocalProcessScriptRuntime(default_timeout_ms=timeout_ms),
+        description="asyncio subprocess runtime for local shell scripts.",
+        is_safe_for_production=True,
+        supports_timeout=True,
+    )
 
 
 # ---------------------------------------------------------------------------

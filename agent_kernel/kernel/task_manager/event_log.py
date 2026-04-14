@@ -16,11 +16,14 @@ Design constraints:
 from __future__ import annotations
 
 import contextlib
+import logging
 import threading
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from agent_kernel.kernel.task_manager.registry import TaskRegistry
+
+_logger = logging.getLogger(__name__)
 
 __all__ = [
     "InMemoryTaskEventLog",
@@ -174,7 +177,10 @@ class InMemoryTaskEventLog:
                     }
                     registry.update_state(payload["task_id"], state_map[event_type])
                 replayed += 1
-            except Exception:
-                # Malformed events are skipped; production adapters should log.
-                pass
+            except Exception:  # pylint: disable=broad-exception-caught
+                _logger.warning(
+                    "TaskEventLog.replay_into_registry: skipping malformed event event_type=%r",
+                    event_type,
+                    exc_info=True,
+                )
         return replayed

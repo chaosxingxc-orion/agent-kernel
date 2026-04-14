@@ -1751,6 +1751,43 @@ class KernelFacade:
             },
         )
 
+    async def resolve_escalation(
+        self,
+        run_id: str,
+        *,
+        resolution_notes: str | None = None,
+        caused_by: str | None = None,
+    ) -> None:
+        """Signal that a human_escalation recovery has been resolved.
+
+        Sends a ``recovery_succeeded`` signal to the workflow so it can
+        resume execution after a ``human_escalation`` decision left the
+        run in ``waiting_external`` state.
+
+        Args:
+            run_id: Target run identifier.
+            resolution_notes: Optional free-text notes from the operator.
+            caused_by: Optional causation reference for audit.
+        """
+        self._touch_run(run_id)
+        payload: dict[str, Any] = {}
+        if resolution_notes:
+            payload["resolution_notes"] = resolution_notes
+        await self._workflow_gateway.signal_workflow(
+            run_id,
+            SignalRunRequest(
+                run_id=run_id,
+                signal_type="recovery_succeeded",
+                signal_payload=payload or None,
+                caused_by=caused_by or f"resolve_escalation:{run_id}",
+            ),
+        )
+        await self._append_trace_event(
+            run_id,
+            "trace.escalation_resolved",
+            {"resolution_notes": resolution_notes},
+        )
+
     def get_action_state(self, dispatch_idempotency_key: str) -> str | None:
         """Return the current dedupe state for an action's idempotency key.
 

@@ -134,6 +134,7 @@ class KernelRuntimeConfig:
     outbox_reconcile_interval_s: float = 300.0
     enable_circuit_breaker_probe: bool = False
     circuit_breaker_probe_interval_s: float = 60.0
+    script_timeout_s: float = 30.0
 
 
 class KernelRuntime:
@@ -279,6 +280,13 @@ class KernelRuntime:
             workflow_id_prefix=substrate_config.workflow_id_prefix,
             observability_hook=config.observability_hook,
         )
+
+        # Wire script_timeout_s into the LocalProcessScriptRuntime singleton.
+        from agent_kernel.kernel.cognitive.script_runtime_registry import (
+            configure_local_process_timeout,
+        )
+
+        configure_local_process_timeout(int(config.script_timeout_s * 1000))
 
         # Dispatch to the appropriate substrate adaptor.
         adaptor: TemporalAdaptor | LocalFSMAdaptor
