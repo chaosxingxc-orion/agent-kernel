@@ -331,13 +331,17 @@ runtime = SubprocessScriptRuntime(timeout_s=30.0)
 
 ### RuntimeProductionSafetyConfig
 
-`build_minimal_complete()` 接受 `production_safety_config` 参数。当 `enabled=True` 且 `environment="prod"` 时，以下配置会被拒绝：
+`build_minimal_complete()` 接受 `production_safety_config` 参数。当 `enabled=True` 且 `environment="prod"` 时，以下配置会被拒绝（抛出 `ValueError`）：
 
 - `event_log backend=in_memory`
 - `dedupe_store backend=in_memory`
 - `decision_deduper backend=in_memory`
 - `recovery_outcome backend=in_memory`
-- 未提供 `context_port` 或 `llm_gateway`（认知组件缺失）
+- `context_port` 实例为 `InMemoryContextPort`
+- `llm_gateway` 实例为 `EchoLLMGateway`
+- `enable_activity_backed_executor=False`（默认路径使用 no-op `AsyncExecutorService`）
+
+> `InMemoryTaskEventLog` 为平台层关注点，当前无持久化后端，生产模式下发出 `warnings.warn` 而非拒绝。
 
 ```python
 from agent_kernel.runtime.bundle import RuntimeProductionSafetyConfig

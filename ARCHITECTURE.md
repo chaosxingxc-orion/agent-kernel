@@ -695,18 +695,20 @@ RecoveryGateService (reflect_and_retry)
 
 `ReasoningLoop` 每次反思轮次通过 `KernelMetricsCollector` 记录 `reflection_rounds_total` 指标（标签 `corrected=true/false`）。
 
-### 13.4 Bundle 生产安全检查（更新）
+### 13.4 Bundle 生产安全检查
 
-`AgentKernelRuntimeBundle._enforce_production_safety()` 拦截所有不安全的 PoC 配置：
+`AgentKernelRuntimeBundle._enforce_production_safety()` 在 `enabled=True` 且 `environment="prod"` 时拦截所有不安全的 PoC 配置：
 
-| 检查项 | 触发条件 |
-|--------|----------|
-| EventLog backend | `backend=in_memory` |
-| DecisionDeduper backend | `backend=in_memory` |
-| DedupeStore backend | `backend=in_memory` |
-| RecoveryOutcome backend | `backend=in_memory` |
-| TurnIntentLog backend | `backend=none` |
-| ContextPort | 实例为 `InMemoryContextPort` |
-| LLM Gateway | 实例为 `EchoLLMGateway` |
+| 检查项 | 触发条件 | 动作 |
+|--------|----------|------|
+| EventLog backend | `backend=in_memory` | `ValueError` |
+| DecisionDeduper backend | `backend=in_memory` | `ValueError` |
+| DedupeStore backend | `backend=in_memory` | `ValueError` |
+| RecoveryOutcome backend | `backend=in_memory` | `ValueError` |
+| TurnIntentLog backend | `backend=none` | `ValueError` |
+| ContextPort | 实例为 `InMemoryContextPort` | `ValueError` |
+| LLM Gateway | 实例为 `EchoLLMGateway` | `ValueError` |
+| Executor | `enable_activity_backed_executor=False`（默认 no-op） | `ValueError` |
+| TaskEventLog | `InMemoryTaskEventLog`（平台层，无持久化后端） | `warnings.warn`（不阻断） |
 
-任意一项违规均抛出 `ProductionSafetyViolation`，阻止不合规的生产部署。
+任意 `ValueError` 项违规均立即抛出，阻止不合规的生产部署。`InMemoryTaskEventLog` 为平台级关注点，当前无持久化后端，仅发出警告。
