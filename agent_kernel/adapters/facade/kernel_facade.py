@@ -1758,7 +1758,7 @@ class KernelFacade:
         resolution_notes: str | None = None,
         caused_by: str | None = None,
     ) -> None:
-        """Signal that a human_escalation recovery has been resolved.
+        """Public caller-facing API. Signal that a human_escalation recovery has been resolved.
 
         Sends a ``recovery_succeeded`` signal to the workflow so it can
         resume execution after a ``human_escalation`` decision left the

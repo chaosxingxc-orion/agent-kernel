@@ -334,6 +334,7 @@ class AgentKernelRuntimeBundle:
             turn_intent_log_config=resolved_turn_intent_config,
             context_port=context_port,
             llm_gateway=llm_gateway,
+            enable_activity_backed_executor=enable_activity_backed_executor,
         )
 
         kernel_core = cls._build_kernel_core(
@@ -394,8 +395,28 @@ class AgentKernelRuntimeBundle:
         turn_intent_log_config: RuntimeTurnIntentLogConfig,
         context_port: Any | None,
         llm_gateway: Any | None,
+        enable_activity_backed_executor: bool = False,
     ) -> None:
-        """Validate selected runtime components for production safety."""
+        """Validate selected runtime components for production safety.
+
+        Args:
+            production_safety_config: Safety guard configuration.
+            event_log_config: Event log backend configuration.
+            dedupe_config: Dedupe backend configuration.
+            decision_deduper_config: Decision deduper backend
+                configuration.
+            recovery_outcome_config: Recovery outcome store backend
+                configuration.
+            turn_intent_log_config: Turn intent log backend
+                configuration.
+            context_port: Optional cognitive context port instance.
+            llm_gateway: Optional LLM gateway instance.
+            enable_activity_backed_executor: When ``False`` (default),
+                a violation is raised in prod because the no-op
+                ``AsyncExecutorService`` with ``handler=None`` returns
+                fake success for every dispatch.
+
+        """
         if not production_safety_config.enabled:
             return
         if production_safety_config.environment != "prod":
@@ -419,6 +440,12 @@ class AgentKernelRuntimeBundle:
         llm_gateway_name = type(llm_gateway).__name__ if llm_gateway is not None else None
         if llm_gateway_name == "EchoLLMGateway":
             violations.append("llm_gateway EchoLLMGateway is not allowed in prod")
+        if not enable_activity_backed_executor:
+            violations.append(
+                "executor is no-op AsyncExecutorService (handler=None); "
+                "set enable_activity_backed_executor=True or provide activity_gateway/"
+                "tool_handlers in prod"
+            )
 
         # Enable production-mode guard on the script runtime registry so
         # unsafe runtimes (echo, in_process_python) are blocked at dispatch
@@ -428,6 +455,17 @@ class AgentKernelRuntimeBundle:
         )
 
         KERNEL_SCRIPT_RUNTIME_REGISTRY.enable_production_mode()
+
+        # TaskRegistry uses InMemoryTaskEventLog (platform-level; no persistent backend
+        # available). Emit a warning in prod rather than a hard violation.
+        import warnings
+
+        warnings.warn(
+            "TaskRegistry is using InMemoryTaskEventLog — task state will be lost on "
+            "restart. Acceptable for now; provide a persistent TaskEventLog backend "
+            "when task durability is required.",
+            stacklevel=4,
+        )
 
         if violations:
             joined = "; ".join(violations)
@@ -755,6 +793,9 @@ class AgentKernelRuntimeBundle:
         runner_adapter = AgentCoreRunnerAdapter()
         tool_mcp_adapter = AgentCoreToolMCPAdapter()
         task_event_log = InMemoryTaskEventLog()
+        # TaskRegistry uses InMemoryTaskEventLog — platform-level concern; no persistent
+        # backend available yet. Exempt from _enforce_production_safety() violations.
+        # When a durable TaskEventLog backend is added, this should become configurable.
         task_registry = TaskRegistry(event_appender=task_event_log)
         facade = KernelFacade(
             workflow_gateway=gateway,

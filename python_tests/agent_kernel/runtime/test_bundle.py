@@ -479,6 +479,8 @@ def test_bundle_prod_safety_accepts_sqlite_backends_in_prod(tmp_path: Path) -> N
             backend="sqlite",
             sqlite_database_path=tmp_path / "bundle-prod-turn-intent.sqlite3",
         ),
+        enable_activity_backed_executor=True,
+        activity_gateway=_RecordingActivityGateway(),
         production_safety_config=RuntimeProductionSafetyConfig(
             enabled=True,
             environment="prod",
@@ -624,3 +626,77 @@ class TestBundleTaskRegistryWiring:
         )
 
         assert bundle.task_registry._event_appender is not None  # pylint: disable=protected-access
+
+
+class TestProductionSafetyExecutorCheck:
+    """Tests for the no-op executor production safety guard."""
+
+    def test_production_safety_rejects_no_op_executor(self, tmp_path: Path) -> None:
+        """Prod safety should reject bundle built with no-op AsyncExecutorService."""
+        with pytest.raises(ValueError, match="no-op AsyncExecutorService"):
+            AgentKernelRuntimeBundle.build_minimal_complete(
+                temporal_client=_FakeTemporalClient(),
+                event_log_config=RuntimeEventLogConfig(
+                    backend="sqlite",
+                    sqlite_database_path=tmp_path / "exec-check-event-log.sqlite3",
+                ),
+                dedupe_config=RuntimeDedupeConfig(
+                    backend="sqlite",
+                    sqlite_database_path=tmp_path / "exec-check-dedupe.sqlite3",
+                ),
+                recovery_outcome_config=RuntimeRecoveryOutcomeConfig(
+                    backend="sqlite",
+                    sqlite_database_path=tmp_path / "exec-check-recovery.sqlite3",
+                ),
+                turn_intent_log_config=RuntimeTurnIntentLogConfig(
+                    backend="sqlite",
+                    sqlite_database_path=tmp_path / "exec-check-turn-intent.sqlite3",
+                ),
+                enable_activity_backed_executor=False,
+                production_safety_config=RuntimeProductionSafetyConfig(
+                    enabled=True,
+                    environment="prod",
+                ),
+            )
+
+    def test_production_safety_allows_activity_backed_executor(self, tmp_path: Path) -> None:
+        """Prod safety should pass when enable_activity_backed_executor=True with gateway."""
+        gateway = _RecordingActivityGateway()
+        bundle = AgentKernelRuntimeBundle.build_minimal_complete(
+            temporal_client=_FakeTemporalClient(),
+            event_log_config=RuntimeEventLogConfig(
+                backend="sqlite",
+                sqlite_database_path=tmp_path / "exec-allow-event-log.sqlite3",
+            ),
+            dedupe_config=RuntimeDedupeConfig(
+                backend="sqlite",
+                sqlite_database_path=tmp_path / "exec-allow-dedupe.sqlite3",
+            ),
+            recovery_outcome_config=RuntimeRecoveryOutcomeConfig(
+                backend="sqlite",
+                sqlite_database_path=tmp_path / "exec-allow-recovery.sqlite3",
+            ),
+            turn_intent_log_config=RuntimeTurnIntentLogConfig(
+                backend="sqlite",
+                sqlite_database_path=tmp_path / "exec-allow-turn-intent.sqlite3",
+            ),
+            enable_activity_backed_executor=True,
+            activity_gateway=gateway,
+            production_safety_config=RuntimeProductionSafetyConfig(
+                enabled=True,
+                environment="prod",
+            ),
+        )
+        assert isinstance(bundle.executor, ActivityBackedExecutorService)
+        bundle.event_log.close()
+        bundle.dedupe_store.close()
+        bundle.recovery_outcomes.close()
+        bundle.turn_intent_log.close()
+
+    def test_async_executor_service_no_handler_allowed_in_tests(self) -> None:
+        """AsyncExecutorService() without a handler is allowed outside prod mode."""
+        from agent_kernel.kernel.minimal_runtime import AsyncExecutorService
+
+        # Construction must not raise in test/dev mode.
+        svc = AsyncExecutorService()
+        assert svc._handler is None

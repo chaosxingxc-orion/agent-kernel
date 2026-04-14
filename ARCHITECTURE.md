@@ -320,7 +320,7 @@ POST /runs/{run_id}/resolve-escalation
     -> 工作流恢复执行下一轮 turn
 ```
 
-`resolve_escalation` 是面向平台的 `KernelFacade` 方法；它不绕过六权限 FSM — 而是通过标准信号路径重新进入。
+`resolve_escalation` 是面向平台的 `KernelFacade` 方法；它不绕过六权限 FSM — 而是通过标准信号路径重新进入。该方法属于 `KernelFacade` 公开调用方 API，下游系统（如 hi-agent）应在其 `RuntimeAdapter` 协议中暴露对应接口。
 
 ---
 
