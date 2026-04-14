@@ -15,9 +15,12 @@ This checker is intentionally read-only and non-blocking: it produces a
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,7 +360,9 @@ def _collect_dedupe_keys(dedupe_store: Any, run_id: str) -> list[str]:
                 except sqlite3.OperationalError:
                     continue
         except Exception:
-            pass
+            logger.debug(
+                "_extract_dedupe_keys_best_effort: SQLite introspection failed", exc_info=True
+            )
 
     # Strategy 2: In-memory records dict (InMemoryDedupeStore uses _records_by_key).
     for attr in ("_records_by_key", "_records"):
@@ -366,7 +371,10 @@ def _collect_dedupe_keys(dedupe_store: Any, run_id: str) -> list[str]:
             try:
                 return [k for k in records if k.startswith(f"{run_id}:")]
             except Exception:
-                pass
+                logger.debug(
+                    "_extract_dedupe_keys_best_effort: in-memory records access failed",
+                    exc_info=True,
+                )
 
     # Strategy 3: No known structure 鈥?return empty (best-effort).
     return []

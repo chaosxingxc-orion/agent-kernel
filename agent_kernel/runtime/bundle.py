@@ -169,6 +169,7 @@ class RuntimeStrictModeConfig:
     """
 
     enabled: bool = True
+    history_event_threshold: int = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -766,7 +767,10 @@ class AgentKernelRuntimeBundle:
             turn_intent_log=self.turn_intent_log,
             deduper=self.deduper,
             dedupe_store=self.dedupe_store,
-            strict_mode=RunActorStrictModeConfig(enabled=self.strict_mode_config.enabled),
+            strict_mode=RunActorStrictModeConfig(
+                enabled=self.strict_mode_config.enabled,
+                history_event_threshold=self.strict_mode_config.history_event_threshold,
+            ),
             context_port=self.cognitive_context_port,
             llm_gateway=self.cognitive_llm_gateway,
             output_parser=self.cognitive_output_parser,

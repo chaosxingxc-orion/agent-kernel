@@ -17,6 +17,7 @@ import concurrent.futures
 import contextlib
 import io
 import json
+import logging
 import os
 import time
 from contextlib import redirect_stderr, redirect_stdout
@@ -24,6 +25,8 @@ from typing import Any
 
 from agent_kernel.kernel.contracts import ScriptActivityInput, ScriptResult
 from agent_kernel.kernel.dedupe_store import IdempotencyEnvelope
+
+logger = logging.getLogger(__name__)
 
 
 class EchoScriptRuntime:
@@ -303,7 +306,10 @@ class LocalProcessScriptRuntime:
                 if isinstance(parsed, dict):
                     output_json = parsed
             except json.JSONDecodeError:
-                pass
+                logger.debug(
+                    "SubprocessScriptRuntime: stdout is not JSON, treating as plain text",
+                    exc_info=True,
+                )
 
         return ScriptResult(
             script_id=input_value.script_id,

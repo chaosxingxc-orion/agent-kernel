@@ -10,10 +10,13 @@ Useful for integration testing and operator validation after Worker crashes.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from agent_kernel.kernel.turn_engine import _build_turn_identity
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,7 +208,7 @@ class ReplayFidelityVerifier:
             if record is not None:
                 dedupe_state = record.state
         except Exception:  # pylint: disable=broad-exception-caught
-            pass
+            logger.debug("_turn_fidelity_record_best_effort: dedupe lookup failed", exc_info=True)
 
         # Event count.
         event_count: int = 0
@@ -213,7 +216,7 @@ class ReplayFidelityVerifier:
             events = await event_log.load(turn_input.run_id)
             event_count = len(events)
         except Exception:  # pylint: disable=broad-exception-caught
-            pass
+            logger.debug("_turn_fidelity_record_best_effort: event log load failed", exc_info=True)
 
         return TurnFidelityRecord(
             outcome_kind=outcome_kind,

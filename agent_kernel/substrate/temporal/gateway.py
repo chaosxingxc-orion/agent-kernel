@@ -430,13 +430,12 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         """
         query_name = self._config.event_stream_query_method_name
         if query_name is None:
-            raise NotImplementedError(
-                "stream_run_events requires TemporalGatewayConfig.event_stream_query_method_name "
-                "to be set to the Temporal workflow query method name that returns the event "
-                "stream payload. Without it, no events can be streamed and event-driven "
-                "execution loops will silently receive no events. "
-                "Configure it at TemporalSDKWorkflowGateway construction time."
+            _logger.debug(
+                "stream_run_events called but event_stream_query_method_name is not configured; "
+                "yielding empty stream for run_id=%s",
+                run_id,
             )
+            return
         handle = self._client.get_workflow_handle(
             self._workflow_id_for_run(run_id),
         )

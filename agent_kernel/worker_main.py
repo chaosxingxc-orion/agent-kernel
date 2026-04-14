@@ -22,6 +22,12 @@ Key environment variables
     Task queue the worker polls (default: ``agent-kernel``).
 ``AGENT_KERNEL_DATA_DIR``
     Directory for SQLite persistence files (default: ``/app/data``).
+``AGENT_KERNEL_LLM_PROVIDER``
+    LLM provider: ``"openai"`` or ``"anthropic"``.  Omit to disable cognitive.
+``AGENT_KERNEL_LLM_MODEL``
+    Model identifier passed to the provider API.
+``AGENT_KERNEL_LLM_API_KEY``
+    Provider API key.
 """
 
 from __future__ import annotations
@@ -29,8 +35,39 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from agent_kernel.config import KernelConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _build_llm_gateway(config: KernelConfig) -> Any | None:
+    """Construct an LLM gateway from kernel config, or return None.
+
+    Args:
+        config: Populated ``KernelConfig`` instance.
+
+    Returns:
+        A concrete ``OpenAILLMGateway`` or ``AnthropicLLMGateway`` when
+        ``config.llm_provider`` is ``"openai"`` or ``"anthropic"``
+        respectively; ``None`` for any other value (including empty string).
+
+    """
+    if config.llm_provider not in ("openai", "anthropic"):
+        return None
+    from agent_kernel.kernel.cognitive.llm_gateway_config import (
+        LLMGatewayConfig,
+        create_llm_gateway,
+    )
+
+    gateway_config = LLMGatewayConfig(
+        provider=config.llm_provider,  # type: ignore[arg-type]
+        model=config.llm_model,
+        api_key=config.llm_api_key,
+    )
+    return create_llm_gateway(gateway_config)
 
 
 async def main() -> None:
@@ -45,6 +82,7 @@ async def main() -> None:
         RuntimeDedupeConfig,
         RuntimeEventLogConfig,
         RuntimeRecoveryOutcomeConfig,
+        RuntimeStrictModeConfig,
         RuntimeTurnIntentLogConfig,
     )
     from agent_kernel.substrate.temporal.client import (
@@ -74,6 +112,19 @@ async def main() -> None:
         )
     )
 
+    llm_gateway = _build_llm_gateway(config)
+    if llm_gateway is not None:
+        logger.info(
+            "LLM gateway configured — provider=%s model=%s",
+            config.llm_provider,
+            config.llm_model,
+        )
+    else:
+        logger.info(
+            "No LLM gateway configured (llm_provider=%r); cognitive services disabled.",
+            config.llm_provider,
+        )
+
     bundle = AgentKernelRuntimeBundle.build_minimal_complete(
         temporal_client=client,
         event_log_config=RuntimeEventLogConfig(
@@ -92,6 +143,10 @@ async def main() -> None:
             backend="sqlite",
             sqlite_database_path=f"{data_dir}/turn_intent.db",
         ),
+        strict_mode_config=RuntimeStrictModeConfig(
+            history_event_threshold=config.history_reset_threshold,
+        ),
+        llm_gateway=llm_gateway,
     )
 
     worker = bundle.create_temporal_worker(

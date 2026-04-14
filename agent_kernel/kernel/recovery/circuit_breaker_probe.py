@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from agent_kernel.kernel.contracts import CircuitBreakerPolicy, CircuitBreakerStore
+
+logger = logging.getLogger(__name__)
 
 
 class CircuitBreakerProbeScheduler:
@@ -78,5 +81,7 @@ class CircuitBreakerProbeScheduler:
                 listed = self._circuit_breaker_store.list_effect_classes()
                 classes.update(str(value) for value in listed)
             except Exception:
-                pass
+                logger.debug(
+                    "CircuitBreakerProbe: store does not support list_effect_classes", exc_info=True
+                )
         return sorted(classes)
