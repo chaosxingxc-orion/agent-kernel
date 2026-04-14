@@ -1,16 +1,24 @@
 # Vendored Dependencies
 
-| Package | Version | Source | Commit | License |
-|---------|---------|--------|--------|---------|
-| temporalio | 1.24.0 | https://github.com/temporalio/sdk-python | 8f003b4 | MIT |
+| Package | Version | Upstream | Subtree prefix | Squash commit |
+|---------|---------|----------|----------------|---------------|
+| temporalio (sdk-python) | 1.24.0 | https://github.com/temporalio/sdk-python | `external/temporal-sdk-python` | 4cde647 |
+
+## git subtree workflow
+
+```bash
+# Pull upstream tag upgrade (e.g. 1.25.0)
+git subtree pull --prefix external/temporal-sdk-python \
+  https://github.com/temporalio/sdk-python.git 1.25.0 --squash
+
+# Push a local patch back to a personal fork
+git subtree push --prefix external/temporal-sdk-python \
+  https://github.com/<you>/sdk-python.git patch/my-fix
+```
 
 ## Notes
 
-- `temporalio/` — Temporal Python SDK source, vendored at tag `1.24.0`.
-  Kept for offline reference and local patching. The installed package
-  (`pip install -e ".[temporal]"`) takes precedence at runtime; this copy
-  is not on `sys.path` by default.
-- To apply a local patch: `pip install -e external/temporalio` (requires
-  the SDK's own `[build-system]` to be present — see `temporalio_pyproject.toml`).
-- Upgrade procedure: copy new tag's `temporalio/` directory here and update
-  the version row above.
+- `external/temporal-sdk-python/` is the full SDK tree embedded via `git subtree add --squash`.
+  It is excluded from the package build (hatchling), pyright type-checking, and ruff lint.
+- Runtime dependency is still installed via `pip install -e ".[temporal]"` (`temporalio>=1.7,<2`).
+  This vendored copy is for offline reference, local patching, and controlled upgrades.
