@@ -24,13 +24,16 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 from agent_kernel.kernel.contracts import (
+    MCPActivityInput,
     QueryRunResponse,
     RunProjection,
     RuntimeEvent,
     SignalRunRequest,
     SpawnChildRunRequest,
     StartRunRequest,
+    TemporalActivityGateway,
     TemporalWorkflowGateway,
+    ToolActivityInput,
 )
 from agent_kernel.substrate.temporal.run_actor_workflow import (
     RunActorWorkflow,
@@ -75,16 +78,20 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         self,
         temporal_client: Any,
         config: TemporalGatewayConfig | None = None,
+        activity_gateway: TemporalActivityGateway | None = None,
     ) -> None:
         """Initialize gateway with Temporal client and optional config.
 
         Args:
             temporal_client: Temporal SDK client instance.
             config: Configuration for workflow id composition and task routing.
+            activity_gateway: Optional activity gateway used by execute_turn
+                to dispatch tool_call and mcp_call actions.
 
         """
         self._client = temporal_client
         self._config = config or TemporalGatewayConfig()
+        self._activity_gateway = activity_gateway
 
     async def start_workflow(self, request: StartRunRequest) -> dict[str, str]:
         """Start one run workflow and returns a facade-safe workflow id.
@@ -324,15 +331,58 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         self,
         run_id: str,
         action: Any,
-        handler: Any,
+        _handler: Any,
         *,
         idempotency_key: str,
     ) -> Any:
-        """Raise until Temporal execute-turn activity wiring is implemented."""
-        raise NotImplementedError(
-            "TemporalSDKWorkflowGateway.execute_turn() requires Temporal Activity "
-            "registration. Use LocalWorkflowGateway (LocalSubstrateConfig) for now."
-        )
+        """Route one action to the configured activity_gateway.
+
+        Dispatches ``tool_call`` actions via ``execute_tool`` and ``mcp_call``
+        actions via ``execute_mcp``.  Raises ``RuntimeError`` when no
+        activity_gateway was provided at construction time.
+
+        Args:
+            run_id: Identifier of the target run.
+            action: Kernel action DTO; must carry an ``action_type`` attribute.
+            _handler: Unused by this implementation (kept for interface
+                compatibility with ``LocalWorkflowGateway``).
+            idempotency_key: Used as ``action_id`` when constructing activity
+                input DTOs.
+
+        Returns:
+            Result returned by the activity_gateway call.
+
+        Raises:
+            RuntimeError: When ``activity_gateway`` was not provided.
+            ValueError: When ``action_type`` is not supported.
+
+        """
+        if self._activity_gateway is None:
+            raise RuntimeError(
+                "execute_turn requires an activity_gateway; "
+                "pass activity_gateway= to TemporalSDKWorkflowGateway."
+            )
+        action_type = getattr(action, "action_type", None)
+        if action_type == "tool_call":
+            return await self._activity_gateway.execute_tool(
+                ToolActivityInput(
+                    run_id=run_id,
+                    action_id=idempotency_key,
+                    tool_name=getattr(action, "tool_name", ""),
+                    arguments=getattr(action, "arguments", {}),
+                )
+            )
+        if action_type == "mcp_call":
+            return await self._activity_gateway.execute_mcp(
+                MCPActivityInput(
+                    run_id=run_id,
+                    action_id=idempotency_key,
+                    server_name=getattr(action, "mcp_server", ""),
+                    operation=getattr(action, "mcp_capability", ""),
+                    arguments=getattr(action, "arguments", {}),
+                )
+            )
+        raise ValueError(f"execute_turn: unsupported action_type={action_type!r}")
 
     def stream_run_events(self, run_id: str) -> AsyncIterator[RuntimeEvent]:
         """Streams runtime events for one run through optional query hook.

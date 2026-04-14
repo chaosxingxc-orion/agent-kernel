@@ -7,7 +7,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from agent_kernel.adapters.agent_core.session_adapter import AgentCoreCallbackInput
+from agent_kernel.kernel.admission import SnapshotDrivenAdmissionService
+from agent_kernel.kernel.cognitive.llm_gateway import EchoLLMGateway
 from agent_kernel.kernel.contracts import (
     Action,
     EffectClass,
@@ -21,6 +25,7 @@ from agent_kernel.kernel.minimal_runtime import (
     ActivityBackedExecutorService,
     InMemoryKernelRuntimeEventLog,
 )
+from agent_kernel.kernel.persistence.sqlite_decision_deduper import SQLiteDecisionDeduper
 from agent_kernel.kernel.persistence.sqlite_dedupe_store import SQLiteDedupeStore
 from agent_kernel.kernel.persistence.sqlite_event_log import (
     SQLiteKernelRuntimeEventLog,
@@ -34,8 +39,10 @@ from agent_kernel.kernel.persistence.sqlite_turn_intent_log import (
 from agent_kernel.kernel.recovery import PlannedRecoveryGateService
 from agent_kernel.runtime.bundle import (
     AgentKernelRuntimeBundle,
+    RuntimeDecisionDedupeConfig,
     RuntimeDedupeConfig,
     RuntimeEventLogConfig,
+    RuntimeProductionSafetyConfig,
     RuntimeRecoveryOutcomeConfig,
     RuntimeStrictModeConfig,
     RuntimeTurnIntentLogConfig,
@@ -437,3 +444,146 @@ def test_bundle_builds_activity_gateway_from_handler_maps_and_routes() -> None:
     assert tool_requests[0].tool_name == "web.search"
     assert len(mcp_requests) == 1
     assert mcp_requests[0].server_name == "docs"
+
+
+def test_bundle_prod_safety_rejects_in_memory_defaults_in_prod() -> None:
+    """Prod safety mode should reject in-memory defaults."""
+    with pytest.raises(ValueError, match="production safety check failed"):
+        AgentKernelRuntimeBundle.build_minimal_complete(
+            temporal_client=_FakeTemporalClient(),
+            production_safety_config=RuntimeProductionSafetyConfig(
+                enabled=True,
+                environment="prod",
+            ),
+        )
+
+
+def test_bundle_prod_safety_accepts_sqlite_backends_in_prod(tmp_path: Path) -> None:
+    """Prod safety mode should allow bundle build with persisted backends."""
+    bundle = AgentKernelRuntimeBundle.build_minimal_complete(
+        temporal_client=_FakeTemporalClient(),
+        event_log_config=RuntimeEventLogConfig(
+            backend="sqlite",
+            sqlite_database_path=tmp_path / "bundle-prod-event-log.sqlite3",
+        ),
+        dedupe_config=RuntimeDedupeConfig(
+            backend="sqlite",
+            sqlite_database_path=tmp_path / "bundle-prod-dedupe.sqlite3",
+        ),
+        recovery_outcome_config=RuntimeRecoveryOutcomeConfig(
+            backend="sqlite",
+            sqlite_database_path=tmp_path / "bundle-prod-recovery.sqlite3",
+        ),
+        turn_intent_log_config=RuntimeTurnIntentLogConfig(
+            backend="sqlite",
+            sqlite_database_path=tmp_path / "bundle-prod-turn-intent.sqlite3",
+        ),
+        production_safety_config=RuntimeProductionSafetyConfig(
+            enabled=True,
+            environment="prod",
+        ),
+    )
+
+    assert isinstance(bundle.event_log, SQLiteKernelRuntimeEventLog)
+    assert isinstance(bundle.dedupe_store, SQLiteDedupeStore)
+    assert isinstance(bundle.recovery_outcomes, SQLiteRecoveryOutcomeStore)
+    assert isinstance(bundle.turn_intent_log, SQLiteTurnIntentLog)
+    bundle.event_log.close()
+    bundle.dedupe_store.close()
+    bundle.recovery_outcomes.close()
+    bundle.turn_intent_log.close()
+
+
+def test_bundle_prod_safety_rejects_echo_llm_gateway_in_prod(tmp_path: Path) -> None:
+    """Prod safety mode should block EchoLLMGateway."""
+    with pytest.raises(ValueError, match="EchoLLMGateway"):
+        AgentKernelRuntimeBundle.build_minimal_complete(
+            temporal_client=_FakeTemporalClient(),
+            event_log_config=RuntimeEventLogConfig(
+                backend="sqlite",
+                sqlite_database_path=tmp_path / "bundle-prod-event-log2.sqlite3",
+            ),
+            dedupe_config=RuntimeDedupeConfig(
+                backend="sqlite",
+                sqlite_database_path=tmp_path / "bundle-prod-dedupe2.sqlite3",
+            ),
+            recovery_outcome_config=RuntimeRecoveryOutcomeConfig(
+                backend="sqlite",
+                sqlite_database_path=tmp_path / "bundle-prod-recovery2.sqlite3",
+            ),
+            turn_intent_log_config=RuntimeTurnIntentLogConfig(
+                backend="sqlite",
+                sqlite_database_path=tmp_path / "bundle-prod-turn-intent2.sqlite3",
+            ),
+            llm_gateway=EchoLLMGateway(),
+            production_safety_config=RuntimeProductionSafetyConfig(
+                enabled=True,
+                environment="prod",
+            ),
+        )
+
+
+def test_bundle_default_deduper_is_sqlite_decision_deduper() -> None:
+    """Default decision deduper should be SQLiteDecisionDeduper (in-memory SQLite)."""
+    bundle = AgentKernelRuntimeBundle.build_minimal_complete(temporal_client=_FakeTemporalClient())
+    assert isinstance(bundle.deduper, SQLiteDecisionDeduper)
+
+
+def test_bundle_decision_deduper_config_in_memory_backend() -> None:
+    """Explicit in_memory backend should produce InMemoryDecisionDeduper."""
+    from agent_kernel.kernel.minimal_runtime import InMemoryDecisionDeduper
+
+    bundle = AgentKernelRuntimeBundle.build_minimal_complete(
+        temporal_client=_FakeTemporalClient(),
+        decision_deduper_config=RuntimeDecisionDedupeConfig(backend="in_memory"),
+    )
+    assert isinstance(bundle.deduper, InMemoryDecisionDeduper)
+
+
+def test_bundle_decision_deduper_config_sqlite_backend(tmp_path: Path) -> None:
+    """Explicit sqlite backend should produce SQLiteDecisionDeduper backed by file."""
+    bundle = AgentKernelRuntimeBundle.build_minimal_complete(
+        temporal_client=_FakeTemporalClient(),
+        decision_deduper_config=RuntimeDecisionDedupeConfig(
+            backend="sqlite",
+            sqlite_database_path=tmp_path / "decision-deduper.sqlite3",
+        ),
+    )
+    assert isinstance(bundle.deduper, SQLiteDecisionDeduper)
+
+
+def test_bundle_default_admission_is_snapshot_driven() -> None:
+    """Default admission service should be SnapshotDrivenAdmissionService."""
+    bundle = AgentKernelRuntimeBundle.build_minimal_complete(temporal_client=_FakeTemporalClient())
+    assert isinstance(bundle.admission, SnapshotDrivenAdmissionService)
+
+
+def test_bundle_prod_safety_rejects_in_memory_decision_deduper(
+    tmp_path: Path,
+) -> None:
+    """Prod safety mode should block decision_deduper backend=in_memory."""
+    with pytest.raises(ValueError, match="decision_deduper"):
+        AgentKernelRuntimeBundle.build_minimal_complete(
+            temporal_client=_FakeTemporalClient(),
+            event_log_config=RuntimeEventLogConfig(
+                backend="sqlite",
+                sqlite_database_path=tmp_path / "safety-event-log.sqlite3",
+            ),
+            dedupe_config=RuntimeDedupeConfig(
+                backend="sqlite",
+                sqlite_database_path=tmp_path / "safety-dedupe.sqlite3",
+            ),
+            decision_deduper_config=RuntimeDecisionDedupeConfig(backend="in_memory"),
+            recovery_outcome_config=RuntimeRecoveryOutcomeConfig(
+                backend="sqlite",
+                sqlite_database_path=tmp_path / "safety-recovery.sqlite3",
+            ),
+            turn_intent_log_config=RuntimeTurnIntentLogConfig(
+                backend="sqlite",
+                sqlite_database_path=tmp_path / "safety-turn-intent.sqlite3",
+            ),
+            production_safety_config=RuntimeProductionSafetyConfig(
+                enabled=True,
+                environment="prod",
+            ),
+        )

@@ -30,3 +30,20 @@ jobs:
 
       - name: Run Python lint gate
         run: python -m ruff check agent_kernel/ python_tests/ && python -m pylint agent_kernel/
+
+      - name: Run production safety gate
+        run: |
+          python scripts/check_prod_safety.py \
+            --allow 'agent_kernel/adapters/agent_core/session_adapter.py' \
+            --allow 'agent_kernel/adapters/facade/kernel_facade.py' \
+            --allow 'agent_kernel/kernel/capability_snapshot.py' \
+            --allow 'agent_kernel/kernel/cognitive/*.py' \
+            --allow 'agent_kernel/kernel/contracts.py' \
+            --allow 'agent_kernel/kernel/minimal_runtime.py' \
+            --allow 'agent_kernel/kernel/peer_auth.py' \
+            --allow 'agent_kernel/kernel/persistence/consistency.py' \
+            --allow 'agent_kernel/kernel/persistence/sqlite_*.py' \
+            --allow 'agent_kernel/kernel/task_manager/*.py' \
+            --allow 'agent_kernel/kernel/turn_engine.py' \
+            --allow 'agent_kernel/runtime/bundle.py' \
+            --allow 'agent_kernel/substrate/temporal/*.py'

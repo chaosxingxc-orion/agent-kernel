@@ -13,9 +13,16 @@ dependencies = [
     "uvicorn[standard]>=0.29",
 ]
 
+[project.scripts]
+agent-kernel-server = "agent_kernel.service.http_server:_server_main"
+agent-kernel-worker = "agent_kernel.worker_main:main_sync"
+
 [project.optional-dependencies]
 temporal = ["temporalio>=1.7"]
 pg = ["asyncpg>=0.30"]
+anthropic = ["anthropic>=0.40"]
+openai = ["openai>=1.50", "tiktoken>=0.7"]
+llm = ["anthropic>=0.40", "openai>=1.50", "tiktoken>=0.7"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",

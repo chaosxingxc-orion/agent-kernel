@@ -20,6 +20,11 @@ def _make_facade(**kwargs) -> KernelFacade:
     return KernelFacade(gateway, **kwargs)
 
 
+def _inner_gw(facade: KernelFacade) -> AsyncMock:
+    """Unwrap WorkflowGatewaySignalAdapter to reach the underlying AsyncMock."""
+    return getattr(facade._workflow_gateway, "_gateway", facade._workflow_gateway)
+
+
 # ---------------------------------------------------------------------------
 # injectable kernel_version
 # ---------------------------------------------------------------------------
@@ -92,7 +97,7 @@ class TestApprovalRefDedup:
             reviewer_id="alice",
         )
         asyncio.run(facade.submit_approval(request))
-        facade._workflow_gateway.signal_workflow.assert_awaited_once()
+        _inner_gw(facade).signal_workflow.assert_awaited_once()
 
     def test_duplicate_approval_ref_is_dropped(self) -> None:
         facade = _make_facade()
@@ -105,7 +110,7 @@ class TestApprovalRefDedup:
         asyncio.run(facade.submit_approval(request))
         asyncio.run(facade.submit_approval(request))
         # Signal should only fire once despite two calls
-        assert facade._workflow_gateway.signal_workflow.await_count == 1
+        assert _inner_gw(facade).signal_workflow.await_count == 1
 
     def test_same_ref_different_run_both_signal(self) -> None:
         facade = _make_facade()
@@ -117,7 +122,7 @@ class TestApprovalRefDedup:
         )
         asyncio.run(facade.submit_approval(r1))
         asyncio.run(facade.submit_approval(r2))
-        assert facade._workflow_gateway.signal_workflow.await_count == 2
+        assert _inner_gw(facade).signal_workflow.await_count == 2
 
     def test_different_refs_same_run_both_signal(self) -> None:
         facade = _make_facade()
@@ -129,7 +134,7 @@ class TestApprovalRefDedup:
         )
         asyncio.run(facade.submit_approval(r1))
         asyncio.run(facade.submit_approval(r2))
-        assert facade._workflow_gateway.signal_workflow.await_count == 2
+        assert _inner_gw(facade).signal_workflow.await_count == 2
 
     def test_dedup_is_per_facade_instance(self) -> None:
         """Two facade instances do not share the dedup set."""

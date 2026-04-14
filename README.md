@@ -22,49 +22,62 @@
 ```text
 agent_kernel/
   adapters/
-    facade/kernel_facade.py       # 唯一平台入口 (KernelFacade)
-    agent_core/                   # AgentCore 适配器 (context/checkpoint/runner/session/tool)
+    facade/kernel_facade.py                  # 唯一平台入口 (KernelFacade)
+    facade/workflow_gateway_adapter.py       # 信号 API 兼容适配器
+    agent_core/                              # AgentCore 适配器 (context/checkpoint/runner/session/tool)
   kernel/
-    contracts.py                  # 全部 DTO 与 Protocol 契约
-    turn_engine.py                # FSM 状态机核心
-    minimal_runtime.py            # 内存实现 (PoC/测试)
-    capability_snapshot.py        # SHA256 快照构建器
+    contracts.py                             # 全部 DTO 与 Protocol 契约
+    turn_engine.py                           # FSM 状态机核心
+    minimal_runtime.py                       # 内存实现 (PoC/测试)
+    capability_snapshot.py                   # SHA256 快照构建器
     capability_snapshot_resolver.py
-    dedupe_store.py               # 至多一次分发状态机
-    event_registry.py             # 25+ 内核事件类型目录
-    action_type_registry.py       # action_type 判别器注册
-    failure_code_registry.py      # 失败码注册表
-    failure_evidence.py           # 失败证据构建
-    failure_mappings.py           # 失败码到恢复模式映射
-    idempotency_key_policy.py     # 幂等键策略
-    peer_auth.py                  # 对等信号鉴权
-    replay_fidelity.py            # 重放保真度校验
-    branch_monitor.py             # 分支监控
-    cognitive/                    # LLM 推理网关与脚本运行时
-    persistence/                  # PostgreSQL / SQLite 持久化实现
-    recovery/                     # 恢复决策 (planner/gate/circuit_breaker)
-    task_manager/                 # 任务注册、健康监控
+    dedupe_store.py                          # 至多一次分发状态机
+    event_registry.py                        # 25+ 内核事件类型目录
+    action_type_registry.py                  # action_type 判别器注册
+    failure_code_registry.py                 # 失败码注册表
+    failure_evidence.py                      # 失败证据构建
+    failure_mappings.py                      # 失败码到恢复模式映射
+    idempotency_key_policy.py                # 幂等键策略
+    peer_auth.py                             # 对等信号鉴权
+    replay_fidelity.py                       # 重放保真度校验
+    branch_monitor.py                        # 分支监控
+    admission/                               # 生产准入服务
+      snapshot_driven_admission.py           # SnapshotDrivenAdmissionService (5-规则流水线)
+      tenant_policy.py                       # TenantPolicyResolver
+    cognitive/                               # LLM 推理网关与脚本运行时
+      llm_gateway_anthropic.py               # AnthropicLLMGateway
+      llm_gateway_openai.py                  # OpenAILLMGateway
+      script_runtime_subprocess.py           # SubprocessScriptRuntime
+    persistence/                             # PostgreSQL / SQLite 持久化实现
+      sqlite_decision_deduper.py             # SQLiteDecisionDeduper (WAL 模式)
+    recovery/                                # 恢复决策 (planner/gate/circuit_breaker)
+    task_manager/                            # 任务注册、健康监控
   runtime/
-    health.py                     # K8s 存活/就绪探针
-    heartbeat.py                  # 超时看门狗
-    metrics.py                    # 指标采集 (KernelMetricsCollector)
-    observability_hooks.py        # 可观测性钩子协议
-    otel_export.py                # OpenTelemetry 导出
-    drain_coordinator.py          # 优雅排空协调器
-    kernel_runtime.py             # KernelRuntime 组装 (遗留, 不推荐直接使用)
+    bundle.py                                # AgentKernelRuntimeBundle 组装
+    health.py                                # K8s 存活/就绪探针
+    heartbeat.py                             # 超时看门狗
+    metrics.py                               # 指标采集 (KernelMetricsCollector)
+    observability_hooks.py                   # 可观测性钩子协议
+    otel_export.py                           # OpenTelemetry 导出
+    drain_coordinator.py                     # 优雅排空协调器
+    kernel_runtime.py                        # KernelRuntime 组装 (遗留, 不推荐直接使用)
   service/
-    http_server.py                # Starlette HTTP 服务, create_app / create_app_default
-    auth_middleware.py            # Bearer-token 认证中间件
-    openapi.py                    # OpenAPI 规范生成
-    serialization.py              # 请求/响应序列化
-  skills/                         # 技能运行时契约
+    http_server.py                           # Starlette HTTP 服务, create_app / create_app_temporal
+    auth_middleware.py                       # Bearer-token 认证中间件
+    openapi.py                               # OpenAPI 规范生成
+    serialization.py                         # 请求/响应序列化
+  skills/                                    # 技能运行时契约
   substrate/
-    local/adaptor.py              # 纯进程内执行 (LocalWorkflowGateway)
-    temporal/                     # Temporal workflow / worker / activity
-  config.py                       # KernelConfig -- 集中配置
-  testing.py                      # 测试工具 re-export
-python_tests/                     # 全部测试
-docs/                             # 设计文档
+    local/adaptor.py                         # 纯进程内执行 (LocalWorkflowGateway)
+    temporal/                                # Temporal workflow / worker / activity
+  config.py                                  # KernelConfig -- 集中配置
+  testing.py                                 # 测试工具 re-export
+  worker_main.py                             # 独立 Temporal worker CLI
+python_tests/                                # 全部测试
+docs/                                        # 设计文档
+scripts/                                     # 工具脚本
+  check_prod_safety.py                       # 生产安全扫描脚本
+docker-compose.yml                           # 一键本地栈 (Temporal + kernel)
 ```
 
 ## 架构概览
@@ -115,37 +128,59 @@ graph LR
 
 ## 快速启动
 
-### HTTP 服务方式（推荐）
-
-**Docker：**
+### Docker Compose（最简路径）
 
 ```bash
-docker build -t agent-kernel .
-docker run -p 8400:8400 agent-kernel
+# 启动 Temporal + kernel（含 HTTP 服务和 worker）
+docker compose up --build
+
+# 确认就绪
+curl http://localhost:8400/health/liveness
+curl http://localhost:8400/manifest
 ```
 
-**uvicorn 直接启动：**
+`docker-compose.yml` 包含两个服务：
+- `temporal` — `temporalio/auto-setup:latest`，SQLite 后端，无需外部数据库
+- `kernel` — HTTP API + Temporal worker 合一容器，挂载 `kernel-data` volume
+
+### CLI 命令（已安装包）
 
 ```bash
 pip install -e ".[dev]"
-python -m uvicorn agent_kernel.service.http_server:create_app_default \
-    --host 0.0.0.0 --port 8400
+
+# 启动 HTTP 服务（内置 Temporal worker lifespan）
+agent-kernel-server
+
+# 独立 Temporal worker（从环境变量读取配置）
+agent-kernel-worker
 ```
 
-服务启动后访问 `GET /health/liveness` 确认存活，`GET /openapi.json` 查看完整 API 规范。
+两个入口均从环境变量读取 `KernelConfig`（见配置章节）。`agent-kernel-server` 使用 `create_app_temporal()` 工厂，在同一进程内同时启动 HTTP 服务和 Temporal worker。
 
-### 代码嵌入方式
-
-**使用 `create_app_default()`（内存运行时，适合开发/测试）：**
+### 代码嵌入方式（Temporal 连接）
 
 ```python
-from agent_kernel.service.http_server import create_app_default
-from agent_kernel.config import KernelConfig
+from temporalio.client import Client
+from agent_kernel.runtime.bundle import (
+    AgentKernelRuntimeBundle,
+    RuntimeEventLogConfig,
+    RuntimeDecisionDedupeConfig,
+    RuntimeProductionSafetyConfig,
+)
 
-app = create_app_default(KernelConfig(http_port=8400))
+temporal_client = await Client.connect("localhost:7233")
+
+bundle = AgentKernelRuntimeBundle.build_minimal_complete(
+    temporal_client=temporal_client,
+    event_log_config=RuntimeEventLogConfig(backend="sqlite", sqlite_database_path="/data/events.db"),
+    decision_deduper_config=RuntimeDecisionDedupeConfig(backend="sqlite", sqlite_database_path="/data/dedup.db"),
+    production_safety_config=RuntimeProductionSafetyConfig(enabled=True, environment="prod"),
+)
+
+# bundle.facade 是 KernelFacade，bundle.gateway 是 TemporalSDKWorkflowGateway
 ```
 
-**直接构建 KernelFacade + LocalWorkflowGateway：**
+### 纯进程内方式（开发/测试）
 
 ```python
 from agent_kernel.adapters.facade.kernel_facade import KernelFacade
@@ -179,7 +214,6 @@ deps = RunActorDependencyBundle(
 gateway = LocalWorkflowGateway(deps)
 facade = KernelFacade(workflow_gateway=gateway)
 
-# 启动一个 run
 resp = await facade.start_run(
     StartRunRequest(
         initiator="user",
@@ -234,8 +268,98 @@ cfg = KernelConfig.from_env()
 | `AGENT_KERNEL_CIRCUIT_BREAKER_THRESHOLD` | `circuit_breaker_threshold` | `5` | 熔断器触发阈值 |
 | `AGENT_KERNEL_CIRCUIT_BREAKER_HALF_OPEN_MS` | `circuit_breaker_half_open_ms` | `30000` | 熔断器半开窗口（毫秒） |
 | `AGENT_KERNEL_HISTORY_RESET_THRESHOLD` | `history_reset_threshold` | `10000` | Temporal continue_as_new 阈值 |
+| `AGENT_KERNEL_TEMPORAL_HOST` | `temporal_host` | `localhost:7233` | Temporal 服务地址 |
+| `AGENT_KERNEL_TEMPORAL_NAMESPACE` | `temporal_namespace` | `default` | Temporal 命名空间 |
+| `AGENT_KERNEL_TEMPORAL_TASK_QUEUE` | `temporal_task_queue` | `agent-kernel` | Temporal 任务队列 |
+| `AGENT_KERNEL_LLM_PROVIDER` | `llm_provider` | `""` | LLM 提供商（`anthropic` 或 `openai`） |
+| `AGENT_KERNEL_LLM_MODEL` | `llm_model` | `""` | LLM 模型名称 |
+| `AGENT_KERNEL_LLM_API_KEY` | `llm_api_key` | `""` | LLM API 密钥（也可使用 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`） |
+| `AGENT_KERNEL_SCRIPT_TIMEOUT_S` | `script_timeout_s` | `30.0` | 脚本子进程超时（秒） |
 
 完整字段列表见 `agent_kernel/config.py`。
+
+## LLM 网关与脚本运行时
+
+v0.2.0 引入三个生产级认知组件，均为可选依赖，不安装对应包时降级为 PoC 实现。
+
+### 安装可选依赖
+
+```bash
+# Anthropic
+pip install -e ".[anthropic]"
+
+# OpenAI
+pip install -e ".[openai]"
+```
+
+### LLM 网关
+
+```python
+from agent_kernel.kernel.cognitive.llm_gateway_config import LLMGatewayConfig
+from agent_kernel.kernel.cognitive.llm_gateway_anthropic import AnthropicLLMGateway
+from agent_kernel.kernel.cognitive.llm_gateway_openai import OpenAILLMGateway
+
+# 从环境变量自动构建（读取 AGENT_KERNEL_LLM_* 或 ANTHROPIC_API_KEY / OPENAI_API_KEY）
+cfg = LLMGatewayConfig.from_env()
+
+if cfg.provider == "anthropic":
+    gateway = AnthropicLLMGateway(cfg)
+elif cfg.provider == "openai":
+    gateway = OpenAILLMGateway(cfg)
+```
+
+- `AnthropicLLMGateway`：依赖 `anthropic>=0.40`，调用 Anthropic Messages API。
+- `OpenAILLMGateway`：依赖 `openai>=1.50` 和 `tiktoken>=0.7`，调用 OpenAI Chat Completions API。
+
+### 脚本运行时
+
+```python
+from agent_kernel.kernel.cognitive.script_runtime_subprocess import SubprocessScriptRuntime
+
+runtime = SubprocessScriptRuntime(timeout_s=30.0)
+```
+
+`SubprocessScriptRuntime` 在提交前用 `ast.parse` 验证脚本语法，在隔离的子进程中执行，支持可配置超时，替代 PoC 的 `EchoScriptRuntime`。
+
+## 生产安全
+
+### RuntimeProductionSafetyConfig
+
+`build_minimal_complete()` 接受 `production_safety_config` 参数。当 `enabled=True` 且 `environment="prod"` 时，以下配置会被拒绝：
+
+- `event_log backend=in_memory`
+- `dedupe_store backend=in_memory`
+- `decision_deduper backend=in_memory`
+- `recovery_outcome backend=in_memory`
+- 未提供 `context_port` 或 `llm_gateway`（认知组件缺失）
+
+```python
+from agent_kernel.runtime.bundle import RuntimeProductionSafetyConfig
+
+config = RuntimeProductionSafetyConfig(enabled=True, environment="prod")
+```
+
+### 生产安全扫描脚本
+
+`scripts/check_prod_safety.py` 扫描 `agent_kernel/` 源码，检测 PoC/mock/stub/placeholder 标记，并对已知 PoC 文件使用白名单放行。CI 在 `ci-lint.yml` 中自动运行此检查：
+
+```bash
+python scripts/check_prod_safety.py
+```
+
+### 生产就绪默认值
+
+| 组件 | PoC 默认（测试） | 生产默认（v0.2.0） |
+|------|-----------------|-------------------|
+| `DecisionDeduper` | `InMemoryDecisionDeduper` | `SQLiteDecisionDeduper`（WAL 模式，线程安全，重启安全） |
+| `DispatchAdmissionService` | `StaticDispatchAdmissionService` | `SnapshotDrivenAdmissionService`（5 规则流水线） |
+| `ScriptRuntime` | `EchoScriptRuntime` | `SubprocessScriptRuntime` |
+
+`SnapshotDrivenAdmissionService` 的 5 规则流水线依次检查：`permission_mode` → `binding_existence` → `idempotency` → `risk_tier` → `rate_limit`，策略由 `TenantPolicyResolver` 提供（支持 `"policy:default"` 和 `"file:///path/to/policy.json"`）。
+
+## WorkflowGatewaySignalAdapter
+
+`agent_kernel/adapters/facade/workflow_gateway_adapter.py` 提供 `WorkflowGatewaySignalAdapter`，将 `signal_workflow(run_id, request)` 与遗留 `signal_run(request)` API 规范化，使不同网关实现可以透明互换。
 
 ## API 端点
 
@@ -290,6 +414,9 @@ pylint agent_kernel/
 
 # 类型检查
 pyright agent_kernel/
+
+# 生产安全扫描
+python scripts/check_prod_safety.py
 ```
 
 Pytest 配置在 `pyproject.toml` 中：`pythonpath = ["."]`，`testpaths = ["python_tests"]`。
@@ -297,8 +424,8 @@ Pytest 配置在 `pyproject.toml` 中：`pythonpath = ["."]`，`testpaths = ["py
 ## 工程质量
 
 - **CI Workflows** (`.github/workflows/`)：
-  - `ci-test.yml` -- pytest + 覆盖率 (最低 60%)
-  - `ci-lint.yml` -- ruff check + pylint
+  - `ci-test.yml` -- pytest + 覆盖率（最低 60%）
+  - `ci-lint.yml` -- ruff check + pylint + 生产安全扫描（`check_prod_safety.py`，已知 PoC 文件白名单放行）
   - `ci-typecheck.yml` -- pyright
 - **Pre-commit hooks** (`.pre-commit-config.yaml`)：ruff check --fix + ruff format
 - **代码规范**：Google Python Style Guide，ruff line-length=100，target Python 3.14

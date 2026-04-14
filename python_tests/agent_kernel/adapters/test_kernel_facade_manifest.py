@@ -21,6 +21,11 @@ def _make_facade(**kwargs) -> KernelFacade:
     return KernelFacade(gateway, **kwargs)
 
 
+def _inner_gw(facade: KernelFacade) -> AsyncMock:
+    """Unwrap WorkflowGatewaySignalAdapter to reach the underlying AsyncMock."""
+    return getattr(facade._workflow_gateway, "_gateway", facade._workflow_gateway)
+
+
 # ---------------------------------------------------------------------------
 # get_manifest
 # ---------------------------------------------------------------------------
@@ -93,8 +98,8 @@ class TestSubmitApproval:
             reviewer_id="user-alice",
         )
         asyncio.run(facade.submit_approval(request))
-        facade._workflow_gateway.signal_workflow.assert_awaited_once()
-        call_args = facade._workflow_gateway.signal_workflow.call_args
+        _inner_gw(facade).signal_workflow.assert_awaited_once()
+        call_args = _inner_gw(facade).signal_workflow.call_args
         signal_request = call_args[0][1]
         assert signal_request.signal_type == "approval_submitted"
         assert signal_request.signal_payload["approved"] is True
@@ -111,7 +116,7 @@ class TestSubmitApproval:
             reason="policy violation",
         )
         asyncio.run(facade.submit_approval(request))
-        call_args = facade._workflow_gateway.signal_workflow.call_args
+        call_args = _inner_gw(facade).signal_workflow.call_args
         signal_request = call_args[0][1]
         assert signal_request.signal_payload["approved"] is False
         assert signal_request.signal_payload["reason"] == "policy violation"
@@ -129,6 +134,7 @@ class TestSubmitApproval:
             asyncio.run(facade.submit_approval(request))
 
     def test_submit_approval_tracks_inflight_with_drain_coordinator(self) -> None:
+
         class _DrainStub:
             def __init__(self) -> None:
                 self.enter_calls = 0

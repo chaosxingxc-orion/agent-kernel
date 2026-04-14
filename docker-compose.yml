@@ -1,0 +1,92 @@
+---
+# agent-kernel local development stack
+#
+# Services
+# --------
+# temporal      – Temporal server (SQLite backend, no external DB required)
+# kernel        – HTTP API + Temporal worker in one container (all-in-one mode)
+#
+# To scale the worker independently, comment out the `kernel` service and
+# uncomment the `kernel-api` + `kernel-worker` split below.
+#
+# Usage
+# -----
+#   docker compose up --build
+#   curl http://localhost:8400/health/liveness
+#   curl http://localhost:8400/manifest
+
+services:
+  temporal:
+    image: temporalio/auto-setup:latest
+    ports:
+      - "7233:7233"
+    environment:
+      - DB=sqlite
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # All-in-one: HTTP server + Temporal worker in a single container.
+  # Both share the same SQLite volume for durable state.
+  kernel:
+    build: .
+    ports:
+      - "8400:8400"
+    environment:
+      AGENT_KERNEL_TEMPORAL_HOST: "temporal:7233"
+      AGENT_KERNEL_TEMPORAL_NAMESPACE: "default"
+      AGENT_KERNEL_TEMPORAL_TASK_QUEUE: "agent-kernel"
+      AGENT_KERNEL_DATA_DIR: "/app/data"
+      # Optional: set an API key to protect the HTTP endpoints.
+      # AGENT_KERNEL_API_KEY: "changeme"
+    volumes:
+      - kernel-data:/app/data
+    depends_on:
+      temporal:
+        condition: service_healthy
+    restart: on-failure
+
+  # -------------------------------------------------------------------------
+  # Split mode: uncomment and comment out `kernel` above for independent
+  # scaling of the HTTP API and Temporal worker.
+  # -------------------------------------------------------------------------
+  # kernel-api:
+  #   build: .
+  #   ports:
+  #     - "8400:8400"
+  #   command:
+  #     - python
+  #     - -m
+  #     - uvicorn
+  #     - "agent_kernel.service.http_server:create_app_temporal"
+  #     - --host
+  #     - "0.0.0.0"
+  #     - --port
+  #     - "8400"
+  #     - --factory
+  #   environment:
+  #     AGENT_KERNEL_TEMPORAL_HOST: "temporal:7233"
+  #     AGENT_KERNEL_DATA_DIR: "/app/data"
+  #   volumes:
+  #     - kernel-data:/app/data
+  #   depends_on:
+  #     temporal:
+  #       condition: service_healthy
+  #
+  # kernel-worker:
+  #   build: .
+  #   command: ["agent-kernel-worker"]
+  #   environment:
+  #     AGENT_KERNEL_TEMPORAL_HOST: "temporal:7233"
+  #     AGENT_KERNEL_DATA_DIR: "/app/data"
+  #   volumes:
+  #     - kernel-data:/app/data
+  #   depends_on:
+  #     temporal:
+  #       condition: service_healthy
+
+volumes:
+  kernel-data:

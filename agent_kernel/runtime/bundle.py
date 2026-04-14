@@ -25,6 +25,7 @@ from agent_kernel.adapters.agent_core.tool_mcp_adapter import (
     AgentCoreToolMCPAdapter,
 )
 from agent_kernel.adapters.facade.kernel_facade import KernelFacade
+from agent_kernel.kernel.admission import SnapshotDrivenAdmissionService
 from agent_kernel.kernel.contracts import (
     AdmissionResult,
     DecisionDeduper,
@@ -46,8 +47,8 @@ from agent_kernel.kernel.minimal_runtime import (
     InMemoryDecisionProjectionService,
     InMemoryKernelRuntimeEventLog,
     InMemoryRecoveryOutcomeStore,
-    StaticDispatchAdmissionService,
 )
+from agent_kernel.kernel.persistence.sqlite_decision_deduper import SQLiteDecisionDeduper
 from agent_kernel.kernel.persistence.sqlite_dedupe_store import SQLiteDedupeStore
 from agent_kernel.kernel.persistence.sqlite_event_log import (
     SQLiteKernelRuntimeEventLog,
@@ -88,6 +89,25 @@ EventLogBackend = Literal["in_memory", "sqlite"]
 DedupeBackend = Literal["in_memory", "sqlite"]
 RecoveryOutcomeBackend = Literal["in_memory", "sqlite"]
 TurnIntentBackend = Literal["none", "sqlite"]
+RuntimeEnvironment = Literal["dev", "prod"]
+DecisionDedupeBackend = Literal["in_memory", "sqlite"]
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeDecisionDedupeConfig:
+    """Declares which backend the kernel uses for decision fingerprint dedup.
+
+    Attributes:
+        backend: Storage backend kind.  ``"sqlite"`` is recommended for
+            production; ``"in_memory"`` is acceptable for tests only.
+        sqlite_database_path: SQLite database file path when
+            ``backend`` is ``"sqlite"``. Use ``":memory:"`` for an
+            in-process store (tests only).
+
+    """
+
+    backend: DecisionDedupeBackend = "sqlite"
+    sqlite_database_path: str | Path = ":memory:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +171,21 @@ class RuntimeStrictModeConfig:
     enabled: bool = True
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeProductionSafetyConfig:
+    """Controls whether production-safety guardrails are enforced.
+
+    Attributes:
+        enabled: Turns on production safety validation when ``True``.
+        environment: Target runtime environment. Validation is enforced only
+            when ``environment`` is ``"prod"``.
+
+    """
+
+    enabled: bool = False
+    environment: RuntimeEnvironment = "dev"
+
+
 @dataclass(slots=True)
 class AgentKernelRuntimeBundle:
     """Holds the wired minimal-complete runtime component set.
@@ -209,9 +244,11 @@ class AgentKernelRuntimeBundle:
         temporal_config: TemporalGatewayConfig | None = None,
         event_log_config: RuntimeEventLogConfig | None = None,
         dedupe_config: RuntimeDedupeConfig | None = None,
+        decision_deduper_config: RuntimeDecisionDedupeConfig | None = None,
         recovery_outcome_config: RuntimeRecoveryOutcomeConfig | None = None,
         turn_intent_log_config: RuntimeTurnIntentLogConfig | None = None,
         strict_mode_config: RuntimeStrictModeConfig | None = None,
+        production_safety_config: RuntimeProductionSafetyConfig | None = None,
         enable_activity_backed_executor: bool = False,
         activity_gateway: TemporalActivityGateway | None = None,
         tool_handlers: (Mapping[str, ToolActivityCallable] | None) = None,
@@ -240,6 +277,9 @@ class AgentKernelRuntimeBundle:
             strict_mode_config: Optional strict-mode toggle used by
                 workflow turn snapshot wiring. Defaults to strict
                 mode enabled.
+            production_safety_config: Optional production safety
+                guard configuration. When enabled for ``prod``, PoC
+                and in-memory defaults are rejected.
             enable_activity_backed_executor: Enables executor
                 implementation that delegates tool/MCP execution
                 to ``TemporalActivityGateway``. Defaults to
@@ -268,11 +308,29 @@ class AgentKernelRuntimeBundle:
             log backend.
 
         """
+        resolved_event_log_config = event_log_config or RuntimeEventLogConfig()
+        resolved_dedupe_config = dedupe_config or RuntimeDedupeConfig()
+        resolved_decision_deduper_config = decision_deduper_config or RuntimeDecisionDedupeConfig()
+        resolved_recovery_config = recovery_outcome_config or RuntimeRecoveryOutcomeConfig()
+        resolved_turn_intent_config = turn_intent_log_config or RuntimeTurnIntentLogConfig()
+        resolved_production_safety = production_safety_config or RuntimeProductionSafetyConfig()
+        cls._enforce_production_safety(
+            production_safety_config=resolved_production_safety,
+            event_log_config=resolved_event_log_config,
+            dedupe_config=resolved_dedupe_config,
+            decision_deduper_config=resolved_decision_deduper_config,
+            recovery_outcome_config=resolved_recovery_config,
+            turn_intent_log_config=resolved_turn_intent_config,
+            context_port=context_port,
+            llm_gateway=llm_gateway,
+        )
+
         kernel_core = cls._build_kernel_core(
-            event_log_config=event_log_config,
-            dedupe_config=dedupe_config,
-            recovery_outcome_config=recovery_outcome_config,
-            turn_intent_log_config=turn_intent_log_config,
+            event_log_config=resolved_event_log_config,
+            dedupe_config=resolved_dedupe_config,
+            decision_deduper_config=resolved_decision_deduper_config,
+            recovery_outcome_config=resolved_recovery_config,
+            turn_intent_log_config=resolved_turn_intent_config,
             enable_activity_backed_executor=(enable_activity_backed_executor),
             activity_gateway=activity_gateway,
             tool_handlers=tool_handlers,
@@ -287,6 +345,7 @@ class AgentKernelRuntimeBundle:
         boundary = cls._build_boundary_components(
             temporal_client=temporal_client,
             temporal_config=temporal_config,
+            activity_gateway=activity_gateway,
         )
         return cls(
             event_log=kernel_core["event_log"],
@@ -314,9 +373,50 @@ class AgentKernelRuntimeBundle:
         )
 
     @staticmethod
+    def _enforce_production_safety(
+        production_safety_config: RuntimeProductionSafetyConfig,
+        event_log_config: RuntimeEventLogConfig,
+        dedupe_config: RuntimeDedupeConfig,
+        decision_deduper_config: RuntimeDecisionDedupeConfig,
+        recovery_outcome_config: RuntimeRecoveryOutcomeConfig,
+        turn_intent_log_config: RuntimeTurnIntentLogConfig,
+        context_port: Any | None,
+        llm_gateway: Any | None,
+    ) -> None:
+        """Validate selected runtime components for production safety."""
+        if not production_safety_config.enabled:
+            return
+        if production_safety_config.environment != "prod":
+            return
+
+        violations: list[str] = []
+        if event_log_config.backend == "in_memory":
+            violations.append("event_log backend=in_memory is not allowed in prod")
+        if dedupe_config.backend == "in_memory":
+            violations.append("dedupe backend=in_memory is not allowed in prod")
+        if decision_deduper_config.backend == "in_memory":
+            violations.append("decision_deduper backend=in_memory is not allowed in prod")
+        if recovery_outcome_config.backend == "in_memory":
+            violations.append("recovery_outcome backend=in_memory is not allowed in prod")
+        if turn_intent_log_config.backend == "none":
+            violations.append("turn_intent_log backend=none is not allowed in prod")
+
+        context_port_name = type(context_port).__name__ if context_port is not None else None
+        if context_port_name == "InMemoryContextPort":
+            violations.append("context_port InMemoryContextPort is not allowed in prod")
+        llm_gateway_name = type(llm_gateway).__name__ if llm_gateway is not None else None
+        if llm_gateway_name == "EchoLLMGateway":
+            violations.append("llm_gateway EchoLLMGateway is not allowed in prod")
+
+        if violations:
+            joined = "; ".join(violations)
+            raise ValueError(f"production safety check failed: {joined}")
+
+    @staticmethod
     def _build_kernel_core(
         event_log_config: RuntimeEventLogConfig | None = None,
         dedupe_config: RuntimeDedupeConfig | None = None,
+        decision_deduper_config: RuntimeDecisionDedupeConfig | None = None,
         recovery_outcome_config: RuntimeRecoveryOutcomeConfig | None = None,
         turn_intent_log_config: RuntimeTurnIntentLogConfig | None = None,
         enable_activity_backed_executor: bool = False,
@@ -397,12 +497,17 @@ class AgentKernelRuntimeBundle:
             )
             reflection_builder = ReflectionContextBuilder()
 
+        resolved_deduper_config = decision_deduper_config or RuntimeDecisionDedupeConfig()
+        deduper: DecisionDeduper
+        if resolved_deduper_config.backend == "sqlite":
+            deduper = SQLiteDecisionDeduper(resolved_deduper_config.sqlite_database_path)
+        else:
+            deduper = InMemoryDecisionDeduper()
+
         return {
             "event_log": event_log,
-            "projection": InMemoryDecisionProjectionService(
-                event_log,
-            ),
-            "admission": StaticDispatchAdmissionService(),
+            "projection": InMemoryDecisionProjectionService(event_log),
+            "admission": SnapshotDrivenAdmissionService(),
             "executor": AgentKernelRuntimeBundle._build_executor(
                 enable_activity_backed_executor=(enable_activity_backed_executor),
                 activity_gateway=activity_gateway,
@@ -418,7 +523,7 @@ class AgentKernelRuntimeBundle:
                 circuit_breaker_policy=circuit_breaker_policy,
             ),
             "recovery_outcomes": recovery_outcomes,
-            "deduper": InMemoryDecisionDeduper(),
+            "deduper": deduper,
             "dedupe_store": dedupe_store,
             "turn_intent_log": turn_intent_log,
         }
@@ -603,12 +708,15 @@ class AgentKernelRuntimeBundle:
     def _build_boundary_components(
         temporal_client: Any,
         temporal_config: TemporalGatewayConfig | None,
+        activity_gateway: TemporalActivityGateway | None = None,
     ) -> dict[str, Any]:
         """Build gateway, facade, and agent-core boundary adapters.
 
         Args:
             temporal_client: Temporal client for substrate.
             temporal_config: Optional Temporal gateway config.
+            activity_gateway: Optional activity gateway injected into
+                the workflow gateway to enable ``execute_turn`` routing.
 
         Returns:
             Dictionary of boundary component instances.
@@ -617,6 +725,7 @@ class AgentKernelRuntimeBundle:
         gateway = TemporalSDKWorkflowGateway(
             temporal_client,
             temporal_config,
+            activity_gateway=activity_gateway,
         )
         context_adapter = AgentCoreContextAdapter()
         checkpoint_adapter = AgentCoreCheckpointAdapter()

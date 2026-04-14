@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 from agent_kernel.adapters.agent_core.checkpoint_adapter import AgentCoreResumeInput
 from agent_kernel.adapters.agent_core.context_adapter import AgentCoreContextInput
+from agent_kernel.adapters.facade.workflow_gateway_adapter import adapt_workflow_gateway
 from agent_kernel.kernel.action_type_registry import KERNEL_ACTION_TYPE_REGISTRY
 from agent_kernel.kernel.contracts import (
     Action,
@@ -172,7 +173,7 @@ class KernelFacade:
                 first ``query_trace_runtime()`` call.
 
         """
-        self._workflow_gateway = workflow_gateway
+        self._workflow_gateway = adapt_workflow_gateway(workflow_gateway)
         self._context_adapter = context_adapter
         self._checkpoint_adapter = checkpoint_adapter
         self._health_probe = health_probe
@@ -1436,6 +1437,7 @@ class KernelFacade:
         with self._stage_lock:
             self._stage_registry.setdefault(run_id, {})[stage_id] = view
         await self._workflow_gateway.signal_workflow(
+            run_id,
             SignalRunRequest(
                 run_id=run_id,
                 signal_type="stage_opened",
@@ -1444,7 +1446,7 @@ class KernelFacade:
                     "branch_id": branch_id,
                 },
                 caused_by="kernel_facade.open_stage",
-            )
+            ),
         )
         await self._append_trace_event(
             run_id,
@@ -1499,6 +1501,7 @@ class KernelFacade:
             )
             run_stages[stage_id] = updated
         await self._workflow_gateway.signal_workflow(
+            run_id,
             SignalRunRequest(
                 run_id=run_id,
                 signal_type="stage_state_updated",
@@ -1508,7 +1511,7 @@ class KernelFacade:
                     "failure_code": failure_code,
                 },
                 caused_by="kernel_facade.mark_stage_state",
-            )
+            ),
         )
         await self._append_trace_event(
             run_id,
@@ -1545,6 +1548,7 @@ class KernelFacade:
         with self._branch_lock:
             self._branch_registry.setdefault(request.run_id, {})[request.branch_id] = view
         await self._workflow_gateway.signal_workflow(
+            request.run_id,
             SignalRunRequest(
                 run_id=request.run_id,
                 signal_type="branch_opened",
@@ -1555,7 +1559,7 @@ class KernelFacade:
                     "proposed_by": request.proposed_by,
                 },
                 caused_by="kernel_facade.open_branch",
-            )
+            ),
         )
         await self._append_trace_event(
             request.run_id,
@@ -1602,6 +1606,7 @@ class KernelFacade:
             )
             run_branches[request.branch_id] = updated
         await self._workflow_gateway.signal_workflow(
+            request.run_id,
             SignalRunRequest(
                 run_id=request.run_id,
                 signal_type="branch_state_updated",
@@ -1612,7 +1617,7 @@ class KernelFacade:
                     "reason": request.reason,
                 },
                 caused_by="kernel_facade.mark_branch_state",
-            )
+            ),
         )
         await self._append_trace_event(
             request.run_id,
@@ -1639,6 +1644,7 @@ class KernelFacade:
         with self._human_gate_lock:
             self._open_human_gates.setdefault(request.run_id, set()).add(request.gate_ref)
         await self._workflow_gateway.signal_workflow(
+            request.run_id,
             SignalRunRequest(
                 run_id=request.run_id,
                 signal_type="human_gate_opened",
@@ -1653,7 +1659,7 @@ class KernelFacade:
                     "caused_by": request.caused_by,
                 },
                 caused_by="kernel_facade.open_human_gate",
-            )
+            ),
         )
         await self._append_trace_event(
             request.run_id,

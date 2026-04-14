@@ -66,8 +66,21 @@ class KernelConfig:
     circuit_breaker_threshold: int = 5
     circuit_breaker_half_open_ms: int = 30_000
 
+    # -- Temporal connection (substrate/temporal/client.py) ----------------
+    temporal_host: str = "localhost:7233"
+    temporal_namespace: str = "default"
+    temporal_task_queue: str = "agent-kernel"
+
     # -- Temporal (substrate/temporal/run_actor_workflow.py) ----------------
     history_reset_threshold: int = 10_000
+
+    # -- LLM Gateway (kernel/cognitive/llm_gateway_*.py) ------------------
+    llm_provider: str = ""
+    llm_model: str = ""
+    llm_api_key: str = ""
+
+    # -- Script Runtime (kernel/cognitive/script_runtime_subprocess.py) ---
+    script_timeout_s: float = 30.0
 
     @classmethod
     def from_env(cls) -> KernelConfig:
@@ -131,6 +144,13 @@ class KernelConfig:
                 "history_reset_threshold",
                 int,
             ),
+            "AGENT_KERNEL_TEMPORAL_HOST": ("temporal_host", str),
+            "AGENT_KERNEL_TEMPORAL_NAMESPACE": ("temporal_namespace", str),
+            "AGENT_KERNEL_TEMPORAL_TASK_QUEUE": ("temporal_task_queue", str),
+            "AGENT_KERNEL_LLM_PROVIDER": ("llm_provider", str),
+            "AGENT_KERNEL_LLM_MODEL": ("llm_model", str),
+            "AGENT_KERNEL_LLM_API_KEY": ("llm_api_key", str),
+            "AGENT_KERNEL_SCRIPT_TIMEOUT_S": ("script_timeout_s", float),
         }
         kwargs: dict[str, Any] = {}
         for env_var, (field_name, type_fn) in env_map.items():

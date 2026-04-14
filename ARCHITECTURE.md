@@ -15,6 +15,7 @@ graph TB
 
   subgraph Facade["入口层"]
     KF["KernelFacade -- 唯一合法入口"]
+    WA["WorkflowGatewaySignalAdapter"]
   end
 
   subgraph Gateway["网关层"]
@@ -50,7 +51,8 @@ graph TB
 
   UI --> HTTP
   HTTP --> KF
-  KF --> GW
+  KF --> WA
+  WA --> GW
   GW --> TP
   GW --> LF
   TP --> RA
@@ -88,7 +90,7 @@ graph TB
 | **RunActor** | `substrate/temporal/run_actor_workflow.py` | 生命周期权限；拥有 run 推进循环 | 只有 RunActor 写 run 级生命周期事件 |
 | **RuntimeEventLog** | `kernel/minimal_runtime.py`, `kernel/persistence/` | Append-only 事件真相源 | 事件一旦写入不可变更；所有状态变化必须经过事件 |
 | **DecisionProjection** | `kernel/minimal_runtime.py`, `kernel/persistence/sqlite_projection_cache.py` | 投影真相；从 `authoritative_fact` 和 `derived_replayable` 事件重放构建 | 投影可从事件日志完整重建；`derived_diagnostic` 事件不参与重放 |
-| **DispatchAdmission** | `kernel/turn_engine.py` (AdmissionPort) | 外部副作用唯一门控 | `approval_state` 为 pending/denied/revoked/expired 时，`permission_mode` 强制为 readonly |
+| **DispatchAdmission** | `kernel/admission/snapshot_driven_admission.py` (生产); `kernel/minimal_runtime.py` (PoC/测试) | 外部副作用唯一门控；5 规则顺序评估流水线 | `approval_state` 为 pending/denied/revoked/expired 时，`permission_mode` 强制为 readonly |
 | **ExecutorService** | `kernel/turn_engine.py` (ExecutorPort) | 执行权限；准入通过后分发动作 | 执行必须先通过 Admission 和 DedupeStore |
 | **RecoveryGate** | `kernel/recovery/gate.py` | 失败恢复决策 | 恢复结果写入 `RecoveryOutcomeStore`，不修改事件日志 |
 
@@ -100,6 +102,7 @@ graph TB
 
 ```
 Platform -> KernelFacade.start_run(StartRunRequest)
+         -> WorkflowGatewaySignalAdapter
          -> WorkflowGateway.start_workflow()
          -> RunActorWorkflow.run()
          -> EventLog.append(run.created, run.started)
@@ -112,6 +115,7 @@ Platform -> KernelFacade.start_run(StartRunRequest)
 sequenceDiagram
   participant P as Platform
   participant F as KernelFacade
+  participant A as SignalAdapter
   participant G as WorkflowGateway
   participant R as RunActorWorkflow
   participant T as TurnEngine
@@ -119,7 +123,8 @@ sequenceDiagram
   participant J as Projection
 
   P->>F: start_run()
-  F->>G: start_workflow()
+  F->>A: signal_workflow(run_id, request)
+  A->>G: start_workflow()
   G->>R: run()
   R->>E: append run.created / run.started
   R->>J: catch_up / readiness
@@ -138,11 +143,14 @@ sequenceDiagram
 
 ```
 Platform -> KernelFacade.signal_run(SignalRunRequest)
+         -> WorkflowGatewaySignalAdapter.signal_workflow(run_id, request)
          -> WorkflowGateway.signal_workflow()
          -> RunActorWorkflow 接收信号
          -> EventLog.append(signal.received)
          -> Projection.catch_up() -> 触发下一轮 TurnEngine
 ```
+
+`WorkflowGatewaySignalAdapter` (`adapters/facade/workflow_gateway_adapter.py`) 在 `KernelFacade.__init__` 中被自动包裹，将所有信号调用统一规范化为 `signal_workflow(run_id, request)` 接口，屏蔽旧版 `signal_run(request)` 的差异。
 
 ### 3.4 Trace 事件链路
 
@@ -233,6 +241,17 @@ TurnEngine.register_phase("_phase_custom_audit", after="_phase_admission")
 
 在 RunActor 层对决策指纹进行去重，防止重复的 turn 决策。
 
+**生产默认**: `SQLiteDecisionDeduper` (`kernel/persistence/sqlite_decision_deduper.py`)
+
+- Schema: `decision_fingerprints(fingerprint TEXT PK, run_id TEXT, created_at REAL)`
+- WAL 模式，线程安全 (`threading.Lock`)
+- 协议: `async seen(fingerprint) -> bool`, `async mark(fingerprint, run_id) -> None`
+- 通过 `RuntimeDecisionDedupeConfig` 配置:
+  - `backend: "sqlite"` (默认) 或 `"in_memory"`
+  - `sqlite_database_path: ":memory:"` (默认) 或绝对路径
+
+`InMemoryDecisionDeduper` 仅用于 PoC / 单元测试，不可用于生产（`_enforce_production_safety()` 会拦截）。
+
 ### 6.2 DedupeStore (执行器层)
 
 在 Executor 边界实现 at-most-once 分发语义。
@@ -264,7 +283,7 @@ stateDiagram-v2
 | `static_compensation` | 静态补偿: 执行已注册的补偿处理器 |
 | `human_escalation` | 升级到人工审查 |
 | `abort` | 中止 run |
-| `reflect_and_retry` | LLM 反思 + 生成修正动作后重试 |
+| `reflect_and_retry` | LLM 反思 + 生成修正动作后重试（依赖认知服务层，见第 13 节） |
 
 模式通过 `KERNEL_RECOVERY_MODE_REGISTRY` 注册，可扩展。
 
@@ -344,8 +363,10 @@ stateDiagram-v2
 
 | 后端 | 用途 | 适用场景 |
 |------|------|---------|
-| In-memory | `minimal_runtime.py` 中的所有协议实现 | 测试 / PoC |
-| SQLite | DedupeStore、ProjectionSnapshotCache、TaskViewLog | 本地持久化 / 轻量部署 |
+| In-memory | `minimal_runtime.py` 中的所有协议实现 | 测试 / PoC 仅 |
+| `SQLiteDecisionDeduper` | `kernel/persistence/sqlite_decision_deduper.py` — 决策指纹去重 | 本地持久化 / 生产默认 |
+| SQLite DedupeStore | 执行器层 at-most-once 去重 | 本地持久化 / 轻量部署 |
+| SQLite ProjectionCache | `sqlite_projection_cache.py` — 投影快照加速重启 | 本地持久化 / 轻量部署 |
 | PostgreSQL | EventLog、Projection (路径已支持) | 规模化生产 |
 
 ### 9.2 ProjectionSnapshotCache
@@ -355,6 +376,15 @@ stateDiagram-v2
 - 进程重启后，`CachedDecisionProjectionService` 从 SQLite 种子投影，避免全量事件重放。
 - `catch_up()` 完成后自动持久化最新快照。
 - SQLite 配置: `journal_mode=WAL`, `wal_autocheckpoint=1000`。
+
+### 9.3 准入服务滑动窗口限速器
+
+`SnapshotDrivenAdmissionService` 内置进程内滑动窗口限速，不依赖外部存储:
+
+- 每个 `(run_id, policy_id)` 组合维护独立的时间戳队列。
+- 窗口大小: 60 秒。
+- 超出 `TenantPolicy.max_actions_per_minute` 则返回 `DENY(reason_code="quota_exceeded")`。
+- 限速状态随进程生命周期持续，不跨进程共享（如需共享，升级到外部 Redis 等存储）。
 
 ---
 
@@ -376,12 +406,38 @@ stateDiagram-v2
 - 相同语义输入 -> 跨进程相同哈希。
 - `schema_version="2"` 用于 model/memory/session/peer binding。
 
-### 10.3 准入门控 + SandboxGrant
+### 10.3 准入门控：SnapshotDrivenAdmissionService
 
-`DispatchAdmissionService.admit(action, snapshot)` 是外部副作用的唯一闸口:
+`SnapshotDrivenAdmissionService` (`kernel/admission/snapshot_driven_admission.py`) 是生产环境的默认准入实现，取代 PoC 阶段的 `StaticDispatchAdmissionService`。
 
-- `approval_state` 在 `{pending, denied, revoked, expired}` 时，`permission_mode` 强制降为 `"readonly"`。
-- 写类动作在 readonly 模式下被拒绝。
+入口方法: `admit(action, snapshot) -> AdmissionResult`，顺序执行 5 条规则，**第一条失败即返回 DENY**：
+
+| 规则 # | 名称 | 触发条件 | reason_code |
+|--------|------|----------|-------------|
+| 1 | Permission Mode | `snapshot.permission_mode == "readonly"` 且动作非只读 | `"permission_denied"` |
+| 2 | Binding Existence | `tool_call` 引用未绑定的 `tool_name`；`mcp_call` 引用未绑定的 server/capability；`peer_signal` 引用未绑定的 `peer_run_id` | `"policy_denied"` |
+| 3 | Idempotency | 动作标记为 `non_idempotent` + `remote_write` 且策略禁止非幂等远程写 | `"policy_denied"` |
+| 4 | Risk Tier | `action.risk_tier > policy.max_allowed_risk_tier` | `"policy_denied"` |
+| 5 | Rate Limit | 最近 60 秒内动作数 > `policy.max_actions_per_minute` | `"quota_exceeded"` |
+
+所有 5 条规则通过后返回 `ADMIT`。
+
+**TenantPolicyResolver** 解析策略引用:
+- `"policy:default"` → 内置保守策略 (`max_allowed_risk_tier=3`, `allow_non_idempotent_remote_writes=False`, `max_actions_per_minute=120`)
+- `"file:///path/to/policy.json"` → 从文件加载
+
+**TenantPolicy** (`kernel/admission/tenant_policy.py`):
+
+```python
+@dataclass(frozen=True)
+class TenantPolicy:
+    policy_id: str
+    max_allowed_risk_tier: int = 3
+    allow_non_idempotent_remote_writes: bool = False
+    max_actions_per_minute: int = 120
+```
+
+`StaticDispatchAdmissionService` 仅保留用于 PoC 和单元测试。
 
 ---
 
@@ -407,6 +463,13 @@ cfg = KernelConfig.from_env()      # 从环境变量构建
 | `AGENT_KERNEL_CIRCUIT_BREAKER_THRESHOLD` | `circuit_breaker_threshold` | 5 |
 | `AGENT_KERNEL_CIRCUIT_BREAKER_HALF_OPEN_MS` | `circuit_breaker_half_open_ms` | 30000 |
 | `AGENT_KERNEL_HISTORY_RESET_THRESHOLD` | `history_reset_threshold` | 10000 |
+| `AGENT_KERNEL_TEMPORAL_HOST` | `temporal_host` | "localhost:7233" |
+| `AGENT_KERNEL_TEMPORAL_NAMESPACE` | `temporal_namespace` | "default" |
+| `AGENT_KERNEL_TEMPORAL_TASK_QUEUE` | `temporal_task_queue` | "agent-kernel" |
+| `AGENT_KERNEL_LLM_PROVIDER` | `llm_provider` | "" |
+| `AGENT_KERNEL_LLM_MODEL` | `llm_model` | "" |
+| `AGENT_KERNEL_LLM_API_KEY` | `llm_api_key` | "" |
+| `AGENT_KERNEL_SCRIPT_TIMEOUT_S` | `script_timeout_s` | 30.0 |
 
 (完整列表见 `config.py` 中的 `env_map`)
 
@@ -414,7 +477,20 @@ cfg = KernelConfig.from_env()      # 从环境变量构建
 
 ## 12. 部署
 
-### 12.1 容器构建
+### 12.1 本地开发（推荐路径）
+
+使用 `docker-compose` 启动完整本地栈（Temporal + Kernel）：
+
+```bash
+docker-compose up
+```
+
+`docker-compose.yml` 包含:
+- `temporal` 服务: 自动初始化（SQLite 持久化），暴露 `7233` 端口
+- `kernel` 服务: HTTP 服务 + Worker 合并部署，依赖 `temporal` 健康检查通过后启动
+- `kernel-data` volume: 持久化 SQLite 数据
+
+### 12.2 容器构建
 
 ```dockerfile
 # Dockerfile: python:3.12-slim, 非 root 用户 (kernel)
@@ -425,9 +501,14 @@ docker run -p 8400:8400 agent-kernel
 容器内置:
 - `EXPOSE 8400`
 - `HEALTHCHECK` 探测 `/health/liveness`
-- 入口点: `uvicorn agent_kernel.service.http_server:create_app_default`
+- 入口点: `uvicorn agent_kernel.service.http_server:create_app_temporal --factory`
 
-### 12.2 基座选项
+`create_app_temporal()` 是 Starlette 应用 factory，异步 lifespan 内:
+1. 创建 Temporal 客户端
+2. 构建 SQLite 后端的 `AgentKernelRuntimeBundle`
+3. 以 asyncio task 启动 Temporal Worker
+
+### 12.3 基座选项
 
 | 基座 | 配置 | 适用场景 |
 |------|------|---------|
@@ -437,7 +518,23 @@ docker run -p 8400:8400 agent-kernel
 
 LocalFSM 已知限制: `no_child_workflow_isolation`, `no_temporal_history`, `no_cross_process_speculation`。
 
-### 12.3 HTTP API 概览
+### 12.4 CLI 入口与独立 Worker
+
+打包后提供两个 CLI 入口点:
+
+| 命令 | 模块 | 说明 |
+|------|------|------|
+| `agent-kernel-server` | `agent_kernel.service.http_server` | 启动 HTTP API 服务（含 Worker） |
+| `agent-kernel-worker` | `agent_kernel.worker_main` | 仅启动独立 Temporal Worker |
+
+独立 Worker 部署模式 (`worker_main.py`):
+1. 读取 `KernelConfig.from_env()`
+2. 连接 Temporal (`AGENT_KERNEL_TEMPORAL_HOST`)
+3. 调用 `worker.run()` 开始处理工作流和活动任务
+
+生产建议: 将 HTTP 服务和 Worker 分开部署，以便独立扩缩容。
+
+### 12.5 HTTP API 概览
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -468,3 +565,98 @@ LocalFSM 已知限制: `no_child_workflow_isolation`, `no_temporal_history`, `no
 | GET | `/health/readiness` | 就绪探针 |
 | GET | `/metrics` | 指标快照 |
 | GET | `/openapi.json` | OpenAPI 规范 |
+
+---
+
+## 13. 认知服务层
+
+认知服务层 (`kernel/cognitive/`) 为内核提供 LLM 推理和脚本执行能力，主要服务于 `reflect_and_retry` 恢复模式下的 `ReasoningLoop`。
+
+### 13.1 LLM 网关
+
+**配置**: `LLMGatewayConfig` (`kernel/cognitive/llm_gateway_config.py`):
+
+```python
+@dataclass(frozen=True)
+class LLMGatewayConfig:
+    provider: str          # "anthropic" 或 "openai"
+    model: str
+    api_key: str
+    max_tokens: int = 4096
+    timeout_s: float = 60.0
+    temperature: float = 0.0
+```
+
+从环境变量构建:
+```python
+cfg = LLMGatewayConfig.from_env()
+# 读取: AGENT_KERNEL_LLM_PROVIDER, AGENT_KERNEL_LLM_MODEL, AGENT_KERNEL_LLM_API_KEY
+```
+
+**接口**: `LLMGateway` 协议，单一方法:
+```python
+async def infer(context, config, idempotency_key) -> ModelOutput
+```
+
+**生产实现**:
+
+| 实现类 | 模块 | 依赖 | 安装 |
+|--------|------|------|------|
+| `AnthropicLLMGateway` | `llm_gateway_anthropic.py` | `anthropic>=0.40` | `pip install agent-kernel[anthropic]` |
+| `OpenAILLMGateway` | `llm_gateway_openai.py` | `openai>=1.50`, `tiktoken>=0.7` | `pip install agent-kernel[openai]` |
+
+同时安装两个提供商: `pip install agent-kernel[llm]`
+
+**工厂函数**: `create_llm_gateway(config: LLMGatewayConfig) -> LLMGateway`，根据 `config.provider` 自动选择实现。
+
+`EchoLLMGateway` 仅用于测试/PoC，`_enforce_production_safety()` 会拦截其在生产环境中的使用。
+
+### 13.2 脚本运行时
+
+**生产实现**: `SubprocessScriptRuntime` (`kernel/cognitive/script_runtime_subprocess.py`)
+
+配置 `SubprocessScriptConfig`:
+
+```python
+@dataclass(frozen=True)
+class SubprocessScriptConfig:
+    timeout_s: float = 30.0          # 对应 AGENT_KERNEL_SCRIPT_TIMEOUT_S
+    max_output_bytes: int = 1_048_576 # 1 MB
+    python_executable: str = sys.executable
+```
+
+行为:
+- `validate_script(script, host_kind) -> bool`: 通过 `ast.parse` 在隔离子进程中验证脚本语法
+- `execute_script(input) -> ScriptResult`: 在独立子进程中执行，强制 timeout，WAL 清理
+
+`EchoScriptRuntime` 仅用于 PoC/测试。
+
+### 13.3 与 ReasoningLoop 集成
+
+`reflect_and_retry` 恢复路径调用链:
+
+```
+RecoveryGateService (reflect_and_retry)
+  -> ReasoningLoop.reflect(failure_context)
+     -> LLMGateway.infer(context, config, idempotency_key)
+     -> OutputParser.parse(raw_output) -> CorrectedAction
+  -> TurnEngine 以修正动作重新执行
+```
+
+`ReasoningLoop` 每次反思轮次通过 `KernelMetricsCollector` 记录 `reflection_rounds_total` 指标（标签 `corrected=true/false`）。
+
+### 13.4 Bundle 生产安全检查（更新）
+
+`AgentKernelRuntimeBundle._enforce_production_safety()` 拦截所有不安全的 PoC 配置：
+
+| 检查项 | 触发条件 |
+|--------|----------|
+| EventLog backend | `backend=in_memory` |
+| DecisionDeduper backend | `backend=in_memory` |
+| DedupeStore backend | `backend=in_memory` |
+| RecoveryOutcome backend | `backend=in_memory` |
+| TurnIntentLog backend | `backend=none` |
+| ContextPort | 实例为 `InMemoryContextPort` |
+| LLM Gateway | 实例为 `EchoLLMGateway` |
+
+任意一项违规均抛出 `ProductionSafetyViolation`，阻止不合规的生产部署。

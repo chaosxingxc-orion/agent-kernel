@@ -452,27 +452,9 @@ async def get_openapi(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 
-def create_app(
-    facade: KernelFacade,
-    *,
-    api_key: str | None = None,
-    max_body_bytes: int = _MAX_REQUEST_BODY_BYTES,
-    metrics_collector: object | None = None,
-) -> Starlette:
-    """Create a Starlette ASGI app wrapping the given KernelFacade.
-
-    Args:
-        facade: The KernelFacade instance to expose via HTTP.
-        api_key: Optional API key for Bearer-token authentication.
-            When *None*, all endpoints are open (no auth).
-        metrics_collector: Optional ``KernelMetricsCollector`` instance.
-            When provided, ``GET /metrics`` returns a JSON snapshot.
-
-    Returns:
-        A Starlette application ready to be served by uvicorn.
-
-    """
-    routes = [
+def _build_routes() -> list[Route]:
+    """Return the canonical route list shared by all app factories."""
+    return [
         # Run lifecycle
         Route("/runs", post_runs, methods=["POST"]),
         Route("/runs/{run_id}", get_run, methods=["GET"]),
@@ -539,7 +521,29 @@ def create_app(
         # OpenAPI spec
         Route("/openapi.json", get_openapi, methods=["GET"]),
     ]
-    app = Starlette(routes=routes)
+
+
+def create_app(
+    facade: KernelFacade,
+    *,
+    api_key: str | None = None,
+    max_body_bytes: int = _MAX_REQUEST_BODY_BYTES,
+    metrics_collector: object | None = None,
+) -> Starlette:
+    """Create a Starlette ASGI app wrapping the given KernelFacade.
+
+    Args:
+        facade: The KernelFacade instance to expose via HTTP.
+        api_key: Optional API key for Bearer-token authentication.
+            When *None*, all endpoints are open (no auth).
+        metrics_collector: Optional ``KernelMetricsCollector`` instance.
+            When provided, ``GET /metrics`` returns a JSON snapshot.
+
+    Returns:
+        A Starlette application ready to be served by uvicorn.
+
+    """
+    app = Starlette(routes=_build_routes())
     app.state.facade = facade
     app.state.max_body_bytes = max_body_bytes
     app.state.metrics = metrics_collector
@@ -604,4 +608,132 @@ def create_app_default(
         api_key=config.api_key,
         max_body_bytes=config.max_request_body_bytes,
         metrics_collector=collector,
+    )
+
+
+def create_app_temporal(
+    config: KernelConfig | None = None,
+) -> Starlette:
+    """Create an ASGI app backed by a real Temporal cluster.
+
+    Reads Temporal connection details and storage paths from ``KernelConfig``
+    (or environment via ``KernelConfig.from_env()``).  Starts a
+    ``TemporalKernelWorker`` as an asyncio background task inside the
+    Starlette lifespan so that both the HTTP server and the workflow worker
+    share the same process and event loop.
+
+    Storage defaults to SQLite files under ``AGENT_KERNEL_DATA_DIR``
+    (default ``/app/data``).  Mount a persistent volume at that path in
+    production containers.
+
+    Args:
+        config: Optional ``KernelConfig`` override.  When *None*,
+            ``KernelConfig.from_env()`` is used.
+
+    Returns:
+        A Starlette ASGI application with Temporal substrate wired in.
+
+    Raises:
+        RuntimeError: If the ``temporalio`` SDK is not installed.
+
+    """
+    import asyncio
+    import os
+    from contextlib import asynccontextmanager
+
+    from agent_kernel.runtime.bundle import (
+        AgentKernelRuntimeBundle,
+        RuntimeDedupeConfig,
+        RuntimeEventLogConfig,
+        RuntimeRecoveryOutcomeConfig,
+        RuntimeTurnIntentLogConfig,
+    )
+    from agent_kernel.runtime.metrics import KernelMetricsCollector
+    from agent_kernel.substrate.temporal.client import (
+        TemporalClientConfig,
+        create_temporal_client,
+    )
+    from agent_kernel.substrate.temporal.worker import TemporalWorkerConfig
+
+    if config is None:
+        config = KernelConfig.from_env()
+
+    data_dir = os.environ.get("AGENT_KERNEL_DATA_DIR", "/app/data")
+
+    @asynccontextmanager
+    async def _lifespan(app: Starlette):  # type: ignore[type-arg]
+        os.makedirs(data_dir, exist_ok=True)
+
+        client = await create_temporal_client(
+            TemporalClientConfig(
+                target_host=config.temporal_host,
+                namespace=config.temporal_namespace,
+            )
+        )
+        bundle = AgentKernelRuntimeBundle.build_minimal_complete(
+            temporal_client=client,
+            event_log_config=RuntimeEventLogConfig(
+                backend="sqlite",
+                sqlite_database_path=f"{data_dir}/event_log.db",
+            ),
+            dedupe_config=RuntimeDedupeConfig(
+                backend="sqlite",
+                sqlite_database_path=f"{data_dir}/dedupe.db",
+            ),
+            recovery_outcome_config=RuntimeRecoveryOutcomeConfig(
+                backend="sqlite",
+                sqlite_database_path=f"{data_dir}/recovery.db",
+            ),
+            turn_intent_log_config=RuntimeTurnIntentLogConfig(
+                backend="sqlite",
+                sqlite_database_path=f"{data_dir}/turn_intent.db",
+            ),
+        )
+        worker = bundle.create_temporal_worker(
+            client,
+            config=TemporalWorkerConfig(task_queue=config.temporal_task_queue),
+        )
+        collector = KernelMetricsCollector()
+
+        app.state.facade = bundle.facade
+        app.state.metrics = collector
+        app.state.max_body_bytes = config.max_request_body_bytes
+
+        logger.info(
+            "Temporal worker starting — host=%s namespace=%s task_queue=%s",
+            config.temporal_host,
+            config.temporal_namespace,
+            config.temporal_task_queue,
+        )
+        worker_task = asyncio.create_task(worker.run(), name="temporal-worker")
+        try:
+            yield
+        finally:
+            import contextlib
+
+            worker_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await worker_task
+            logger.info("Temporal worker stopped.")
+
+    inner = Starlette(routes=_build_routes(), lifespan=_lifespan)
+    # ApiKeyMiddleware forwards non-HTTP scopes (lifespan) to the inner app,
+    # so the lifespan context manager fires correctly even when wrapped.
+    return ApiKeyMiddleware(inner, api_key=config.api_key)  # type: ignore[return-value]
+
+
+def _server_main() -> None:
+    """Synchronous entry point for the ``agent-kernel-server`` CLI command.
+
+    Starts uvicorn serving ``create_app_temporal`` on the port and host
+    configured via environment variables.
+    """
+    import uvicorn
+
+    cfg = KernelConfig.from_env()
+    uvicorn.run(
+        "agent_kernel.service.http_server:create_app_temporal",
+        host="0.0.0.0",
+        port=cfg.http_port,
+        factory=True,
     )
