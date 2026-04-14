@@ -16,6 +16,8 @@
 | Protocol version | `1.0.0` |
 | Python | `>=3.12` |
 | 构建工具 | hatchling |
+| Temporal Python SDK | `>=1.7,<2`（已测试：`1.24.x`） |
+| Temporal Server | `>=1.20`（Docker Compose 固定：`1.25.2`） |
 
 ## 目录概览
 

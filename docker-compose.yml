@@ -17,7 +17,7 @@
 
 services:
   temporal:
-    image: temporalio/auto-setup:latest
+    image: temporalio/auto-setup:1.25.2  # Temporal Server; SDK pin: temporalio>=1.7,<2
     ports:
       - "7233:7233"
     environment:
