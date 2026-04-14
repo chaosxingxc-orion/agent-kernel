@@ -293,6 +293,9 @@ class RunActorWorkflow:
         self._run_id: str | None = None
         self._session_id: str | None = None
         self._parent_run_id: str | None = None
+        # Run-scoped fields populated at the start of run() from RunInput.
+        self._policy_versions: RunPolicyVersions | None = None
+        self._active_stage_id: str | None = None
         # Temporal Python SDK query handlers should be synchronous. Keep an
         # in-memory projection snapshot that signal/run paths refresh, so query
         # can stay sync and still return up-to-date kernel state.
@@ -426,7 +429,7 @@ class RunActorWorkflow:
         try:
             parent_handle = temporal_workflow.get_external_workflow_handle(parent_workflow_id)
             await parent_handle.signal("signal", child_signal_payload)
-        except (TemporalError, RuntimeError):
+        except TemporalError, RuntimeError:
             # Parent notification is best-effort; do not fail child completion.
             return
 

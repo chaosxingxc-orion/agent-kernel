@@ -12,3 +12,5 @@ venv/
 dist/
 build/
 .claude/
+# Intermediate analysis reports generated during development sessions
+*-report.md
