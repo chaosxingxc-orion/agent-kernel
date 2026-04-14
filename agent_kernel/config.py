@@ -79,7 +79,10 @@ class KernelConfig:
     llm_model: str = ""
     llm_api_key: str = ""
 
-    # -- Script Runtime (kernel/cognitive/script_runtime_subprocess.py) ---
+    # -- Script Runtime ---------------------------------------------------
+    # Caller responsibility: pass int(script_timeout_s * 1000) as
+    # default_timeout_ms to InProcessPythonScriptRuntime.  The bundle does
+    # not manage script runtime construction directly.
     script_timeout_s: float = 30.0
 
     @classmethod

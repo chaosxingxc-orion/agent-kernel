@@ -33,6 +33,7 @@ Key environment variables
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 from typing import TYPE_CHECKING, Any
@@ -77,6 +78,7 @@ async def main() -> None:
     ``worker.run()``, so no explicit signal wiring is required here.
     """
     from agent_kernel.config import KernelConfig
+    from agent_kernel.kernel.contracts import CircuitBreakerPolicy
     from agent_kernel.runtime.bundle import (
         AgentKernelRuntimeBundle,
         RuntimeDedupeConfig,
@@ -85,6 +87,7 @@ async def main() -> None:
         RuntimeStrictModeConfig,
         RuntimeTurnIntentLogConfig,
     )
+    from agent_kernel.runtime.heartbeat import HeartbeatPolicy, RunHeartbeatMonitor
     from agent_kernel.substrate.temporal.client import (
         TemporalClientConfig,
         create_temporal_client,
@@ -97,6 +100,25 @@ async def main() -> None:
     )
 
     config = KernelConfig.from_env()
+
+    heartbeat_policy = HeartbeatPolicy(
+        state_timeout_s={
+            "dispatching": config.heartbeat_dispatching_timeout_s,
+            "waiting_result": config.heartbeat_waiting_result_timeout_s,
+            "waiting_external": config.heartbeat_waiting_external_timeout_s,
+            "waiting_human_input": config.heartbeat_waiting_human_timeout_s,
+            "recovering": config.heartbeat_recovering_timeout_s,
+        },
+        min_heartbeat_interval_s=config.heartbeat_min_interval_s,
+        stale_check_age_s=config.heartbeat_stale_check_age_s,
+    )
+    heartbeat_monitor = RunHeartbeatMonitor(policy=heartbeat_policy)
+
+    circuit_breaker_policy = CircuitBreakerPolicy(
+        threshold=config.circuit_breaker_threshold,
+        half_open_after_ms=config.circuit_breaker_half_open_ms,
+    )
+
     data_dir = os.environ.get("AGENT_KERNEL_DATA_DIR", "/app/data")
     os.makedirs(data_dir, exist_ok=True)
 
@@ -147,6 +169,8 @@ async def main() -> None:
             history_event_threshold=config.history_reset_threshold,
         ),
         llm_gateway=llm_gateway,
+        circuit_breaker_policy=circuit_breaker_policy,
+        observability_hook=heartbeat_monitor,
     )
 
     worker = bundle.create_temporal_worker(
@@ -158,9 +182,26 @@ async def main() -> None:
         "Temporal worker started — task_queue=%s",
         config.temporal_task_queue,
     )
-    # worker.run() blocks until the Temporal SDK receives a stop signal
-    # (SIGTERM / SIGINT), drains in-flight tasks, then returns.
-    await worker.run()
+    logger.info(
+        "Heartbeat monitoring active — min_interval_s=%d stale_check_age_s=%d",
+        config.heartbeat_min_interval_s,
+        config.heartbeat_stale_check_age_s,
+    )
+
+    async def _watchdog_loop() -> None:
+        while True:
+            await heartbeat_monitor.watchdog_once(gateway=bundle.gateway)
+            await asyncio.sleep(config.heartbeat_min_interval_s)
+
+    watchdog_task = asyncio.create_task(_watchdog_loop())
+    try:
+        # worker.run() blocks until the Temporal SDK receives a stop signal
+        # (SIGTERM / SIGINT), drains in-flight tasks, then returns.
+        await worker.run()
+    finally:
+        watchdog_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watchdog_task
     logger.info("Temporal worker stopped.")
 
 
