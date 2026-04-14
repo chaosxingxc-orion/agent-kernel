@@ -274,7 +274,7 @@ cfg = KernelConfig.from_env()
 | `AGENT_KERNEL_LLM_PROVIDER` | `llm_provider` | `""` | LLM 提供商（`anthropic` 或 `openai`） |
 | `AGENT_KERNEL_LLM_MODEL` | `llm_model` | `""` | LLM 模型名称 |
 | `AGENT_KERNEL_LLM_API_KEY` | `llm_api_key` | `""` | LLM API 密钥（也可使用 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`） |
-| `AGENT_KERNEL_SCRIPT_TIMEOUT_S` | `script_timeout_s` | `30.0` | 脚本子进程超时（秒） |
+| `AGENT_KERNEL_SCRIPT_TIMEOUT_S` | `script_timeout_s` | `30.0` | 脚本超时（秒）。`LocalProcessScriptRuntime` 内建 30 s 兜底；`InProcessPythonScriptRuntime` 需调用方手动将 `int(script_timeout_s * 1000)` 传给 `default_timeout_ms` 构造参数 |
 
 完整字段列表见 `agent_kernel/config.py`。
 

@@ -527,10 +527,15 @@ LocalFSM 已知限制: `no_child_workflow_isolation`, `no_temporal_history`, `no
 | `agent-kernel-server` | `agent_kernel.service.http_server` | 启动 HTTP API 服务（含 Worker） |
 | `agent-kernel-worker` | `agent_kernel.worker_main` | 仅启动独立 Temporal Worker |
 
-独立 Worker 部署模式 (`worker_main.py`):
+独立 Worker 部署模式 (`worker_main.py`) 引导序列:
 1. 读取 `KernelConfig.from_env()`
-2. 连接 Temporal (`AGENT_KERNEL_TEMPORAL_HOST`)
-3. 调用 `worker.run()` 开始处理工作流和活动任务
+2. 构建 `HeartbeatPolicy` + `RunHeartbeatMonitor`（状态超时阈值从 config 读取）
+3. 构建 `CircuitBreakerPolicy`（threshold / half_open_after_ms 从 config 读取）
+4. 连接 Temporal (`AGENT_KERNEL_TEMPORAL_HOST`)
+5. 按需构建 LLM 网关：`AGENT_KERNEL_LLM_PROVIDER` 非空时实例化 `AnthropicLLMGateway` 或 `OpenAILLMGateway`，否则认知服务禁用
+6. 以 SQLite 后端 build `AgentKernelRuntimeBundle`（传入 strict_mode、heartbeat_monitor、circuit_breaker_policy、llm_gateway）
+7. 启动 Temporal Worker（`worker.run()` 内置 SIGTERM/SIGINT 处理）
+8. 并发运行 HeartbeatWatchdog asyncio 任务（轮询间隔 = `heartbeat_min_interval_s`）
 
 生产建议: 将 HTTP 服务和 Worker 分开部署，以便独立扩缩容。
 
@@ -543,7 +548,7 @@ LocalFSM 已知限制: `no_child_workflow_isolation`, `no_temporal_history`, `no
 | GET | `/runs/{run_id}/dashboard` | run 仪表盘 |
 | GET | `/runs/{run_id}/trace` | TRACE 运行时视图 |
 | GET | `/runs/{run_id}/postmortem` | 事后分析 |
-| GET | `/runs/{run_id}/events` | SSE 事件流 |
+| GET | `/runs/{run_id}/events` | SSE 事件流（需配置 `TemporalGatewayConfig.event_stream_query_method_name`；未配置时返回空流并发 WARNING 日志） |
 | POST | `/runs/{run_id}/signal` | 发送信号 |
 | POST | `/runs/{run_id}/cancel` | 取消 run |
 | POST | `/runs/{run_id}/resume` | 恢复 run |
@@ -628,6 +633,15 @@ class SubprocessScriptConfig:
 行为:
 - `validate_script(script, host_kind) -> bool`: 通过 `ast.parse` 在隔离子进程中验证脚本语法
 - `execute_script(input) -> ScriptResult`: 在独立子进程中执行，强制 timeout，WAL 清理
+
+**注册表内置运行时 timeout 对称性**（`kernel/cognitive/script_runtime.py`）:
+
+| 运行时 | timeout 来源 | 兜底行为 |
+|--------|-------------|---------|
+| `InProcessPythonScriptRuntime` | `ScriptActivityInput.timeout_ms` 优先，否则 `default_timeout_ms` | 需调用方传 `int(script_timeout_s * 1000)` 给构造参数 |
+| `LocalProcessScriptRuntime` | `ScriptActivityInput.timeout_ms` 优先，否则 `default_timeout_ms` | 内建 30 000 ms 兜底，与 `KernelConfig.script_timeout_s` 一致 |
+
+两个内置运行时均接受 `default_timeout_ms` 构造参数，LLM 未在 action plan 中指定 `timeout_ms` 时自动回退。
 
 `EchoScriptRuntime` 仅用于 PoC/测试。
 
