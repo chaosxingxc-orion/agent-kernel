@@ -430,9 +430,10 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         """
         query_name = self._config.event_stream_query_method_name
         if query_name is None:
-            _logger.debug(
+            _logger.warning(
                 "stream_run_events called but event_stream_query_method_name is not configured; "
-                "yielding empty stream for run_id=%s",
+                "yielding empty stream for run_id=%s. "
+                "Set TemporalGatewayConfig.event_stream_query_method_name to enable.",
                 run_id,
             )
             return

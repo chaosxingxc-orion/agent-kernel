@@ -261,6 +261,39 @@ class TestLocalProcessScriptRuntime:
         )
         assert result.script_id == "proc-script"
 
+    @pytest.mark.asyncio
+    async def test_none_timeout_ms_falls_back_to_default(self) -> None:
+        """timeout_ms=None must not raise TypeError; default_timeout_ms is used."""
+        runtime = LocalProcessScriptRuntime()
+        input_value = ScriptActivityInput(
+            run_id="run-1",
+            action_id="action-1",
+            script_id="none-timeout",
+            script_content="echo ok",
+            host_kind="local_process",
+            parameters={},
+            timeout_ms=None,
+        )
+        result = await runtime.execute_script(input_value)
+        assert result.exit_code == 0
+
+    @pytest.mark.asyncio
+    async def test_custom_default_timeout_ms_fires_on_none_input(self) -> None:
+        """When timeout_ms=None, the custom default_timeout_ms is enforced."""
+        runtime = LocalProcessScriptRuntime(default_timeout_ms=100)
+        input_value = ScriptActivityInput(
+            run_id="run-1",
+            action_id="action-1",
+            script_id="custom-default-timeout",
+            script_content='python -c "import time; time.sleep(60)"',
+            host_kind="local_process",
+            parameters={},
+            timeout_ms=None,
+        )
+        result = await runtime.execute_script(input_value)
+        assert result.exit_code == -1
+        assert "TimeoutError" in result.stderr
+
 
 # ---------------------------------------------------------------------------
 # R3f — DedupeAwareScriptRuntime

@@ -80,9 +80,17 @@ class KernelConfig:
     llm_api_key: str = ""
 
     # -- Script Runtime ---------------------------------------------------
-    # Caller responsibility: pass int(script_timeout_s * 1000) as
-    # default_timeout_ms to InProcessPythonScriptRuntime.  The bundle does
-    # not manage script runtime construction directly.
+    # Timeout used by both built-in script runtimes, but wired differently:
+    #   InProcessPythonScriptRuntime — caller responsibility: pass
+    #     int(script_timeout_s * 1000) as default_timeout_ms to the constructor.
+    #     The runtime falls back to this value when ScriptActivityInput.timeout_ms
+    #     is not set by the LLM.  The bundle does not manage in-process runtime
+    #     construction directly.
+    #   LocalProcessScriptRuntime — the runtime falls back to its own
+    #     default_timeout_ms (30 000 ms) when ScriptActivityInput.timeout_ms is
+    #     absent.  This default matches script_timeout_s but is not dynamically
+    #     wired; reconfigure via LocalProcessScriptRuntime(default_timeout_ms=…)
+    #     if a different value is needed.
     script_timeout_s: float = 30.0
 
     @classmethod

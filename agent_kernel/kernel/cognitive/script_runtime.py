@@ -234,14 +234,18 @@ class LocalProcessScriptRuntime:
     ``"possible_infinite_loop"`` in caller-constructed evidence.
     """
 
-    def __init__(self, shell: str | None = None) -> None:
+    def __init__(self, shell: str | None = None, default_timeout_ms: int = 30_000) -> None:
         """Initialise the runtime.
 
         Args:
             shell: Optional shell binary to use (default: platform shell).
+            default_timeout_ms: Fallback wall-clock timeout in milliseconds used
+                when ``ScriptActivityInput.timeout_ms`` is ``None``.  Defaults to
+                30 000 ms (30 s), matching ``KernelConfig.script_timeout_s``.
 
         """
         self._shell = shell
+        self._default_timeout_ms = default_timeout_ms
 
     async def execute_script(self, input_value: ScriptActivityInput) -> ScriptResult:
         """Execute a script in a subprocess and returns the result.
@@ -253,13 +257,16 @@ class LocalProcessScriptRuntime:
         Args:
             input_value: Script execution payload.  ``script_content`` is
                 written to stdin or executed directly depending on host_kind.
+                ``timeout_ms`` may be ``None``; ``default_timeout_ms`` is used
+                as fallback in that case.
 
         Returns:
             ScriptResult with exit_code, stdout, stderr, and execution_ms.
             ``exit_code=-1`` signals a timeout.
 
         """
-        timeout_s = input_value.timeout_ms / 1000.0
+        timeout_ms = input_value.timeout_ms or self._default_timeout_ms
+        timeout_s = timeout_ms / 1000.0
         start = time.monotonic()
 
         # Inject parameters as environment variables for subprocess access.
@@ -288,7 +295,7 @@ class LocalProcessScriptRuntime:
                 script_id=input_value.script_id,
                 exit_code=-1,
                 stdout="",
-                stderr=f"TimeoutError: script exceeded {input_value.timeout_ms}ms budget",
+                stderr=f"TimeoutError: script exceeded {timeout_ms}ms budget",
                 output_json=None,
                 execution_ms=elapsed_ms,
             )
