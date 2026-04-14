@@ -216,6 +216,12 @@ class KernelFacade:
         self._tracked_run_order: list[str] = []
         self._tracked_run_set: set[str] = set()
         self._tracked_run_lock = threading.Lock()
+        # Run lifecycle timestamps: populated on start_run / spawn_child_run /
+        # first detected terminal state.
+        self._run_created_at: dict[str, str] = {}
+        self._run_completed_at: dict[str, str] = {}
+        # Per-child metadata tracked at spawn time.
+        self._child_kind: dict[str, str] = {}
 
     @property
     def is_draining(self) -> bool:
@@ -507,6 +513,9 @@ class KernelFacade:
         workflow = await self._workflow_gateway.start_workflow(request_for_gateway)
         workflow_id = workflow.get("workflow_id", "")
         run_id = str(workflow.get("run_id") or workflow_id)
+        import datetime
+
+        self._run_created_at[run_id] = datetime.datetime.now(datetime.UTC).isoformat()
         if self._context_adapter is not None and binding_ref is not None:
             self._context_adapter.bind_run_context(run_id, binding_ref)
         return StartRunResponse(
@@ -802,6 +811,10 @@ class KernelFacade:
             request_for_gateway,
         )
         child_run_id = str(workflow.get("run_id") or workflow.get("workflow_id", ""))
+        import datetime
+
+        self._run_created_at[child_run_id] = datetime.datetime.now(datetime.UTC).isoformat()
+        self._child_kind[child_run_id] = request.child_kind
         # Minimal closed-loop behavior: notify parent run projection that a new
         # child has been created. The parent workflow converts this signal into
         # a replayable runtime event, so projection can track active children.
@@ -1225,18 +1238,25 @@ class KernelFacade:
             with contextlib.suppress(NotImplementedError):
                 total_action_count = self._dedupe_store.count_by_run(run_id)
 
-        # Derive timing.
-        # NOTE: The facade does not hold a reference to the event log, so we
-        # cannot derive created_at / completed_at from the first/last event
-        # timestamps.  We fall back to the current wall-clock time.  A future
-        # enhancement could accept an optional event_log dependency or extend
-        # TemporalWorkflowGateway with an event-timestamp query.
-        now = datetime.datetime.now(datetime.UTC).isoformat()
-        created_at = now
+        # Derive timing from facade-tracked lifecycle timestamps.
+        # created_at: recorded when start_run() was called on this facade instance.
+        #   None if the run was started by a different facade instance before this one.
+        created_at: str | None = self._run_created_at.get(run_id)
+        # completed_at: cached on first detection of terminal state.
         completed_at: str | None = None
         if trace.run_state in ("completed", "failed", "aborted"):
-            completed_at = now
+            if run_id not in self._run_completed_at:
+                self._run_completed_at[run_id] = datetime.datetime.now(datetime.UTC).isoformat()
+            completed_at = self._run_completed_at[run_id]
+        # duration_ms: computed if both timestamps are available; 0 if timing is unknown.
         duration_ms = 0
+        if created_at is not None and completed_at is not None:
+            try:
+                _start = datetime.datetime.fromisoformat(created_at)
+                _end = datetime.datetime.fromisoformat(completed_at)
+                duration_ms = max(0, int((_end - _start).total_seconds() * 1000))
+            except ValueError:
+                duration_ms = 0
 
         # task_id: QueryRunResponse does not carry task_id or
         # task_contract_ref.  Best-effort extraction via getattr so callers
@@ -1294,26 +1314,29 @@ class KernelFacade:
                 if child_resp.lifecycle_state in _terminal:
                     outcome = child_resp.lifecycle_state
 
-                # child_kind: We do not have per-child metadata stored at
-                # the kernel level; default to "child".  hi-agent may enrich
-                # this with task-specific kinds post-hoc.
+                # child_kind: tracked at spawn time via self._child_kind.
                 # task_id: Same limitation as query_run_postmortem — the
                 # QueryRunResponse does not expose task_id.
-                # created_at / completed_at: The facade lacks event-log
-                # access, so we use wall-clock time as a placeholder.
+                # created_at / completed_at: tracked at spawn/terminal detection.
                 child_task_id: str | None = getattr(
                     child_resp, "task_contract_ref", None
                 ) or getattr(child_resp, "task_id", None)
-                child_now = datetime.datetime.now(datetime.UTC).isoformat()
-                child_completed: str | None = child_now if outcome else None
+                child_created_at: str | None = self._run_created_at.get(child_id)
+                child_completed: str | None = None
+                if outcome is not None:
+                    if child_id not in self._run_completed_at:
+                        self._run_completed_at[child_id] = datetime.datetime.now(
+                            datetime.UTC
+                        ).isoformat()
+                    child_completed = self._run_completed_at[child_id]
                 summaries.append(
                     ChildRunSummary(
                         child_run_id=child_id,
-                        child_kind="child",
+                        child_kind=self._child_kind.get(child_id, "child"),
                         task_id=child_task_id,
                         lifecycle_state=child_resp.lifecycle_state,
                         outcome=outcome,
-                        created_at=child_now,
+                        created_at=child_created_at,
                         completed_at=child_completed,
                     )
                 )
@@ -1321,11 +1344,11 @@ class KernelFacade:
                 summaries.append(
                     ChildRunSummary(
                         child_run_id=child_id,
-                        child_kind="child",
+                        child_kind=self._child_kind.get(child_id, "child"),
                         task_id=None,
                         lifecycle_state="created",
                         outcome=None,
-                        created_at=datetime.datetime.now(datetime.UTC).isoformat(),
+                        created_at=self._run_created_at.get(child_id),
                         completed_at=None,
                     )
                 )
@@ -1679,11 +1702,17 @@ class KernelFacade:
         Returns:
             State string (e.g. ``"reserved"``, ``"dispatched"``,
             ``"acknowledged"``, ``"succeeded"``, ``"unknown_effect"``), or
-            ``None`` if the key is unknown or no dedupe_store was injected.
+            ``None`` if the key is unknown.
+
+        Raises:
+            RuntimeError: When no dedupe_store was injected at construction time.
 
         """
         if self._dedupe_store is None:
-            return None
+            raise RuntimeError(
+                "get_action_state called but no dedupe_store was injected — "
+                "idempotency protection is disabled."
+            )
         record = self._dedupe_store.get(dispatch_idempotency_key)
         return record.state if record is not None else None
 

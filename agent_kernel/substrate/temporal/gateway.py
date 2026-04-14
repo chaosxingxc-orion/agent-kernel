@@ -17,7 +17,10 @@ Why this module exists:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+
+_logger = logging.getLogger(__name__)
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -344,8 +347,12 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         Args:
             run_id: Identifier of the target run.
             action: Kernel action DTO; must carry an ``action_type`` attribute.
-            _handler: Unused by this implementation (kept for interface
-                compatibility with ``LocalWorkflowGateway``).
+            _handler: Not used by this implementation. In ``LocalWorkflowGateway``,
+                this handler is called directly for in-process capability dispatch.
+                In ``TemporalSDKWorkflowGateway``, execution routes through
+                ``activity_gateway`` instead — the handler is never invoked.
+                A runtime warning is emitted when a non-None handler is passed,
+                to surface this divergence at call time.
             idempotency_key: Used as ``action_id`` when constructing activity
                 input DTOs.
 
@@ -361,6 +368,13 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
             raise RuntimeError(
                 "execute_turn requires an activity_gateway; "
                 "pass activity_gateway= to TemporalSDKWorkflowGateway."
+            )
+        if _handler is not None:
+            _logger.warning(
+                "execute_turn: handler argument is ignored by TemporalSDKWorkflowGateway. "
+                "In Temporal mode, tool execution routes through activity_gateway, not the "
+                "caller-provided handler. Register a Temporal activity for run_id=%s instead.",
+                run_id,
             )
         action_type = getattr(action, "action_type", None)
         if action_type == "tool_call":

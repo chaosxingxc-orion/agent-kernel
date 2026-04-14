@@ -324,9 +324,10 @@ class TestOpenHumanGate:
 
 
 class TestGetActionState:
-    def test_returns_none_without_dedupe_store(self):
+    def test_raises_when_no_dedupe_store(self):
         facade = _make_facade()
-        assert facade.get_action_state("any-key") is None
+        with pytest.raises(RuntimeError, match="no dedupe_store was injected"):
+            facade.get_action_state("any-key")
 
     def test_returns_none_for_unknown_key(self):
         store = InMemoryDedupeStore()
