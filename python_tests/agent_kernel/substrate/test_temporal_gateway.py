@@ -6,6 +6,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+import pytest
+
 from agent_kernel.kernel.contracts import (
     QueryRunResponse,
     RunProjection,
@@ -192,12 +194,14 @@ def test_start_child_workflow_uses_child_workflow_id_namespace() -> None:
     assert client.start_calls[0]["kwargs"]["id"] == "run:child:parent-1:child-1"
 
 
-def test_stream_run_events_returns_empty_when_query_hook_not_configured() -> None:
-    """Gateway stream API must yield zero events when hook is not configured.
+def test_stream_run_events_raises_when_query_hook_not_configured() -> None:
+    """Gateway must raise RuntimeError when event_stream_query_method_name is not set.
 
-    Production deployments do not set event_stream_query_method_name; raising
-    NotImplementedError would crash the SSE endpoint for every caller. An empty
-    stream is the correct graceful degradation.
+    Silently yielding an empty iterator would cause silent data loss for all
+    downstream consumers (SSE endpoint, reconcile loop, branch progress
+    tracking).  The correct behaviour is a loud, actionable RuntimeError so
+    operators know to configure the field rather than silently receiving no
+    events.
     """
     client = _FakeClient()
     gateway = TemporalSDKWorkflowGateway(client)
@@ -208,8 +212,8 @@ def test_stream_run_events_returns_empty_when_query_hook_not_configured() -> Non
             collected_events.append(event)
         return collected_events
 
-    result = asyncio.run(_collect())
-    assert result == [], "expected empty stream when event_stream_query_method_name is not set"
+    with pytest.raises(RuntimeError, match="event_stream_query_method_name is not set"):
+        asyncio.run(_collect())
 
 
 def test_stream_run_events_uses_query_hook_and_normalizes_payload() -> None:

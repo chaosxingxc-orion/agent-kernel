@@ -55,8 +55,12 @@ class TemporalGatewayConfig:
         workflow_run_callable: Workflow entry callable for start_workflow.
         signal_method_name: Workflow signal method name used by handles.
         query_method_name: Workflow query method name used by handles.
-        event_stream_query_method_name: Optional workflow query method used to
-            fetch runtime event stream payloads.
+        event_stream_query_method_name: Workflow query method used to fetch
+            runtime event stream payloads.  **Required** for event streaming in
+            Temporal mode — ``stream_run_events`` raises ``RuntimeError`` when
+            this field is ``None``.  Set to the query method registered on the
+            workflow (e.g. ``"query_runtime_events"``).  Leave ``None`` only
+            when event streaming is explicitly not needed for this deployment.
 
     """
 
@@ -426,17 +430,25 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
     async def _stream_run_events(self, run_id: str) -> AsyncIterator[RuntimeEvent]:
         """Yield runtime events returned by configured workflow query hook.
 
-        If no stream query method is configured, the stream is empty.
+        Args:
+            run_id: Target run identifier.
+
+        Raises:
+            RuntimeError: When ``event_stream_query_method_name`` is not configured.
+                Callers must set this field on ``TemporalGatewayConfig`` to enable
+                event streaming in Temporal mode.  Silently yielding an empty stream
+                would cause silent data loss for all downstream consumers.
+
         """
         query_name = self._config.event_stream_query_method_name
         if query_name is None:
-            _logger.warning(
-                "stream_run_events called but event_stream_query_method_name is not configured; "
-                "yielding empty stream for run_id=%s. "
-                "Set TemporalGatewayConfig.event_stream_query_method_name to enable.",
-                run_id,
+            raise RuntimeError(
+                "stream_run_events is not operational: "
+                "TemporalGatewayConfig.event_stream_query_method_name is not set. "
+                "Configure this field to the Temporal workflow query method that "
+                "exposes the runtime event log (e.g. 'query_runtime_events'). "
+                f"run_id={run_id!r}"
             )
-            return
         handle = self._client.get_workflow_handle(
             self._workflow_id_for_run(run_id),
         )
