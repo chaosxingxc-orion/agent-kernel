@@ -586,6 +586,17 @@ LocalFSM 已知限制: `no_child_workflow_isolation`, `no_temporal_history`, `no
 
 生产环境可省略 `external/` 目录，只需 `pip install ".[temporal]"` 安装 wheel 即可。
 
+**`TemporalGatewayConfig` 关键字段：**
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `task_queue` | `"agent-kernel"` | Worker 监听的 Temporal 任务队列 |
+| `workflow_id_prefix` | `"run"` | workflow id 前缀（格式：`{prefix}:{run_id}`） |
+| `workflow_run_callable` | `RunActorWorkflow.run` | 工作流入口 callable |
+| `signal_method_name` | `"signal"` | 信号 handle 方法名 |
+| `query_method_name` | `"query"` | 投影查询方法名 |
+| `event_stream_query_method_name` | `None` | **事件流查询方法名（必须设置以启用 SSE 流）**；为 `None` 时调用 `stream_run_events` 抛出 `RuntimeError`，防止静默数据丢失。设置为工作流上注册的查询方法名，例如 `"query_runtime_events"`。 |
+
 ### 12.4 CLI 入口与独立 Worker
 
 打包后提供两个 CLI 入口点:
@@ -619,7 +630,7 @@ HTTP 路由实现在 `service/http_server.py`（`create_app` / `create_app_tempo
 | GET | `/runs/{run_id}/dashboard` | run 仪表盘 |
 | GET | `/runs/{run_id}/trace` | TRACE 运行时视图 |
 | GET | `/runs/{run_id}/postmortem` | 事后分析 |
-| GET | `/runs/{run_id}/events` | SSE 事件流（需配置 `TemporalGatewayConfig.event_stream_query_method_name`；未配置时返回空流并发 WARNING 日志） |
+| GET | `/runs/{run_id}/events` | SSE 事件流；Temporal 模式下**必须**在 `TemporalGatewayConfig` 中设置 `event_stream_query_method_name`，否则 `_stream_run_events` 抛出 `RuntimeError`（不再静默返回空流）。LocalFSM 模式无此限制。 |
 | POST | `/runs/{run_id}/signal` | 发送信号 |
 | POST | `/runs/{run_id}/cancel` | 取消 run |
 | POST | `/runs/{run_id}/resume` | 恢复 run |
