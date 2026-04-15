@@ -52,6 +52,10 @@ agent_kernel/
       script_runtime_subprocess.py           # SubprocessScriptRuntime
     persistence/                             # PostgreSQL / SQLite 持久化实现
       sqlite_decision_deduper.py             # SQLiteDecisionDeduper (WAL 模式)
+      sqlite_dedupe_store.py                 # SQLiteDedupeStore — 全量 Protocol (含 count_by_run)
+      sqlite_colocated_bundle.py             # ColocatedSQLiteBundle — EventLog+DedupeStore 共享连接原子写
+      consistency.py                         # verify_event_dedupe_consistency (同步/异步) — 只读跨存储校验
+      dispatch_outbox_reconciler.py          # DispatchOutboxReconciler — Saga 修复器 + ScheduledOutboxReconciler
     recovery/                                # 恢复决策 (planner/gate/circuit_breaker)
     task_manager/                            # 任务注册、健康监控
   runtime/
@@ -366,6 +370,29 @@ python scripts/check_prod_safety.py
 | `ScriptRuntime` | `EchoScriptRuntime` | `SubprocessScriptRuntime` |
 
 `SnapshotDrivenAdmissionService` 的 5 规则流水线依次检查：`permission_mode` → `binding_existence` → `idempotency` → `risk_tier` → `rate_limit`，策略由 `TenantPolicyResolver` 提供（支持 `"policy:default"` 和 `"file:///path/to/policy.json"`）。
+
+## 一致性检查与修复
+
+进程崩溃可能在 `reserve()` 与事件追加之间留下不一致窗口。内核提供两层工具：
+
+```python
+# 只读校验（检测 EventLog ↔ DedupeStore 漂移）
+from agent_kernel.kernel.persistence.consistency import averify_event_dedupe_consistency
+
+report = await averify_event_dedupe_consistency(event_log, dedupe_store, run_id)
+if not report.is_consistent:
+    for v in report.violations:
+        print(v.kind, v.idempotency_key, v.detail)
+
+# Saga 修复（自动将漂移 key 过渡到 unknown_effect，触发恢复层）
+from agent_kernel.kernel.persistence.dispatch_outbox_reconciler import DispatchOutboxReconciler
+
+reconciler = DispatchOutboxReconciler()
+result = await reconciler.reconcile(event_log, dedupe_store, run_id)
+# result.violations_found / violations_repaired / actions
+```
+
+`ScheduledOutboxReconciler` 提供后台周期性扫描（默认 300 s）；可通过 `run_ids_provider` 回调注入活跃 run 列表。
 
 ## WorkflowGatewaySignalAdapter
 

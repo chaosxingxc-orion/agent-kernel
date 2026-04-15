@@ -382,9 +382,10 @@ POST /runs/{run_id}/resolve-escalation
 |------|------|---------|
 | In-memory | `minimal_runtime.py` 中的所有协议实现 | 测试 / PoC 仅 |
 | `SQLiteDecisionDeduper` | `kernel/persistence/sqlite_decision_deduper.py` — 决策指纹去重 | 本地持久化 / 生产默认 |
-| SQLite DedupeStore | 执行器层 at-most-once 去重 | 本地持久化 / 轻量部署 |
+| `SQLiteDedupeStore` | 执行器层 at-most-once 去重；全量 Protocol 实现（含 `count_by_run`） | 本地持久化 / 轻量部署 |
+| `ColocatedSQLiteBundle` | 共享单连接原子写入（EventLog + DedupeStore 同一事务）；`_SharedConnectionDedupeStore` 全量 Protocol 实现 | 本地持久化 / 轻量部署 |
 | SQLite ProjectionCache | `sqlite_projection_cache.py` — 投影快照加速重启 | 本地持久化 / 轻量部署 |
-| PostgreSQL | EventLog、Projection (路径已支持) | 规模化生产 |
+| PostgreSQL | EventLog、DedupeStore、RecoveryOutcome（路径已支持）；`PostgresDedupeStore` 全量 Protocol 实现 | 规模化生产 |
 
 ### 9.2 ProjectionSnapshotCache
 
@@ -402,6 +403,46 @@ POST /runs/{run_id}/resolve-escalation
 - 窗口大小: 60 秒。
 - 超出 `TenantPolicy.max_actions_per_minute` 则返回 `DENY(reason_code="quota_exceeded")`。
 - 限速状态随进程生命周期持续，不跨进程共享（如需共享，升级到外部 Redis 等存储）。
+
+### 9.4 EventLog–DedupeStore 一致性检查与修复
+
+进程崩溃可能在 `reserve()` 与事件追加之间留下不一致窗口。`kernel/persistence/consistency.py` 提供只读一致性校验器，`kernel/persistence/dispatch_outbox_reconciler.py` 提供 Saga 模式的自动修复器。
+
+**校验 API：**
+
+```python
+# 同步（非 async 上下文）
+report = verify_event_dedupe_consistency(event_log, dedupe_store, run_id)
+
+# 异步（内核主路径推荐）
+report = await averify_event_dedupe_consistency(event_log, dedupe_store, run_id)
+```
+
+两类违规：
+
+| 违规类型 | 触发场景 | 处置 |
+|----------|---------|------|
+| `orphaned_dedupe_key` | DedupeStore 有 key 但 EventLog 无对应事件（`reserve()` 后崩溃） | 过渡到 `unknown_effect` |
+| `unknown_effect_no_log_evidence` | DedupeStore 为 `unknown_effect` 但 EventLog 无 dispatch 证据 | 写 WARNING，人工审查 |
+
+**修复 API：**
+
+```python
+reconciler = DispatchOutboxReconciler()
+result = await reconciler.reconcile(event_log, dedupe_store, run_id)
+# result.violations_found, result.violations_repaired, result.actions
+```
+
+`ScheduledOutboxReconciler` 封装后台周期性扫描（默认 300 s），通过 `run_ids_provider` 发现活跃 run 并循环调用 `reconcile()`。
+
+**DedupeStore Protocol 完整性（v0.2.0 全部后端达到完整）：**
+
+| 后端 | `count_by_run` | `mark_succeeded` | 适用场景 |
+|------|---------------|-----------------|---------|
+| `InMemoryDedupeStore` | ✅ | ✅ | PoC / 测试 |
+| `SQLiteDedupeStore` | ✅ | ✅ | 轻量生产 |
+| `_SharedConnectionDedupeStore` | ✅ | ✅ | 共享连接（colocated bundle）|
+| `PostgresDedupeStore` | ✅ | ✅ | 规模化生产 |
 
 ---
 
