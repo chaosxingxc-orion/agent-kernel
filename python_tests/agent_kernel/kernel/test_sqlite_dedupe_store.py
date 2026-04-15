@@ -50,3 +50,39 @@ def test_sqlite_dedupe_enforces_monotonic_transition_rules(tmp_path: Path) -> No
     with pytest.raises(DedupeStoreStateError):
         store.mark_dispatched("key-2")
     store.close()
+
+
+class TestSQLiteDedupeStoreCountByRun:
+    """Unit tests for SQLiteDedupeStore.count_by_run using an in-memory database."""
+
+    def setup_method(self) -> None:
+        """Create a fresh in-memory store for each test."""
+        self.store = SQLiteDedupeStore(":memory:")
+
+    def teardown_method(self) -> None:
+        """Close the store after each test."""
+        self.store.close()
+
+    def test_count_by_run_returns_zero_when_no_records(self) -> None:
+        """count_by_run returns 0 when no records exist for the given run."""
+        assert self.store.count_by_run("run-empty") == 0
+
+    def test_count_by_run_counts_only_matching_run(self) -> None:
+        """count_by_run counts records for the target run and ignores other runs."""
+        self.store.reserve(_build_envelope("run-a:action:1"))
+        self.store.reserve(_build_envelope("run-a:action:2"))
+        self.store.reserve(_build_envelope("run-b:action:1"))
+
+        assert self.store.count_by_run("run-a") == 2
+        assert self.store.count_by_run("run-b") == 1
+
+    def test_count_by_run_across_multiple_runs(self) -> None:
+        """count_by_run returns correct totals after records are added for several runs."""
+        for i in range(3):
+            self.store.reserve(_build_envelope(f"run-x:op:{i}"))
+        for i in range(5):
+            self.store.reserve(_build_envelope(f"run-y:op:{i}"))
+
+        assert self.store.count_by_run("run-x") == 3
+        assert self.store.count_by_run("run-y") == 5
+        assert self.store.count_by_run("run-z") == 0

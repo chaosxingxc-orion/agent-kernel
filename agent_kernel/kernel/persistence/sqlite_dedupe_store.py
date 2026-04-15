@@ -380,6 +380,35 @@ class SQLiteDedupeStore:
                 external_ack_ref=row["external_ack_ref"],
             )
 
+    def count_by_run(self, run_id: str) -> int:
+        """Count dedupe records whose key belongs to a given run.
+
+        Matches rows where ``dispatch_idempotency_key`` starts with
+        ``"{run_id}:"``.  Special characters in *run_id* that could be
+        interpreted as SQLite LIKE wildcards (``%``, ``_``) are escaped so
+        that the prefix match is always literal.
+
+        Args:
+            run_id: Run identifier to count records for.
+
+        Returns:
+            Number of records whose key starts with ``"{run_id}:"``.
+
+        """
+        # Escape LIKE special characters so the prefix match is literal.
+        escaped = run_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        prefix = f"{escaped}:%"
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM dedupe_store
+                WHERE dispatch_idempotency_key LIKE ? ESCAPE '\\'
+                """,
+                (prefix,),
+            ).fetchone()
+        return int(row["cnt"])
+
     def _get_required_record(self, dispatch_idempotency_key: str) -> DedupeRecord:
         """Get record by key or raises.
 

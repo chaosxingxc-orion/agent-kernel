@@ -163,69 +163,7 @@ def verify_event_dedupe_consistency(
         return report
 
     report.events_checked = len(events)
-
-    # Build a set of idempotency_keys that appear in the event log for this run.
-    event_idempotency_keys: set[str] = set()
-    for ev in events:
-        ik = getattr(ev, "idempotency_key", None)
-        if ik:
-            event_idempotency_keys.add(ik)
-
-    # Build a set of event_type values per idempotency_key.
-    event_types_by_key: dict[str, set[str]] = {}
-    for ev in events:
-        ik = getattr(ev, "idempotency_key", None)
-        et = getattr(ev, "event_type", None)
-        if ik and et:
-            event_types_by_key.setdefault(ik, set()).add(et)
-
-    # --- Enumerate all dedupe keys belonging to this run ---
-    all_dedupe_keys: list[str] = _collect_dedupe_keys(dedupe_store, run_id)
-    report.dedupe_keys_checked = len(all_dedupe_keys)
-
-    for key in all_dedupe_keys:
-        record = dedupe_store.get(key)
-        if record is None:
-            continue
-
-        # --- Violation 1: orphaned dedupe key ---
-        if key not in event_idempotency_keys:
-            report.violations.append(
-                ConsistencyViolation(
-                    kind="orphaned_dedupe_key",
-                    idempotency_key=key,
-                    dedupe_state=record.state,
-                    event_count=0,
-                    detail=(
-                        f"DedupeStore key {key!r} (state={record.state!r}) has no "
-                        f"matching event in the EventLog for run {run_id!r}. "
-                        "Possible crash between reserve() and event append."
-                    ),
-                )
-            )
-            continue
-
-        # --- Violation 2: unknown_effect with no dispatch evidence ---
-        if record.state == "unknown_effect":
-            found_types = event_types_by_key.get(key, set())
-            has_dispatch_evidence = bool(
-                found_types & {"turn.dispatched", "turn.effect_unknown", "turn.effect_recorded"}
-            )
-            if not has_dispatch_evidence:
-                report.violations.append(
-                    ConsistencyViolation(
-                        kind="unknown_effect_no_log_evidence",
-                        idempotency_key=key,
-                        dedupe_state="unknown_effect",
-                        event_count=len(found_types),
-                        detail=(
-                            f"DedupeStore key {key!r} is in state 'unknown_effect' "
-                            f"but no dispatch/effect event was found in the EventLog "
-                            f"for run {run_id!r}. Human review recommended."
-                        ),
-                    )
-                )
-
+    _detect_violations(report, events, dedupe_store, run_id)
     return report
 
 
@@ -266,7 +204,27 @@ async def averify_event_dedupe_consistency(
         return report
 
     report.events_checked = len(events)
+    _detect_violations(report, events, dedupe_store, run_id)
+    return report
 
+
+def _detect_violations(
+    report: ConsistencyReport,
+    events: list[Any],
+    dedupe_store: Any,
+    run_id: str,
+) -> None:
+    """Populate *report* with violations found by cross-checking events vs dedupe keys.
+
+    Shared by the sync and async public functions; called after events are loaded.
+
+    Args:
+        report: ConsistencyReport to append violations to (mutated in place).
+        events: Events already loaded for *run_id*.
+        dedupe_store: DedupeStore-compatible object to enumerate and query.
+        run_id: Run identifier (used for log messages in violation details).
+
+    """
     event_idempotency_keys: set[str] = set()
     event_types_by_key: dict[str, set[str]] = {}
     for ev in events:
@@ -320,8 +278,6 @@ async def averify_event_dedupe_consistency(
                         ),
                     )
                 )
-
-    return report
 
 
 def _collect_dedupe_keys(dedupe_store: Any, run_id: str) -> list[str]:

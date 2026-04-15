@@ -410,6 +410,71 @@ class _SharedConnectionDedupeStore:
                     self._conn.execute("ROLLBACK")
                 raise
 
+    def mark_succeeded(
+        self, dispatch_idempotency_key: str, external_ack_ref: str | None = None
+    ) -> None:
+        """Transitions record to ``succeeded`` state.
+
+        Args:
+            dispatch_idempotency_key: Dedupe key identifying the dispatch record.
+            external_ack_ref: Optional external acknowledgement reference.
+
+        Raises:
+            DedupeStoreStateError: If transition is invalid for current state.
+
+        """
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                record = self._get(dispatch_idempotency_key)
+                if record is None:
+                    raise DedupeStoreStateError(
+                        f"Unknown dispatch_idempotency_key: {dispatch_idempotency_key}."
+                    )
+                if record.state not in ("acknowledged", "succeeded"):
+                    raise DedupeStoreStateError(f"Cannot transition {record.state} -> succeeded.")
+                cursor = self._conn.execute(
+                    """
+                    UPDATE colocated_dedupe_store
+                    SET state = ?, peer_operation_id = ?, external_ack_ref = ?
+                    WHERE dispatch_idempotency_key = ?
+                    """,
+                    (
+                        "succeeded",
+                        record.peer_operation_id,
+                        external_ack_ref or record.external_ack_ref,
+                        dispatch_idempotency_key,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise DedupeStoreStateError(
+                        f"Lost-update: key {dispatch_idempotency_key!r} disappeared."
+                    )
+                self._conn.execute("COMMIT")
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._conn.execute("ROLLBACK")
+                raise
+
+    def count_by_run(self, run_id: str) -> int:
+        """Return total dedupe record count for a run.
+
+        Args:
+            run_id: Run identifier to count records for.
+
+        Returns:
+            Integer count of dedupe records whose key starts with ``run_id:``.
+
+        """
+        escaped = run_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT COUNT(*) FROM colocated_dedupe_store "
+                "WHERE dispatch_idempotency_key LIKE ? ESCAPE '\\'",
+                (f"{escaped}:%",),
+            ).fetchone()
+        return int(rows[0]) if rows else 0
+
     def mark_unknown_effect(self, dispatch_idempotency_key: str) -> None:
         """Transitions record to ``unknown_effect`` state.
 

@@ -927,8 +927,8 @@ class KernelFacade:
         Kernel guarantees exactly-once execution via idempotency_key.
 
         The LocalFSM substrate executes the handler in-process.
-        The Temporal substrate raises NotImplementedError until full Activity
-        integration is implemented.
+        The Temporal substrate routes via ``activity_gateway`` (``tool_call`` →
+        ``execute_tool``, ``mcp_call`` → ``execute_mcp``).
 
         Args:
             run_id: Target run identifier.

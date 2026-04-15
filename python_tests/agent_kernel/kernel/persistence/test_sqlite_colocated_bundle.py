@@ -452,6 +452,51 @@ class TestDedupeStoreOperations:
         assert record.state == "acknowledged"
         bundle.close()
 
+    def test_mark_succeeded_transitions_from_acknowledged(self) -> None:
+        """mark_succeeded transitions acknowledged -> succeeded."""
+        bundle = _bundle()
+        env = _make_envelope("run-succ", "k-succ")
+        bundle.dedupe_store.reserve(env)
+        bundle.dedupe_store.mark_dispatched(env.dispatch_idempotency_key)
+        bundle.dedupe_store.mark_acknowledged(env.dispatch_idempotency_key)
+        bundle.dedupe_store.mark_succeeded(env.dispatch_idempotency_key, external_ack_ref="ack-ok")
+        record = bundle.dedupe_store.get(env.dispatch_idempotency_key)
+        assert record is not None
+        assert record.state == "succeeded"
+        assert record.external_ack_ref == "ack-ok"
+        bundle.close()
+
+    def test_mark_succeeded_invalid_transition_raises(self) -> None:
+        """mark_succeeded from reserved (not acknowledged) raises DedupeStoreStateError."""
+        bundle = _bundle()
+        env = _make_envelope("run-succ-inv", "k-succ-inv")
+        bundle.dedupe_store.reserve(env)
+        with pytest.raises(DedupeStoreStateError):
+            bundle.dedupe_store.mark_succeeded(env.dispatch_idempotency_key)
+        bundle.close()
+
+    def test_count_by_run_returns_zero_with_no_records(self) -> None:
+        """count_by_run returns 0 when no records exist for the run."""
+        bundle = _bundle()
+        assert bundle.dedupe_store.count_by_run("run-empty-count") == 0
+        bundle.close()
+
+    def test_count_by_run_counts_correctly_across_multiple_runs(self) -> None:
+        """count_by_run returns only records belonging to the requested run."""
+        bundle = _bundle()
+        run_a = "run-count-a"
+        run_b = "run-count-b"
+
+        # Insert 3 records for run_a and 2 for run_b.
+        for i in range(3):
+            bundle.dedupe_store.reserve(_make_envelope(run_a, f"act-{i}"))
+        for i in range(2):
+            bundle.dedupe_store.reserve(_make_envelope(run_b, f"act-{i}"))
+
+        assert bundle.dedupe_store.count_by_run(run_a) == 3
+        assert bundle.dedupe_store.count_by_run(run_b) == 2
+        bundle.close()
+
 
 # ---------------------------------------------------------------------------
 # TestColocatedBundleThreadSafety
