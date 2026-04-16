@@ -1,4 +1,4 @@
-"""Tests for minimal in-memory kernel runtime service implementations."""
+"""Verifies for minimal in-memory kernel runtime service implementations."""
 
 from __future__ import annotations
 
@@ -52,6 +52,7 @@ class _RecordingActivityGateway:
         self,
         request: ToolActivityInput,
     ) -> dict[str, Any]:
+        """Execute tool."""
         self.tool_requests.append(request)
         return {"route": "tool", "tool_name": request.tool_name}
 
@@ -59,6 +60,7 @@ class _RecordingActivityGateway:
         self,
         request: MCPActivityInput,
     ) -> dict[str, Any]:
+        """Execute mcp."""
         self.mcp_requests.append(request)
         return {
             "route": "mcp",
@@ -1305,6 +1307,7 @@ def test_workflow_failure_emits_recovery_event_and_updates_projection_reason() -
         action: Action,
         grant_ref: str | None,
     ) -> dict[str, str]:
+        """Failing handler."""
         del action, grant_ref
         raise RuntimeError("executor boom")
 

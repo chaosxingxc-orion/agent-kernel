@@ -1,4 +1,4 @@
-"""Tests for KernelFacade run cleanup and bounded eviction."""
+"""Verifies for kernelfacade run cleanup and bounded eviction."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from agent_kernel.kernel.contracts import (
 
 
 def _make_gateway() -> MagicMock:
+    """Make gateway."""
     gw = MagicMock()
     gw.signal_run = AsyncMock()
     gw.signal_workflow = AsyncMock()
@@ -29,6 +30,7 @@ def _make_facade(
     gateway: MagicMock | None = None,
     max_tracked_runs: int = 10_000,
 ) -> KernelFacade:
+    """Make facade."""
     gw = gateway or _make_gateway()
     return KernelFacade(workflow_gateway=gw, max_tracked_runs=max_tracked_runs)
 
@@ -94,6 +96,7 @@ class TestCleanupCompletedRun:
     """cleanup_completed_run removes ALL state for a given run_id."""
 
     def test_cleanup_completed_run_removes_all_state(self) -> None:
+        """Verifies cleanup completed run removes all state."""
         facade = _make_facade()
         _populate_all_registries(facade, "run-1")
 
@@ -109,6 +112,7 @@ class TestCleanupCompletedRun:
         assert "run-1" not in facade._tracked_run_order
 
     def test_cleanup_nonexistent_run_is_noop(self) -> None:
+        """Verifies cleanup nonexistent run is noop."""
         facade = _make_facade()
 
         # Should not raise.
@@ -119,6 +123,7 @@ class TestCleanupCompletedRun:
         assert len(facade._tracked_run_order) == 0
 
     def test_cleanup_preserves_other_runs(self) -> None:
+        """Verifies cleanup preserves other runs."""
         facade = _make_facade()
         _populate_all_registries(facade, "run-keep")
         _populate_all_registries(facade, "run-remove")
@@ -133,6 +138,7 @@ class TestBoundedEviction:
     """Eviction removes the oldest run_id when over max_tracked_runs."""
 
     def test_eviction_removes_oldest_when_over_limit(self) -> None:
+        """Verifies eviction removes oldest when over limit."""
         facade = _make_facade(max_tracked_runs=3)
 
         # Populate 3 runs (at limit).
@@ -152,6 +158,7 @@ class TestBoundedEviction:
             assert rid in facade._tracked_run_set
 
     def test_touch_same_run_does_not_duplicate(self) -> None:
+        """Verifies touch same run does not duplicate."""
         facade = _make_facade(max_tracked_runs=2)
 
         # Touch same run multiple times via different operations.

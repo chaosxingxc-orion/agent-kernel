@@ -166,6 +166,7 @@ class LocalFSMAdaptor:
     # Internal backward-compat accessor used by KernelRuntime._worker_task property
     @property
     def _worker_task(self) -> None:
+        """Returns the active worker task for a run."""
         return None
 
 

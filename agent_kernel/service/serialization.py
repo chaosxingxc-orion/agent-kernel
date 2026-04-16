@@ -40,6 +40,7 @@ def serialize_dataclass(obj: Any) -> dict[str, Any]:
 
 
 def _normalize(value: Any) -> Any:
+    """Normalizes objects into JSON-serializable values."""
     if isinstance(value, dict):
         return {k: _normalize(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):

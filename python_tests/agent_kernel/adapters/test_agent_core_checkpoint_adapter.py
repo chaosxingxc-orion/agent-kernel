@@ -1,4 +1,4 @@
-"""Tests for checkpoint adapter mapping between platform and kernel views."""
+"""Verifies for checkpoint adapter mapping between platform and kernel views."""
 
 from __future__ import annotations
 

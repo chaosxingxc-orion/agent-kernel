@@ -21,9 +21,12 @@ _CASE_COUNT = 1000
 
 @dataclass(slots=True)
 class _SnapshotBuilder:
+    """Test suite for  SnapshotBuilder."""
+
     should_fail: bool
 
     def build(self, *_args: Any, **_kwargs: Any) -> CapabilitySnapshot:
+        """Builds a test fixture value."""
         if self.should_fail:
             raise CapabilitySnapshotBuildError("matrix fail")
         return CapabilitySnapshot(
@@ -43,14 +46,19 @@ class _SnapshotBuilder:
 
 @dataclass(slots=True)
 class _Admission:
+    """Test suite for  Admission."""
+
     admitted: bool
 
     async def admit(self, *_args: Any, **_kwargs: Any) -> bool:
+        """Admit."""
         return self.admitted
 
 
 @dataclass(slots=True)
 class _Executor:
+    """Test suite for  Executor."""
+
     acknowledged: bool
 
     async def execute(
@@ -60,10 +68,12 @@ class _Executor:
         _envelope: IdempotencyEnvelope,
         **_kwargs: Any,
     ) -> dict[str, Any]:
+        """Executes the test operation."""
         return {"acknowledged": self.acknowledged}
 
 
 def _action(seed: int) -> Action:
+    """Builds an action fixture."""
     return Action(
         action_id=f"a-{seed}",
         run_id="run-matrix",
@@ -74,6 +84,7 @@ def _action(seed: int) -> Action:
 
 
 def _turn_input(seed: int) -> TurnInput:
+    """Turn input."""
     return TurnInput(
         run_id="run-matrix",
         through_offset=seed + 1,

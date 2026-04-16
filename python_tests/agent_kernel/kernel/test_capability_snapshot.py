@@ -1,4 +1,4 @@
-"""Tests for v6.4 capability snapshot canonicalization and stable hashing."""
+"""Verifies for v6.4 capability snapshot canonicalization and stable hashing."""
 
 from __future__ import annotations
 

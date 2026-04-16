@@ -131,6 +131,7 @@ class SQLiteTurnIntentLog(TurnIntentLog):
         )
 
     def _ensure_schema(self) -> None:
+        """Ensures required database schema objects exist."""
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS turn_intent_log (
               id INTEGER PRIMARY KEY AUTOINCREMENT,

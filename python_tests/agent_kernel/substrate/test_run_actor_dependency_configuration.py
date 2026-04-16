@@ -1,4 +1,4 @@
-"""Tests for RunActorWorkflow dependency configuration behavior."""
+"""Verifies for runactorworkflow dependency configuration behavior."""
 
 from __future__ import annotations
 

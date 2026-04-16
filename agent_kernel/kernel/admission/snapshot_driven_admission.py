@@ -33,6 +33,7 @@ class SnapshotDrivenAdmissionService:
     """
 
     def __init__(self, policy_resolver: TenantPolicyResolver | None = None) -> None:
+        """Initializes SnapshotDrivenAdmissionService."""
         self._resolver = policy_resolver if policy_resolver is not None else TenantPolicyResolver()
         # Sliding-window rate limiter: maps run_id → deque of admit timestamps (float).
         self._rate_windows: dict[str, deque[float]] = {}

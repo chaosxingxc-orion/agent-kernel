@@ -21,6 +21,7 @@ _CASE_COUNT = 1850
 
 
 def _normalize(values: list[str]) -> list[str]:
+    """Normalize."""
     return sorted({value for value in values if value})
 
 
@@ -30,6 +31,7 @@ def _make_noisy_values(
     *,
     max_len: int = 12,
 ) -> list[str]:
+    """Make noisy values."""
     size = rng.randint(0, max_len)
     values: list[str] = []
     for _ in range(size):

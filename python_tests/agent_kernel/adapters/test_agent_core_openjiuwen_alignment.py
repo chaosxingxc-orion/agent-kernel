@@ -1,4 +1,4 @@
-"""Tests adapter alignment with openjiuwen-style runner/session objects."""
+"""Verifies adapter alignment with openjiuwen-style runner/session objects."""
 
 from __future__ import annotations
 
@@ -12,18 +12,24 @@ from agent_kernel.adapters.agent_core.session_adapter import (
 
 
 class _FakeWorkflowSession:
+    """Test suite for  FakeWorkflowSession."""
+
     def __init__(self, session_id: str, workflow_id: str) -> None:
+        """Initializes _FakeWorkflowSession."""
         self._session_id = session_id
         self._workflow_id = workflow_id
 
     def session_id(self) -> str:
+        """Session id."""
         return self._session_id
 
     def workflow_id(self) -> str:
+        """Workflow id."""
         return self._workflow_id
 
 
 def test_runner_adapter_maps_openjiuwen_run_call() -> None:
+    """Verifies runner adapter maps openjiuwen run call."""
     adapter = AgentCoreRunnerAdapter()
     session = _FakeWorkflowSession("session-42", "wf-42")
 
@@ -42,6 +48,7 @@ def test_runner_adapter_maps_openjiuwen_run_call() -> None:
 
 
 def test_runner_adapter_prefers_workflow_id_for_child_calls() -> None:
+    """Verifies runner adapter prefers workflow id for child calls."""
     adapter = AgentCoreRunnerAdapter()
     session = _FakeWorkflowSession("session-99", "wf-parent")
 
@@ -57,6 +64,7 @@ def test_runner_adapter_prefers_workflow_id_for_child_calls() -> None:
 
 
 def test_session_adapter_routes_callback_to_latest_bound_run() -> None:
+    """Verifies session adapter routes callback to latest bound run."""
     adapter = AgentCoreSessionAdapter()
     session = _FakeWorkflowSession("session-1", "wf-1")
 

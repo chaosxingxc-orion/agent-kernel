@@ -89,6 +89,7 @@ class TaskWatchdog:
         """Start background watchdog loop and return the task handle."""
 
         async def _loop() -> None:
+            """Runs the background loop until stopped."""
             try:
                 while True:
                     await asyncio.sleep(interval_s)

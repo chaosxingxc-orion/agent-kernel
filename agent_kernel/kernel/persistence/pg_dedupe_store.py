@@ -117,6 +117,7 @@ class PostgresDedupeStore(DedupeStorePort):
         return self._row_to_record(row)
 
     async def _ensure_schema(self) -> None:
+        """Ensures required database schema objects exist."""
         pool = self._bridge.pool
         async with pool.acquire() as conn:
             await conn.execute(
@@ -133,6 +134,7 @@ class PostgresDedupeStore(DedupeStorePort):
             )
 
     async def _reserve_impl(self, envelope: IdempotencyEnvelope) -> DedupeReservation:
+        """Reserves a dedupe key transactionally."""
         pool = self._bridge.pool
         async with pool.acquire() as conn, conn.transaction():
             inserted = await conn.fetchrow(
@@ -167,6 +169,7 @@ class PostgresDedupeStore(DedupeStorePort):
         envelope: IdempotencyEnvelope,
         peer_operation_id: str | None,
     ) -> DedupeReservation:
+        """Reserve and dispatch impl."""
         pool = self._bridge.pool
         async with pool.acquire() as conn, conn.transaction():
             inserted = await conn.fetchrow(
@@ -205,6 +208,7 @@ class PostgresDedupeStore(DedupeStorePort):
         peer_operation_id: str | None,
         external_ack_ref: str | None,
     ) -> None:
+        """Transitions dedupe record state transactionally."""
         pool = self._bridge.pool
         async with pool.acquire() as conn, conn.transaction():
             row = await self._get_row(key, conn=conn, for_update=True)
@@ -236,6 +240,7 @@ class PostgresDedupeStore(DedupeStorePort):
         conn: Any | None = None,
         for_update: bool = False,
     ) -> Any | None:
+        """Fetches one persisted row for the requested key."""
         query = """
             SELECT
                 dispatch_idempotency_key,
@@ -255,6 +260,7 @@ class PostgresDedupeStore(DedupeStorePort):
 
     @staticmethod
     def _row_to_record(row: Any) -> DedupeRecord:
+        """Row to record."""
         return DedupeRecord(
             dispatch_idempotency_key=str(row["dispatch_idempotency_key"]),
             operation_fingerprint=str(row["operation_fingerprint"]),

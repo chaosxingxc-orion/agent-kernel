@@ -1,4 +1,4 @@
-"""Tests for TaskWatchdog: stall detection and ObservabilityHook forwarding."""
+"""Verifies for taskwatchdog: stall detection and observabilityhook forwarding."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ def _make_registry_with_running_task(
     task_id: str = "t1",
     heartbeat_timeout_ms: int = 300_000,
 ) -> TaskRegistry:
+    """Make registry with running task."""
     reg = TaskRegistry()
     reg.register(
         TaskDescriptor(
@@ -53,6 +54,7 @@ def _make_watchdog(
     registry: TaskRegistry,
     on_stall: object | None = None,
 ) -> TaskWatchdog:
+    """Make watchdog."""
     if on_stall is None:
         on_stall = AsyncMock()
     return TaskWatchdog(registry=registry, on_stall=on_stall)
@@ -64,8 +66,11 @@ def _make_watchdog(
 
 
 class TestWatchdogOnce:
+    """Test suite for WatchdogOnce."""
+
     @pytest.mark.asyncio
     async def test_no_stalled_tasks_returns_empty(self) -> None:
+        """Verifies no stalled tasks returns empty."""
         reg = _make_registry_with_running_task()
         watchdog = _make_watchdog(reg)
         result = await watchdog.watchdog_once()
@@ -73,6 +78,7 @@ class TestWatchdogOnce:
 
     @pytest.mark.asyncio
     async def test_stalled_task_is_processed(self) -> None:
+        """Verifies stalled task is processed."""
         reg = _make_registry_with_running_task(heartbeat_timeout_ms=1)
         # Force last heartbeat to old value
         entry = reg._tasks["t1"]
@@ -83,6 +89,7 @@ class TestWatchdogOnce:
 
     @pytest.mark.asyncio
     async def test_completed_task_not_processed(self) -> None:
+        """Verifies completed task not processed."""
         reg = _make_registry_with_running_task(heartbeat_timeout_ms=1)
         reg.complete_attempt("t1", "r1", "completed")
         watchdog = _make_watchdog(reg)
@@ -109,6 +116,7 @@ class TestWatchdogOnce:
 
     @pytest.mark.asyncio
     async def test_callback_error_does_not_propagate(self) -> None:
+        """Verifies callback error does not propagate."""
         reg = _make_registry_with_running_task(heartbeat_timeout_ms=1)
         entry = reg._tasks["t1"]
         entry.last_heartbeat_ms = int(time.monotonic() * 1000) - 10_000
@@ -135,7 +143,10 @@ class TestWatchdogOnce:
 
 
 class TestObservabilityHook:
+    """Test suite for ObservabilityHook."""
+
     def test_on_turn_state_transition_heartbeats_task(self) -> None:
+        """Verifies on turn state transition heartbeats task."""
         reg = _make_registry_with_running_task()
         watchdog = _make_watchdog(reg)
         initial_hb = reg._tasks["t1"].last_heartbeat_ms
@@ -150,6 +161,7 @@ class TestObservabilityHook:
         assert reg._tasks["t1"].last_heartbeat_ms != initial_hb
 
     def test_on_action_dispatch_heartbeats_task(self) -> None:
+        """Verifies on action dispatch heartbeats task."""
         reg = _make_registry_with_running_task()
         watchdog = _make_watchdog(reg)
         watchdog.on_action_dispatch(
@@ -162,6 +174,7 @@ class TestObservabilityHook:
         assert reg._tasks["t1"].last_heartbeat_ms is not None
 
     def test_on_llm_call_heartbeats_task(self) -> None:
+        """Verifies on llm call heartbeats task."""
         reg = _make_registry_with_running_task()
         watchdog = _make_watchdog(reg)
         watchdog.on_llm_call(
@@ -173,6 +186,7 @@ class TestObservabilityHook:
         assert reg._tasks["t1"].last_heartbeat_ms is not None
 
     def test_on_parallel_branch_result_heartbeats_task(self) -> None:
+        """Verifies on parallel branch result heartbeats task."""
         reg = _make_registry_with_running_task()
         watchdog = _make_watchdog(reg)
         watchdog.on_parallel_branch_result(
@@ -185,6 +199,7 @@ class TestObservabilityHook:
         assert reg._tasks["t1"].last_heartbeat_ms is not None
 
     def test_on_run_lifecycle_transition_completed_marks_attempt(self) -> None:
+        """Verifies on run lifecycle transition completed marks attempt."""
         reg = _make_registry_with_running_task()
         watchdog = _make_watchdog(reg)
         watchdog.on_run_lifecycle_transition(
@@ -198,6 +213,7 @@ class TestObservabilityHook:
         assert health.lifecycle_state == "completed"
 
     def test_on_run_lifecycle_transition_aborted_marks_failed(self) -> None:
+        """Verifies on run lifecycle transition aborted marks failed."""
         reg = _make_registry_with_running_task()
         watchdog = _make_watchdog(reg)
         watchdog.on_run_lifecycle_transition(
@@ -211,6 +227,7 @@ class TestObservabilityHook:
         assert health.lifecycle_state == "failed"
 
     def test_on_run_lifecycle_transition_unknown_run_is_noop(self) -> None:
+        """Verifies on run lifecycle transition unknown run is noop."""
         reg = _make_registry_with_running_task()
         watchdog = _make_watchdog(reg)
         # Should not raise

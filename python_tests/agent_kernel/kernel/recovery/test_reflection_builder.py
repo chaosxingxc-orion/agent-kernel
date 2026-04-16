@@ -1,4 +1,4 @@
-"""Tests for ReflectionContextBuilder."""
+"""Test suite for ReflectionContextBuilder."""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ def _make_evidence(
     original_script: str = "print('hello')",
     stderr_tail: str | None = "Traceback ...",
 ) -> ScriptFailureEvidence:
+    """Make evidence."""
     return ScriptFailureEvidence(
         script_id="script-1",
         failure_kind=failure_kind,  # type: ignore[arg-type]
@@ -42,6 +43,7 @@ def _make_evidence(
 def _make_base_context(
     system_instructions: str = "You are a helpful agent.",
 ) -> ContextWindow:
+    """Make base context."""
     return ContextWindow(
         system_instructions=system_instructions,
         tool_definitions=(
@@ -65,7 +67,7 @@ def _make_base_context(
 
 
 class TestReflectionContextBuilderBuild:
-    """Tests for ReflectionContextBuilder.build()."""
+    """Verifies for reflectioncontextbuilder.build()."""
 
     def test_build_returns_context_window(self) -> None:
         """build() should return a ContextWindow instance."""
@@ -246,7 +248,7 @@ class TestReflectionContextBuilderBuild:
         assert result.skill_definitions == base.skill_definitions
 
     def test_base_context_history_preserved(self) -> None:
-        """history from base_context should be preserved."""
+        """History from base_context should be preserved."""
         builder = ReflectionContextBuilder()
         base = _make_base_context()
         result = builder.build(

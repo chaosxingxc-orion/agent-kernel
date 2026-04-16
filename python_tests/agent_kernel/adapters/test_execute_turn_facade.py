@@ -1,4 +1,4 @@
-"""Tests for KernelFacade.execute_turn() with LocalWorkflowGateway substrate."""
+"""Verifies for kernelfacade.execute turn() with localworkflowgateway substrate."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from agent_kernel.substrate.temporal.run_actor_workflow import (
 
 
 def _make_deps() -> RunActorDependencyBundle:
+    """Make deps."""
     event_log = InMemoryKernelRuntimeEventLog()
     return RunActorDependencyBundle(
         event_log=event_log,
@@ -39,6 +40,7 @@ def _make_deps() -> RunActorDependencyBundle:
 
 
 def _make_facade() -> KernelFacade:
+    """Make facade."""
     deps = _make_deps()
     configure_run_actor_dependencies(deps)
     gateway = LocalWorkflowGateway(deps)
@@ -47,6 +49,7 @@ def _make_facade() -> KernelFacade:
 
 @pytest.mark.asyncio
 async def test_facade_execute_turn_returns_dispatched() -> None:
+    """Verifies facade execute turn returns dispatched."""
     facade = _make_facade()
 
     action = Action(
@@ -58,6 +61,7 @@ async def test_facade_execute_turn_returns_dispatched() -> None:
     )
 
     async def handler(action: Action, grant: str | None) -> dict:
+        """Handles the test callback invocation."""
         return {"output": "done"}
 
     result = await facade.execute_turn(
@@ -73,6 +77,7 @@ async def test_facade_execute_turn_returns_dispatched() -> None:
 
 @pytest.mark.asyncio
 async def test_facade_execute_turn_idempotent() -> None:
+    """Verifies facade execute turn idempotent."""
     facade = _make_facade()
     call_count = 0
 
@@ -85,6 +90,7 @@ async def test_facade_execute_turn_idempotent() -> None:
     )
 
     async def handler(action: Action, grant: str | None) -> dict:
+        """Handles the test callback invocation."""
         nonlocal call_count
         call_count += 1
         return {}

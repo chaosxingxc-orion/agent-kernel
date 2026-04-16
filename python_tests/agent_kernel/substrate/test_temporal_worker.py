@@ -24,6 +24,7 @@ class _FakeWorkerInstance:
     run_fn: AsyncMock
 
     async def run(self) -> None:
+        """Runs the test helper implementation."""
         await self.run_fn()
 
 
@@ -33,14 +34,20 @@ def test_worker_wires_task_queue_workflow_and_activities(monkeypatch: pytest.Mon
     run_fn = AsyncMock()
 
     class _FakeWorkerClass:
+        """Test suite for  FakeWorkerClass."""
+
         def __init__(self, client: object, **kwargs: object) -> None:
+            """Initializes _FakeWorkerClass."""
             worker_constructor_calls.append({"client": client, "kwargs": kwargs})
             self._instance = _FakeWorkerInstance(run_fn=run_fn)
 
         async def run(self) -> None:
+            """Runs the test helper implementation."""
             await self._instance.run()
 
     class _FakeWorkerModule:
+        """Test suite for  FakeWorkerModule."""
+
         Worker = _FakeWorkerClass
 
     monkeypatch.setattr(
@@ -75,13 +82,19 @@ def test_worker_passes_optional_workflow_runner(monkeypatch: pytest.MonkeyPatch)
     worker_constructor_calls: list[dict] = []
 
     class _FakeWorkerClass:
+        """Test suite for  FakeWorkerClass."""
+
         def __init__(self, client: object, **kwargs: object) -> None:
+            """Initializes _FakeWorkerClass."""
             worker_constructor_calls.append({"client": client, "kwargs": kwargs})
 
         async def run(self) -> None:
+            """Runs the test helper implementation."""
             return None
 
     class _FakeWorkerModule:
+        """Test suite for  FakeWorkerModule."""
+
         Worker = _FakeWorkerClass
 
     monkeypatch.setattr(
@@ -109,13 +122,19 @@ def test_worker_clears_configured_dependencies_after_run(monkeypatch: pytest.Mon
     run_fn = AsyncMock()
 
     class _FakeWorkerClass:
+        """Test suite for  FakeWorkerClass."""
+
         def __init__(self, client: object, **kwargs: object) -> None:
+            """Initializes _FakeWorkerClass."""
             del client, kwargs
 
         async def run(self) -> None:
+            """Runs the test helper implementation."""
             await run_fn()
 
     class _FakeWorkerModule:
+        """Test suite for  FakeWorkerModule."""
+
         Worker = _FakeWorkerClass
 
     monkeypatch.setattr(

@@ -1,4 +1,4 @@
-"""Tests for LocalWorkflowGateway.execute_turn()."""
+"""Verifies for localworkflowgateway.execute turn()."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from agent_kernel.substrate.temporal.run_actor_workflow import (
 
 
 def _make_deps() -> RunActorDependencyBundle:
+    """Make deps."""
     event_log = InMemoryKernelRuntimeEventLog()
     return RunActorDependencyBundle(
         event_log=event_log,
@@ -38,6 +39,7 @@ def _make_deps() -> RunActorDependencyBundle:
 
 
 def _make_action(run_id: str = "run-001", action_id: str = "act-001") -> Action:
+    """Make action."""
     return Action(
         action_id=action_id,
         run_id=run_id,
@@ -49,11 +51,13 @@ def _make_action(run_id: str = "run-001", action_id: str = "act-001") -> Action:
 
 @pytest.mark.asyncio
 async def test_execute_turn_returns_dispatched() -> None:
+    """Verifies execute turn returns dispatched."""
     deps = _make_deps()
     configure_run_actor_dependencies(deps)
     gw = LocalWorkflowGateway(deps)
 
     async def handler(action: Action, grant: str | None) -> dict:
+        """Handles the test callback invocation."""
         return {"result": "done"}
 
     result = await gw.execute_turn(
@@ -69,12 +73,14 @@ async def test_execute_turn_returns_dispatched() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_turn_is_idempotent() -> None:
+    """Verifies execute turn is idempotent."""
     deps = _make_deps()
     configure_run_actor_dependencies(deps)
     gw = LocalWorkflowGateway(deps)
     call_count = 0
 
     async def handler(action: Action, grant: str | None) -> dict:
+        """Handles the test callback invocation."""
         nonlocal call_count
         call_count += 1
         return {"call": call_count}
@@ -89,12 +95,14 @@ async def test_execute_turn_is_idempotent() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_turn_different_keys_call_handler_each_time() -> None:
+    """Verifies execute turn different keys call handler each time."""
     deps = _make_deps()
     configure_run_actor_dependencies(deps)
     gw = LocalWorkflowGateway(deps)
     call_count = 0
 
     async def handler(action: Action, grant: str | None) -> dict:
+        """Handles the test callback invocation."""
         nonlocal call_count
         call_count += 1
         return {}

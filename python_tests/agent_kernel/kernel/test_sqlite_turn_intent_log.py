@@ -1,4 +1,4 @@
-"""Tests for SQLite-backed TurnIntentLog persistence semantics."""
+"""Verifies for sqlite-backed turnintentlog persistence semantics."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ def _build_intent(
     *,
     outcome_kind: str = "dispatched",
 ) -> TurnIntentRecord:
+    """Build intent."""
     return TurnIntentRecord(
         run_id=run_id,
         intent_commit_ref=intent_commit_ref,
@@ -28,6 +29,7 @@ def _build_intent(
 
 
 def test_sqlite_turn_intent_log_returns_none_for_missing_run(tmp_path) -> None:
+    """Verifies sqlite turn intent log returns none for missing run."""
     store = SQLiteTurnIntentLog(tmp_path / "turn-intent-empty.sqlite3")
     try:
         assert asyncio.run(store.latest_for_run("run-missing")) is None
@@ -36,6 +38,7 @@ def test_sqlite_turn_intent_log_returns_none_for_missing_run(tmp_path) -> None:
 
 
 def test_sqlite_turn_intent_log_persists_and_recovers_after_reopen(tmp_path) -> None:
+    """Verifies sqlite turn intent log persists and recovers after reopen."""
     database_path = tmp_path / "turn-intent-persist.sqlite3"
     store = SQLiteTurnIntentLog(database_path)
     try:
@@ -62,6 +65,7 @@ def test_sqlite_turn_intent_log_persists_and_recovers_after_reopen(tmp_path) -> 
 
 
 def test_sqlite_turn_intent_log_upserts_same_intent_commit_ref(tmp_path) -> None:
+    """Verifies sqlite turn intent log upserts same intent commit ref."""
     store = SQLiteTurnIntentLog(tmp_path / "turn-intent-upsert.sqlite3")
     try:
         asyncio.run(
@@ -95,6 +99,7 @@ def test_sqlite_turn_intent_log_upserts_same_intent_commit_ref(tmp_path) -> None
 
 
 def test_sqlite_turn_intent_log_latest_by_written_at(tmp_path) -> None:
+    """Verifies sqlite turn intent log latest by written at."""
     store = SQLiteTurnIntentLog(tmp_path / "turn-intent-latest.sqlite3")
     try:
         asyncio.run(

@@ -619,7 +619,7 @@ class TurnEngine:
                 snapshot_hash=ctx.snapshot.snapshot_hash,
             )
             ctx.emitted_events.append(TurnStateEvent(state="snapshot_built"))
-        except (CapabilitySnapshotBuildError, ValueError):
+        except CapabilitySnapshotBuildError, ValueError:
             ctx.emitted_events.append(TurnStateEvent(state="completed_noop"))
             ti = ctx.turn_identity
             ctx.result = TurnResult(
@@ -1140,7 +1140,7 @@ async def _execute_with_context(
     execute_method = executor.execute
     try:
         signature = inspect.signature(execute_method)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         signature = None
 
     if signature is not None and "execution_context" in signature.parameters:

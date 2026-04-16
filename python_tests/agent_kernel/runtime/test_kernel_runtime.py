@@ -1,4 +1,4 @@
-"""Tests for KernelRuntime single-system lifecycle."""
+"""Verifies for kernelruntime single-system lifecycle."""
 
 from __future__ import annotations
 
@@ -70,11 +70,17 @@ def test_collect_closeables_includes_bundle_under_wrapped_event_log() -> None:
     """Wrapped event log should not hide underlying colocated bundle."""
 
     class _Closable:
+        """Test suite for  Closable."""
+
         def close(self) -> None:
+            """Closes the test resource."""
             return None
 
     class _Wrapper(_Closable):
+        """Test suite for  Wrapper."""
+
         def __init__(self, inner: Any) -> None:
+            """Initializes _Wrapper."""
             self._inner = inner
 
     bundle = _Closable()
@@ -97,6 +103,7 @@ def test_collect_closeables_includes_bundle_under_wrapped_event_log() -> None:
 
 
 def test_kernel_runtime_config_defaults() -> None:
+    """Verifies kernel runtime config defaults."""
     config = KernelRuntimeConfig()
     assert config.task_queue == "agent-kernel"
     assert config.temporal_address == "localhost:7233"
@@ -108,6 +115,7 @@ def test_kernel_runtime_config_defaults() -> None:
 
 
 def test_kernel_runtime_config_custom_values() -> None:
+    """Verifies kernel runtime config custom values."""
     config = KernelRuntimeConfig(
         task_queue="my-queue",
         temporal_address="temporal.prod:7233",
@@ -233,6 +241,7 @@ async def test_kernel_runtime_wires_dependencies_before_worker_task() -> None:
     original_configure = configure_run_actor_dependencies
 
     def _capture_configure(deps: RunActorDependencyBundle | None) -> None:
+        """Capture configure."""
         wired.append(deps)
         original_configure(deps)
 
@@ -293,6 +302,7 @@ async def test_kernel_runtime_check_worker_raises_on_failure() -> None:
     config = KernelRuntimeConfig(task_queue="test-q")
 
     async def _fail_immediately() -> None:
+        """Fail immediately."""
         raise RuntimeError("worker boom")
 
     with patch(
@@ -350,6 +360,7 @@ async def test_kernel_runtime_worker_done_callback_fires_on_failure() -> None:
     fired: list[Any] = []
 
     async def _fail_immediately() -> None:
+        """Fail immediately."""
         raise RuntimeError("boom")
 
     with patch(
@@ -368,8 +379,11 @@ async def test_kernel_runtime_worker_done_callback_fires_on_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_kernel_runtime_services_share_event_log_instance() -> None:
-    """The event log used by the bundle must be the same Python object
-    that the projection service holds — no state divergence possible."""
+    """Ensures bundle and projection share one event-log instance.
+
+    The event log used by the bundle must be the same Python object
+    that the projection service holds, so no state divergence is possible.
+    """
     mock_client = _make_mock_temporal_client()
     config = KernelRuntimeConfig()
 

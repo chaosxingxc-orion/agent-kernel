@@ -1,4 +1,4 @@
-"""Tests for action-payload capability snapshot input resolver."""
+"""Verifies for action-payload capability snapshot input resolver."""
 
 from __future__ import annotations
 

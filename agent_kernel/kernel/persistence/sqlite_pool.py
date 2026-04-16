@@ -97,6 +97,7 @@ class SQLiteConnectionPool:
                 conn.close()
 
     def _open_connection(self, *, query_only: bool) -> sqlite3.Connection:
+        """Opens a SQLite connection with configured pragmas."""
         conn = sqlite3.connect(self._database_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")

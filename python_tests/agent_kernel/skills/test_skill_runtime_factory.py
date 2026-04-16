@@ -1,4 +1,4 @@
-"""Tests for host-aware skill runtime factory implementations."""
+"""Verifies for host-aware skill runtime factory implementations."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from agent_kernel.skills.runtime_factory import DefaultSkillRuntimeFactory
 
 
 def _build_skill_definition() -> SkillDefinition:
+    """Build skill definition."""
     return SkillDefinition(
         skill_id="skill.search",
         version="1.0.0",
@@ -23,6 +24,7 @@ def _build_skill_definition() -> SkillDefinition:
 
 
 def _build_skill_request() -> SkillRequest:
+    """Build skill request."""
     return SkillRequest(
         run_id="run-1",
         action_id="action-1",
@@ -31,6 +33,7 @@ def _build_skill_request() -> SkillRequest:
 
 
 def test_factory_routes_cli_process_host() -> None:
+    """Verifies factory routes cli process host."""
     factory = DefaultSkillRuntimeFactory()
     runtime = asyncio.run(factory.create_for_host(_build_skill_definition(), "cli_process"))
     result = asyncio.run(runtime.execute(_build_skill_request()))
@@ -40,6 +43,7 @@ def test_factory_routes_cli_process_host() -> None:
 
 
 def test_factory_routes_in_process_python_host() -> None:
+    """Verifies factory routes in process python host."""
     factory = DefaultSkillRuntimeFactory()
     runtime = asyncio.run(factory.create_for_host(_build_skill_definition(), "in_process_python"))
     result = asyncio.run(runtime.execute(_build_skill_request()))
@@ -49,6 +53,7 @@ def test_factory_routes_in_process_python_host() -> None:
 
 
 def test_factory_routes_remote_service_host() -> None:
+    """Verifies factory routes remote service host."""
     factory = DefaultSkillRuntimeFactory()
     runtime = asyncio.run(factory.create_for_host(_build_skill_definition(), "remote_service"))
     result = asyncio.run(runtime.execute(_build_skill_request()))
@@ -58,6 +63,7 @@ def test_factory_routes_remote_service_host() -> None:
 
 
 def test_factory_rejects_unknown_host_kind() -> None:
+    """Verifies factory rejects unknown host kind."""
     factory = DefaultSkillRuntimeFactory()
     with pytest.raises(ValueError, match="Unsupported skill runtime host kind"):
         asyncio.run(

@@ -408,6 +408,7 @@ class RunHeartbeatMonitor:
         """
 
         async def _loop() -> None:
+            """Runs the background loop until stopped."""
             try:
                 while True:
                     await asyncio.sleep(interval_s)
@@ -432,6 +433,7 @@ class RunHeartbeatMonitor:
         monitor = self
 
         def _check() -> tuple[HealthStatus, str]:
+            """Runs the check and returns a status/message tuple."""
             now = _now_ms()
             near_timeout: list[str] = []
             already_timed_out: list[str] = []
@@ -577,6 +579,7 @@ class KernelSelfHeartbeat:
         stale_age_s = self._stale_age_s
 
         def _check() -> tuple[HealthStatus, str]:
+            """Runs the check and returns a status/message tuple."""
             with lock:
                 if state.last_refresh_at_ms == 0:
                     return (
@@ -605,6 +608,7 @@ class KernelSelfHeartbeat:
         stale_age_s = self._stale_age_s
 
         def _check() -> tuple[HealthStatus, str]:
+            """Runs the check and returns a status/message tuple."""
             with lock:
                 if state.last_refresh_at_ms == 0:
                     return (
@@ -641,6 +645,7 @@ class KernelSelfHeartbeat:
         self,
         event_log: KernelRuntimeEventLog,
     ) -> tuple[HealthStatus, str]:
+        """Probe event log."""
         try:
             await event_log.load(self._PROBE_RUN_ID, after_offset=0)
             return (HealthStatus.OK, "event log read path responsive")
@@ -651,6 +656,7 @@ class KernelSelfHeartbeat:
         self,
         projection: DecisionProjectionService,
     ) -> tuple[HealthStatus, str]:
+        """Probes projection service responsiveness."""
         try:
             await projection.get(self._PROBE_RUN_ID)
             return (HealthStatus.OK, "projection service responsive")

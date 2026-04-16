@@ -34,6 +34,7 @@ FAKE_CONFIG = LLMGatewayConfig(
 
 
 def _make_inference_config() -> InferenceConfig:
+    """Make inference config."""
     return InferenceConfig(
         model_ref="gpt-4o",
         token_budget=TokenBudget(max_input=8192, max_output=512),
@@ -42,6 +43,7 @@ def _make_inference_config() -> InferenceConfig:
 
 
 def _make_context(tool_names: list[str] | None = None) -> ContextWindow:
+    """Make context."""
     tool_definitions = tuple(
         ToolDefinition(
             name=name,
@@ -101,7 +103,7 @@ def _make_fake_text_response() -> MagicMock:
 
 
 class TestOpenAILLMGatewayInfer:
-    """Tests for OpenAILLMGateway.infer()."""
+    """Verifies for openaillmgateway.infer()."""
 
     @pytest.mark.asyncio
     async def test_infer_returns_model_output_with_tool_call(self) -> None:
@@ -179,7 +181,7 @@ class TestOpenAILLMGatewayInfer:
 
 
 class TestOpenAILLMGatewayCountTokens:
-    """Tests for OpenAILLMGateway.count_tokens()."""
+    """Verifies for openaillmgateway.count tokens()."""
 
     @pytest.mark.asyncio
     async def test_count_tokens_returns_int(self) -> None:

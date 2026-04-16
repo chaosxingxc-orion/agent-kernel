@@ -10,6 +10,7 @@ _CASE_COUNT = 1000
 
 
 def _envelope_for(seed: int) -> IdempotencyEnvelope:
+    """Envelope for."""
     host_kind = "remote_service" if seed % 3 == 0 else "local_cli"
     return IdempotencyEnvelope(
         dispatch_idempotency_key=f"dispatch:{seed}",

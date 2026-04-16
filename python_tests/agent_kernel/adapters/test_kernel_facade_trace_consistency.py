@@ -25,6 +25,7 @@ from agent_kernel.kernel.minimal_runtime import InMemoryKernelRuntimeEventLog
 
 
 def _make_gateway(lifecycle_state: str = "running") -> MagicMock:
+    """Make gateway."""
     gw = MagicMock()
     gw.query_projection = AsyncMock(
         return_value=RunProjection(
@@ -44,6 +45,7 @@ def _make_facade(
     event_log: InMemoryKernelRuntimeEventLog,
     gateway: MagicMock | None = None,
 ) -> KernelFacade:
+    """Make facade."""
     return KernelFacade(
         workflow_gateway=gateway or _make_gateway(),
         event_log=event_log,
@@ -59,6 +61,7 @@ class TestBranchStateSurvivesFacadeRestart:
     """open_branch on facade1 should be visible via facade2."""
 
     def test_branch_state_survives_facade_restart(self) -> None:
+        """Verifies branch state survives facade restart."""
         event_log = InMemoryKernelRuntimeEventLog()
         gw = _make_gateway()
 
@@ -89,6 +92,7 @@ class TestStageStateSurvivesFacadeRestart:
     """open_stage on facade1 should be visible via facade2."""
 
     def test_stage_state_survives_facade_restart(self) -> None:
+        """Verifies stage state survives facade restart."""
         event_log = InMemoryKernelRuntimeEventLog()
         gw = _make_gateway()
 
@@ -107,6 +111,7 @@ class TestHumanGateStateSurvivesFacadeRestart:
     """open_human_gate + submit_approval on facade1 should be visible via facade2."""
 
     def test_human_gate_state_survives_facade_restart(self) -> None:
+        """Verifies human gate state survives facade restart."""
         event_log = InMemoryKernelRuntimeEventLog()
         gw = _make_gateway()
 
@@ -129,6 +134,7 @@ class TestHumanGateStateSurvivesFacadeRestart:
         assert view.review_state == "requested"
 
     def test_resolved_gate_survives_facade_restart(self) -> None:
+        """Verifies resolved gate survives facade restart."""
         event_log = InMemoryKernelRuntimeEventLog()
         gw = _make_gateway()
 

@@ -196,6 +196,7 @@ async def main() -> None:
     )
 
     async def _watchdog_loop() -> None:
+        """Runs the watchdog scan loop."""
         while True:
             await heartbeat_monitor.watchdog_once(gateway=bundle.gateway)
             await asyncio.sleep(config.heartbeat_min_interval_s)

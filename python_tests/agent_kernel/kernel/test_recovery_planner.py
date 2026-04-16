@@ -1,4 +1,4 @@
-"""Tests for recovery planner deterministic plan mapping behavior."""
+"""Verifies for recovery planner deterministic plan mapping behavior."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from agent_kernel.kernel.recovery.planner import PlannerHeuristicPolicy, Recover
 
 
 def _projection(run_id: str = "run-1") -> RunProjection:
+    """Builds a projection fixture."""
     return RunProjection(
         run_id=run_id,
         lifecycle_state="recovering",
@@ -34,6 +35,7 @@ def _recovery_input(
     failed_action_id: str | None = None,
     recovery_mode: Literal["static_compensation", "human_escalation", "abort"] | None = None,
 ) -> RecoveryInput:
+    """Recovery input."""
     projection = RunProjection(
         run_id="run-1",
         lifecycle_state=lifecycle_state,
@@ -53,6 +55,7 @@ def _recovery_input(
 
 
 def test_planner_maps_static_compensation_to_schedule_action() -> None:
+    """Verifies planner maps static compensation to schedule action."""
     planner = RecoveryPlanner()
     plan = planner.build_plan(
         RecoveryDecision(
@@ -68,6 +71,7 @@ def test_planner_maps_static_compensation_to_schedule_action() -> None:
 
 
 def test_planner_maps_human_escalation_to_notification_action() -> None:
+    """Verifies planner maps human escalation to notification action."""
     planner = RecoveryPlanner()
     plan = planner.build_plan(
         RecoveryDecision(
@@ -83,6 +87,7 @@ def test_planner_maps_human_escalation_to_notification_action() -> None:
 
 
 def test_planner_maps_abort_to_abort_action() -> None:
+    """Verifies planner maps abort to abort action."""
     planner = RecoveryPlanner()
     plan = planner.build_plan(
         RecoveryDecision(
@@ -96,6 +101,7 @@ def test_planner_maps_abort_to_abort_action() -> None:
 
 
 def test_planner_rejects_mismatched_run_identity() -> None:
+    """Verifies planner rejects mismatched run identity."""
     planner = RecoveryPlanner()
     with pytest.raises(ValueError, match="run_id"):
         planner.build_plan(
@@ -124,6 +130,7 @@ def test_planner_build_plan_from_input_classification_matrix(
     failed_action_id: str | None,
     expected_action: str,
 ) -> None:
+    """Verifies planner build plan from input classification matrix."""
     planner = RecoveryPlanner()
     recovery_input = _recovery_input(
         reason_code=reason_code,
@@ -152,6 +159,7 @@ def test_planner_policy_prefix_configuration_controls_classification(
     reason_code: str,
     expected_action: str,
 ) -> None:
+    """Verifies planner policy prefix configuration controls classification."""
     planner = RecoveryPlanner(
         policy=PlannerHeuristicPolicy(
             human_reason_prefixes=("ops_",),

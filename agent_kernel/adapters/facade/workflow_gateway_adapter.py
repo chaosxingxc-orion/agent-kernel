@@ -24,6 +24,7 @@ class WorkflowGatewaySignalAdapter:
     """
 
     def __init__(self, gateway: Any) -> None:
+        """Initializes WorkflowGatewaySignalAdapter."""
         self._gateway = gateway
 
     async def signal_workflow(self, run_id: str, request: SignalRunRequest) -> None:

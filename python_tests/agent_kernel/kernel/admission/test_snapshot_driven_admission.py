@@ -70,7 +70,7 @@ def make_action(**kwargs) -> MagicMock:
 
 
 def admit(service: SnapshotDrivenAdmissionService, action, snapshot) -> object:
-    """Synchronous wrapper around the async admit() method."""
+    """Runs admission service synchronously in test helpers."""
     return asyncio.run(service.admit(action, snapshot))
 
 
@@ -80,6 +80,8 @@ def admit(service: SnapshotDrivenAdmissionService, action, snapshot) -> object:
 
 
 class TestPermissionModeRule:
+    """Test suite for PermissionModeRule."""
+
     def test_readonly_denies_tool_call(self) -> None:
         """A tool_call action must be denied when permission_mode is 'readonly'."""
         svc = SnapshotDrivenAdmissionService()
@@ -132,6 +134,8 @@ class TestPermissionModeRule:
 
 
 class TestBindingRule:
+    """Test suite for BindingRule."""
+
     def test_unregistered_tool_denied(self) -> None:
         """A tool_call referencing a tool not in tool_bindings must be denied."""
         svc = SnapshotDrivenAdmissionService()
@@ -224,6 +228,8 @@ class TestBindingRule:
 
 
 class TestIdempotencyRule:
+    """Test suite for IdempotencyRule."""
+
     def test_non_idempotent_remote_write_denied_by_default(self) -> None:
         """Non-idempotent remote writes must be denied under the default policy."""
         svc = SnapshotDrivenAdmissionService()
@@ -248,7 +254,10 @@ class TestIdempotencyRule:
         )
 
         class _PermissiveResolver(TenantPolicyResolver):
+            """Test suite for  PermissiveResolver."""
+
             def resolve(self, policy_ref: str) -> TenantPolicy:
+                """Resolves test policy data."""
                 return permissive_policy
 
         svc = SnapshotDrivenAdmissionService(policy_resolver=_PermissiveResolver())
@@ -270,6 +279,8 @@ class TestIdempotencyRule:
 
 
 class TestRiskTierRule:
+    """Test suite for RiskTierRule."""
+
     def test_risk_tier_exceeded_denied(self) -> None:
         """An action with risk_tier above the policy maximum must be denied."""
         svc = SnapshotDrivenAdmissionService()
@@ -304,6 +315,8 @@ class TestRiskTierRule:
 
 
 class TestRateLimitRule:
+    """Test suite for RateLimitRule."""
+
     def test_within_rate_limit_admitted(self) -> None:
         """Actions within max_actions_per_minute must all be admitted."""
         from agent_kernel.kernel.admission.tenant_policy import TenantPolicy, TenantPolicyResolver
@@ -311,7 +324,10 @@ class TestRateLimitRule:
         tight_policy = TenantPolicy(policy_id="tight", max_actions_per_minute=5)
 
         class _TightResolver(TenantPolicyResolver):
+            """Test suite for  TightResolver."""
+
             def resolve(self, policy_ref: str) -> TenantPolicy:
+                """Resolves test policy data."""
                 return tight_policy
 
         svc = SnapshotDrivenAdmissionService(policy_resolver=_TightResolver())
@@ -329,7 +345,10 @@ class TestRateLimitRule:
         tight_policy = TenantPolicy(policy_id="tight", max_actions_per_minute=3)
 
         class _TightResolver(TenantPolicyResolver):
+            """Test suite for  TightResolver."""
+
             def resolve(self, policy_ref: str) -> TenantPolicy:
+                """Resolves test policy data."""
                 return tight_policy
 
         svc = SnapshotDrivenAdmissionService(policy_resolver=_TightResolver())
@@ -353,6 +372,8 @@ class TestRateLimitRule:
 
 
 class TestTenantPolicyResolver:
+    """Test suite for TenantPolicyResolver."""
+
     def test_policy_default_resolves(self) -> None:
         """'policy:default' must resolve to the built-in conservative policy."""
         resolver = TenantPolicyResolver()
@@ -420,6 +441,7 @@ class _IntegrationSnapshotBuilder:
     permission_mode: str
 
     def build(self, *_args: Any, **_kwargs: Any) -> CapabilitySnapshot:
+        """Builds a test fixture value."""
         return CapabilitySnapshot(
             snapshot_ref="snapshot:run-int:1:abc",
             snapshot_hash="hash-int",
@@ -440,10 +462,12 @@ class _AckExecutor:
     """Executor stub that always returns an acknowledged result."""
 
     async def execute(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        """Executes the test operation."""
         return {"acknowledged": True}
 
 
 def _make_integration_engine(permission_mode: str) -> TurnEngine:
+    """Make integration engine."""
     return TurnEngine(
         snapshot_builder=_IntegrationSnapshotBuilder(permission_mode),
         admission_service=SnapshotDrivenAdmissionService(),
@@ -453,6 +477,7 @@ def _make_integration_engine(permission_mode: str) -> TurnEngine:
 
 
 def _integration_turn_input() -> TurnInput:
+    """Integration turn input."""
     return TurnInput(
         run_id="run-int",
         through_offset=1,

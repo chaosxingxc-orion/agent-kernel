@@ -1,4 +1,4 @@
-"""Tests for SQLite-backed RecoveryOutcome store persistence semantics."""
+"""Verifies for sqlite-backed recoveryoutcome store persistence semantics."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ def _build_outcome(
     recovery_mode: str = "human_escalation",
     outcome_state: str = "escalated",
 ) -> RecoveryOutcome:
+    """Build outcome."""
     return RecoveryOutcome(
         run_id=run_id,
         action_id=action_id,
@@ -30,6 +31,7 @@ def _build_outcome(
 
 
 def test_sqlite_recovery_outcome_store_returns_none_when_empty(tmp_path) -> None:
+    """Verifies sqlite recovery outcome store returns none when empty."""
     store = SQLiteRecoveryOutcomeStore(tmp_path / "recovery-empty.sqlite3")
     try:
         assert asyncio.run(store.latest_for_run("run-empty")) is None
@@ -38,6 +40,7 @@ def test_sqlite_recovery_outcome_store_returns_none_when_empty(tmp_path) -> None
 
 
 def test_sqlite_recovery_outcome_store_persists_across_reopen(tmp_path) -> None:
+    """Verifies sqlite recovery outcome store persists across reopen."""
     database_path = tmp_path / "recovery-persist.sqlite3"
     store = SQLiteRecoveryOutcomeStore(database_path)
     try:
@@ -65,6 +68,7 @@ def test_sqlite_recovery_outcome_store_persists_across_reopen(tmp_path) -> None:
 
 
 def test_sqlite_recovery_outcome_store_latest_for_run_uses_newest_written_at(tmp_path) -> None:
+    """Verifies sqlite recovery outcome store latest for run uses newest written at."""
     store = SQLiteRecoveryOutcomeStore(tmp_path / "recovery-latest.sqlite3")
     try:
         asyncio.run(

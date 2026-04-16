@@ -21,6 +21,7 @@ import pytest
 
 
 def _make_envelope(run_id: str, key_suffix: str = "a1") -> Any:
+    """Make envelope."""
     from agent_kernel.kernel.dedupe_store import IdempotencyEnvelope
 
     return IdempotencyEnvelope(
@@ -34,6 +35,7 @@ def _make_envelope(run_id: str, key_suffix: str = "a1") -> Any:
 
 
 def _make_commit(run_id: str, key: str) -> Any:
+    """Make commit."""
     from agent_kernel.kernel.contracts import ActionCommit, RuntimeEvent
 
     event = RuntimeEvent(
@@ -62,7 +64,10 @@ def _make_commit(run_id: str, key: str) -> Any:
 
 
 class TestDedupeAwareScriptRuntimeUnknownEffect:
+    """Test suite for DedupeAwareScriptRuntimeUnknownEffect."""
+
     def _make_input(self) -> Any:
+        """Make input."""
         from agent_kernel.kernel.contracts import ScriptActivityInput
 
         return ScriptActivityInput(
@@ -81,7 +86,10 @@ class TestDedupeAwareScriptRuntimeUnknownEffect:
         dedupe = InMemoryDedupeStore()
 
         class _BoomRuntime:
+            """Test suite for  BoomRuntime."""
+
             async def execute_script(self, input_value):
+                """Execute script."""
                 raise RuntimeError("boom")
 
         runtime = DedupeAwareScriptRuntime(
@@ -146,20 +154,29 @@ class TestDedupeAwareScriptRuntimeUnknownEffect:
         dedupe = InMemoryDedupeStore()
 
         class _BadDedupeStore:
+            """Test suite for  BadDedupeStore."""
+
             def reserve(self, envelope):
+                """Reserves a test key."""
                 return dedupe.reserve(envelope)
 
             def mark_dispatched(self, key, peer_operation_id=None):
+                """Mark dispatched."""
                 return dedupe.mark_dispatched(key, peer_operation_id)
 
             def mark_unknown_effect(self, key):
+                """Mark unknown effect."""
                 raise OSError("disk full")
 
             def get(self, key):
+                """Gets test data."""
                 return dedupe.get(key)
 
         class _BoomRuntime:
+            """Test suite for  BoomRuntime."""
+
             async def execute_script(self, input_value):
+                """Execute script."""
                 raise ValueError("inner error")
 
         runtime = DedupeAwareScriptRuntime(
@@ -178,7 +195,10 @@ class TestDedupeAwareScriptRuntimeUnknownEffect:
 
 
 class TestColocatedSQLiteBundle:
+    """Test suite for ColocatedSQLiteBundle."""
+
     def test_initialize_creates_tables(self) -> None:
+        """Verifies initialize creates tables."""
         from agent_kernel.kernel.persistence.sqlite_colocated_bundle import (
             ColocatedSQLiteBundle,
         )
@@ -194,6 +214,7 @@ class TestColocatedSQLiteBundle:
         bundle.close()
 
     def test_event_log_append_and_load(self) -> None:
+        """Verifies event log append and load."""
         from agent_kernel.kernel.persistence.sqlite_colocated_bundle import (
             ColocatedSQLiteBundle,
         )
@@ -208,6 +229,7 @@ class TestColocatedSQLiteBundle:
         bundle.close()
 
     def test_dedupe_store_reserve_and_get(self) -> None:
+        """Verifies dedupe store reserve and get."""
         from agent_kernel.kernel.persistence.sqlite_colocated_bundle import (
             ColocatedSQLiteBundle,
         )
@@ -343,6 +365,7 @@ class TestColocatedSQLiteBundle:
         bundle.close()
 
     def test_unknown_effect_transition(self) -> None:
+        """Verifies unknown effect transition."""
         from agent_kernel.kernel.persistence.sqlite_colocated_bundle import (
             ColocatedSQLiteBundle,
         )
@@ -368,20 +391,28 @@ class TestColocatedSQLiteBundle:
 
 
 class TestVerifyEventDedupeConsistency:
+    """Test suite for VerifyEventDedupeConsistency."""
+
     def _make_event_log_with_events(self, run_id: str, key: str | None) -> Any:
         """In-memory event log stub with list_events()."""
 
         @dataclass
         class _Event:
+            """Test suite for  Event."""
+
             run_id: str
             idempotency_key: str | None
             event_type: str
 
         class _EventLog:
+            """Test suite for  EventLog."""
+
             def __init__(self) -> None:
+                """Initializes _EventLog."""
                 self._data: list[Any] = []
 
             def list_events(self) -> list[Any]:
+                """List events."""
                 return list(self._data)
 
         log = _EventLog()
@@ -396,6 +427,7 @@ class TestVerifyEventDedupeConsistency:
         return log
 
     def test_consistent_run_has_no_violations(self) -> None:
+        """Verifies consistent run has no violations."""
         from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
         from agent_kernel.kernel.persistence.consistency import (
             verify_event_dedupe_consistency,
@@ -453,12 +485,17 @@ class TestVerifyEventDedupeConsistency:
         # Event log has the key but only with a non-dispatch event type.
         @dataclass
         class _Event:
+            """Test suite for  Event."""
+
             run_id: str
             idempotency_key: str
             event_type: str
 
         class _EventLog:
+            """Test suite for  EventLog."""
+
             def list_events(self) -> list:
+                """List events."""
                 return [_Event(run_id=run_id, idempotency_key=key, event_type="signal.received")]
 
         report = verify_event_dedupe_consistency(_EventLog(), dedupe, run_id)
@@ -560,7 +597,10 @@ class TestVerifyEventDedupeConsistency:
         )
 
         class _EmptyLog:
+            """Test suite for  EmptyLog."""
+
             def list_events(self) -> list:
+                """List events."""
                 return []
 
         report = verify_event_dedupe_consistency(_EmptyLog(), InMemoryDedupeStore(), "run-empty")

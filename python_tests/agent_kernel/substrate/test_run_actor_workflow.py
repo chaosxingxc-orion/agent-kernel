@@ -70,11 +70,14 @@ def make_commit(
 
     Args:
         offset: Commit offset carried by the runtime event.
+        include_capability_snapshot_input: Whether to include the
+            capability_snapshot_input payload in action input.
+        include_declarative_bundle_digest: Whether the capability snapshot
+            input should include declarative_bundle_digest fields.
 
     Returns:
         One commit object containing exactly one fact event.
     """
-
     input_json: dict[str, Any] = {"query": "kernel"}
     if include_capability_snapshot_input:
         input_json["capability_snapshot_input"] = _build_capability_snapshot_input(
@@ -165,7 +168,6 @@ def make_projection(offset: int) -> RunProjection:
     Returns:
         A projection in ``ready`` state.
     """
-
     return RunProjection(
         run_id="run-1",
         lifecycle_state="ready",
@@ -222,7 +224,6 @@ def build_workflow(
         A tuple containing the workflow plus event log, projection,
         admission, executor, recovery, and deduper mocks.
     """
-
     event_log = AsyncMock()
     projection = AsyncMock()
     admission = AsyncMock()
@@ -254,7 +255,6 @@ def build_workflow(
 
 def test_workflow_uses_explicit_offsets_for_catch_up_and_readiness() -> None:
     """Workflow must pass the same commit offset through projection gating."""
-
     (
         workflow,
         _event_log,
@@ -276,7 +276,6 @@ def test_workflow_uses_explicit_offsets_for_catch_up_and_readiness() -> None:
 
 def test_workflow_marks_decision_fingerprint_before_execute() -> None:
     """Workflow must dedupe one authoritative round before execution."""
-
     (
         workflow,
         _event_log,
@@ -303,7 +302,6 @@ def test_workflow_marks_decision_fingerprint_before_execute() -> None:
 
 def test_workflow_persists_dispatched_turn_outcome_without_derived_executor_events() -> None:
     """Workflow should persist dispatched outcome without deriving executor events."""
-
     (
         workflow,
         event_log,
@@ -646,7 +644,6 @@ def test_workflow_persists_recovery_pending_before_recovery_gate_event() -> None
 
 def test_workflow_skips_duplicate_decision_fingerprint() -> None:
     """Workflow must not re-dispatch when fingerprint is already seen."""
-
     (
         workflow,
         _event_log,
@@ -667,7 +664,6 @@ def test_workflow_skips_duplicate_decision_fingerprint() -> None:
 
 def test_workflow_routes_execution_failures_to_recovery_gate() -> None:
     """Workflow must hand off execution failures to Recovery."""
-
     (
         workflow,
         _event_log,
@@ -695,7 +691,6 @@ def test_workflow_routes_execution_failures_to_recovery_gate() -> None:
 
 def test_workflow_appends_abort_recovery_event_after_failure() -> None:
     """Workflow should emit recovery-aborted event when recovery aborts."""
-
     (
         workflow,
         event_log,
@@ -732,7 +727,6 @@ def test_workflow_appends_abort_recovery_event_after_failure() -> None:
 
 def test_workflow_appends_human_escalation_event_after_failure() -> None:
     """Workflow should emit waiting-external event for escalation."""
-
     (
         workflow,
         event_log,
@@ -768,7 +762,6 @@ def test_workflow_appends_human_escalation_event_after_failure() -> None:
 
 def test_workflow_writes_recovery_outcome_after_failure_recovery_decision() -> None:
     """Workflow should persist recovery outcome after recovery event append."""
-
     (
         workflow,
         event_log,
@@ -819,12 +812,16 @@ def test_workflow_writes_turn_intent_record_after_turn_outcome_commit() -> None:
 
     @dataclass(slots=True)
     class _InMemoryTurnIntentLog:
+        """Test suite for  InMemoryTurnIntentLog."""
+
         records: list[TurnIntentRecord]
 
         async def write_intent(self, intent: TurnIntentRecord) -> None:
+            """Write intent."""
             self.records.append(intent)
 
         async def latest_for_run(self, run_id: str) -> TurnIntentRecord | None:
+            """Latest for run."""
             for record in reversed(self.records):
                 if record.run_id == run_id:
                     return record
@@ -870,7 +867,6 @@ def test_workflow_writes_turn_intent_record_after_turn_outcome_commit() -> None:
 
 def test_run_returns_completed_when_projection_is_not_aborted() -> None:
     """Workflow run should complete unless projection already aborts."""
-
     (
         workflow,
         _event_log,
@@ -901,7 +897,6 @@ def test_run_returns_completed_when_projection_is_not_aborted() -> None:
 
 def test_run_returns_aborted_when_projection_state_is_aborted() -> None:
     """Workflow run should reflect abort when projection is aborted."""
-
     (
         workflow,
         _event_log,
@@ -929,7 +924,6 @@ def test_run_returns_aborted_when_projection_state_is_aborted() -> None:
 
 def test_run_with_parent_run_id_signals_parent_when_temporal_context_is_active() -> None:
     """Child run completion should signal parent when context exists."""
-
     (
         workflow,
         _event_log,
@@ -986,7 +980,6 @@ def test_run_with_parent_run_id_signals_parent_when_temporal_context_is_active()
 
 def test_run_without_parent_run_id_does_not_signal_parent_workflow() -> None:
     """Run should not attempt parent callback when no parent_run_id."""
-
     (
         workflow,
         _event_log,
@@ -1022,7 +1015,6 @@ def test_run_without_parent_run_id_does_not_signal_parent_workflow() -> None:
 
 def test_run_with_parent_run_id_is_safe_outside_temporal_workflow_context() -> None:
     """Run should skip parent callback outside Temporal context."""
-
     (
         workflow,
         _event_log,
@@ -1065,7 +1057,6 @@ def test_run_with_parent_run_id_is_safe_outside_temporal_workflow_context() -> N
 
 def test_signal_appends_commit_and_triggers_one_authoritative_round() -> None:
     """Signal should append a wake event and drive one decision-gated round."""
-
     (
         workflow,
         event_log,
@@ -1106,7 +1097,6 @@ def test_signal_appends_commit_and_triggers_one_authoritative_round() -> None:
 
 def test_signal_before_run_is_buffered_and_replayed_after_run() -> None:
     """Workflow should buffer early signals and replay after run() initializes."""
-
     (
         workflow,
         event_log,
@@ -1144,7 +1134,6 @@ def test_signal_before_run_is_buffered_and_replayed_after_run() -> None:
 
 def test_query_reads_latest_projection_for_active_run() -> None:
     """Workflow query should synchronously return cached projection."""
-
     (
         workflow,
         _event_log,
@@ -1239,12 +1228,16 @@ def test_workflow_blocks_recovery_gate_direct_event_log_mutation() -> None:
     admission = StaticDispatchAdmissionService()
 
     async def _failing_handler(_action: Action, _grant_ref: str | None) -> dict[str, Any]:
+        """Failing handler."""
         raise RuntimeError("executor failed")
 
     executor = AsyncExecutorService(handler=_failing_handler)
 
     class _MutatingRecoveryGate:
+        """Test suite for  MutatingRecoveryGate."""
+
         async def decide(self, recovery_input: Any) -> RecoveryDecision:
+            """Decides a recovery mode in tests."""
             await event_log.append_action_commit(
                 ActionCommit(
                     run_id=recovery_input.run_id,
@@ -1315,7 +1308,6 @@ def test_workflow_blocks_recovery_gate_direct_event_log_mutation() -> None:
 
 def test_signal_dedupes_replayed_callback_by_caused_by_token() -> None:
     """Workflow should ignore duplicated callback signals."""
-
     (
         workflow,
         event_log,
@@ -1345,7 +1337,6 @@ def test_signal_dedupes_replayed_callback_by_caused_by_token() -> None:
 
 def test_resume_signal_is_encoded_as_resume_event_type() -> None:
     """Workflow should emit a dedicated resume event type."""
-
     (
         workflow,
         event_log,
@@ -1379,7 +1370,6 @@ def test_resume_signal_is_encoded_as_resume_event_type() -> None:
 
 def test_cancel_signal_is_encoded_as_cancel_requested_event_type() -> None:
     """Workflow should encode cancel signal as runtime cancel event."""
-
     (
         workflow,
         event_log,
@@ -1482,7 +1472,6 @@ def test_hard_failure_signal_is_encoded_as_recovery_aborted_with_reason() -> Non
 
 def test_recovery_succeeded_signal_is_encoded_as_ready_transition_event() -> None:
     """Workflow should encode recovery success as runtime event."""
-
     (
         workflow,
         event_log,
@@ -1516,7 +1505,6 @@ def test_recovery_succeeded_signal_is_encoded_as_ready_transition_event() -> Non
 
 def test_recovery_aborted_signal_is_encoded_as_abort_transition_event() -> None:
     """Workflow should encode recovery abort as terminal runtime event."""
-
     (
         workflow,
         event_log,

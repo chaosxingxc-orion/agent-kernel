@@ -1,4 +1,4 @@
-"""Tests for InMemoryContextPort."""
+"""Test suite for InMemoryContextPort."""
 
 from __future__ import annotations
 
@@ -139,10 +139,10 @@ class TestInMemoryContextPortBasic:
 
 
 class TestInMemoryContextPortHistory:
-    """Tests for history assembly in InMemoryContextPort."""
+    """Verifies for history assembly in inmemorycontextport."""
 
     def test_history_empty_when_no_events(self) -> None:
-        """history should be an empty tuple when history list is empty."""
+        """History should be an empty tuple when history list is empty."""
         port = InMemoryContextPort()
         snapshot = _make_snapshot()
 
@@ -151,7 +151,7 @@ class TestInMemoryContextPortHistory:
         assert result.history == ()
 
     def test_history_contains_one_entry_per_event(self) -> None:
-        """history should have one dict per RuntimeEvent in the history list."""
+        """History should have one dict per RuntimeEvent in the history list."""
         port = InMemoryContextPort()
         snapshot = _make_snapshot()
         events = [_make_event(idx=0), _make_event(idx=1)]
@@ -186,7 +186,7 @@ class TestInMemoryContextPortHistory:
 
 
 class TestInMemoryContextPortOptionalFields:
-    """Tests for optional fields (inference_config, recovery_context)."""
+    """Verifies for optional fields (inference config, recovery context)."""
 
     def test_inference_config_passed_through(self) -> None:
         """inference_config should be propagated to the ContextWindow."""

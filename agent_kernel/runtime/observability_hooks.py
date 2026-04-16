@@ -715,6 +715,7 @@ class OtelObservabilityHook:
     tracer_name: str = "agent_kernel"
 
     def _get_tracer(self) -> Any:
+        """Returns the tracer used for observability emission."""
         if not _OTEL_AVAILABLE:
             return None
         return _otel_trace.get_tracer(self.tracer_name)

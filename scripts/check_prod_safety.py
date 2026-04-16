@@ -41,12 +41,16 @@ KEYWORD_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 @dataclass(frozen=True, slots=True)
 class AllowRule:
+    """Allowlist rule used to suppress expected findings."""
+
     kind: str
     value: str
 
 
 @dataclass(frozen=True, slots=True)
 class Finding:
+    """One scanner finding for a suspicious source line."""
+
     path: Path
     line_number: int
     keyword: str
@@ -54,6 +58,7 @@ class Finding:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parses CLI arguments for the production-safety checker."""
     parser = argparse.ArgumentParser(
         description="Check agent_kernel for PoC/mock/stub/placeholder implementations."
     )
@@ -76,6 +81,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def iter_python_files(root: Path) -> Iterable[Path]:
+    """Iter python files."""
     for path in root.rglob("*.py"):
         if any(part == "__pycache__" or part.startswith(".") for part in path.parts):
             continue
@@ -86,14 +92,17 @@ def iter_python_files(root: Path) -> Iterable[Path]:
 
 
 def normalize_path(path: Path) -> str:
+    """Normalizes a path into a POSIX-style string."""
     return path.as_posix()
 
 
 def looks_like_path_pattern(value: str) -> bool:
+    """Looks like path pattern."""
     return any(ch in value for ch in ("*", "?", "[", "]", "/", "\\"))
 
 
 def parse_allow_entry(raw: str) -> list[AllowRule]:
+    """Parse allow entry."""
     entry = raw.strip().lstrip("\ufeff")
     if not entry or entry.startswith("#"):
         return []
@@ -109,6 +118,7 @@ def parse_allow_entry(raw: str) -> list[AllowRule]:
 
 
 def load_allow_rules(allow_values: list[str], allowlist_files: list[str]) -> list[AllowRule]:
+    """Load allow rules."""
     rules: list[AllowRule] = []
     for value in allow_values:
         rules.extend(parse_allow_entry(value))
@@ -124,15 +134,18 @@ def load_allow_rules(allow_values: list[str], allowlist_files: list[str]) -> lis
 
 
 def path_is_allowed(path: Path, rules: list[AllowRule]) -> bool:
+    """Path is allowed."""
     rel_path = normalize_path(path)
     return any(rule.kind == "path" and fnmatch.fnmatch(rel_path, rule.value) for rule in rules)
 
 
 def line_is_allowed(line: str, rules: list[AllowRule]) -> bool:
+    """Line is allowed."""
     return any(rule.kind == "text" and rule.value in line for rule in rules)
 
 
 def scan_file(path: Path, rules: list[AllowRule]) -> list[Finding]:
+    """Scans one file and returns matching findings."""
     if path_is_allowed(path, rules):
         return []
 
@@ -159,12 +172,14 @@ def scan_file(path: Path, rules: list[AllowRule]) -> list[Finding]:
 
 
 def format_finding(finding: Finding) -> str:
+    """Formats one finding for terminal output."""
     return (
         f"{normalize_path(finding.path)}:{finding.line_number} [{finding.keyword}] {finding.line}"
     )
 
 
 def main() -> int:
+    """Runs the CLI entry point and returns the exit code."""
     args = parse_args()
     allow_rules = load_allow_rules(args.allow, args.allowlist_file)
 

@@ -1,5 +1,24 @@
 # agent-kernel
 
+## Documentation And Style Refresh (2026-04-16)
+
+This repository has been refreshed to enforce Google Python Style Guide alignment
+for both code formatting and docstrings across `agent_kernel/`, `python_tests/`,
+and `scripts/` (excluding vendored `external/` sources).
+
+Current style and quality baseline:
+
+- Formatting and linting:
+  - `python -m ruff check agent_kernel python_tests scripts`
+  - `python -m ruff check agent_kernel python_tests scripts --select D`
+  - `python -m ruff format --check agent_kernel python_tests scripts`
+- Full regression:
+  - `python -m pytest -q`
+  - Latest run result: `7216 passed, 2 skipped, 6 warnings` (2026-04-16)
+
+Warnings are expected `UserWarning` messages for the current in-memory
+`TaskRegistry` event-log backend in tests and do not indicate functional failures.
+
 面向长生命周期任务的智能体内核 -- 统一治理 run 生命周期、事件事实、副作用管控与失败恢复。
 
 ## 定位与边界

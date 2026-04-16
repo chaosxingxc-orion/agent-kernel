@@ -30,6 +30,7 @@ def _descriptor(
     session_id: str = "sess-1",
     goal: str = "do something",
 ) -> TaskDescriptor:
+    """Builds a task descriptor fixture."""
     return TaskDescriptor(
         task_id=task_id or uuid.uuid4().hex,
         session_id=session_id,
@@ -40,6 +41,7 @@ def _descriptor(
 
 
 def _attempt(task_id: str, seq: int = 1, run_id: str | None = None) -> TaskAttempt:
+    """Builds a task attempt fixture."""
     return TaskAttempt(
         attempt_id=uuid.uuid4().hex,
         task_id=task_id,
@@ -50,6 +52,7 @@ def _attempt(task_id: str, seq: int = 1, run_id: str | None = None) -> TaskAttem
 
 
 def _registry_with_log() -> tuple[TaskRegistry, InMemoryTaskEventLog]:
+    """Registry with log."""
     log = InMemoryTaskEventLog()
     reg = TaskRegistry(event_appender=log)
     return reg, log
@@ -61,7 +64,10 @@ def _registry_with_log() -> tuple[TaskRegistry, InMemoryTaskEventLog]:
 
 
 class TestInMemoryTaskEventLog:
+    """Test suite for InMemoryTaskEventLog."""
+
     def test_append_and_retrieve(self) -> None:
+        """Verifies append and retrieve."""
         log = InMemoryTaskEventLog()
         log.append_task_event("task.registered", {"task_id": "t1"})
         log.append_task_event("task.attempt_started", {"task_id": "t1", "run_id": "r1"})
@@ -71,6 +77,7 @@ class TestInMemoryTaskEventLog:
         assert events[1]["event_type"] == "task.attempt_started"
 
     def test_all_events_returns_snapshot(self) -> None:
+        """Verifies all events returns snapshot."""
         log = InMemoryTaskEventLog()
         log.append_task_event("task.registered", {"task_id": "t1"})
         snap1 = log.all_events()
@@ -80,6 +87,7 @@ class TestInMemoryTaskEventLog:
         assert len(snap2) == 2
 
     def test_eviction_on_overflow(self) -> None:
+        """Verifies eviction on overflow."""
         log = InMemoryTaskEventLog(max_events=10)
         for i in range(15):
             log.append_task_event("task.registered", {"task_id": f"t{i}"})
@@ -87,6 +95,7 @@ class TestInMemoryTaskEventLog:
         assert len(log.all_events()) < 15
 
     def test_eviction_cap_respected(self) -> None:
+        """Verifies eviction cap respected."""
         cap = 8
         log = InMemoryTaskEventLog(max_events=cap)
         for i in range(20):
@@ -100,7 +109,10 @@ class TestInMemoryTaskEventLog:
 
 
 class TestRegistryEmitsEvents:
+    """Test suite for RegistryEmitsEvents."""
+
     def test_register_emits_task_registered(self) -> None:
+        """Verifies register emits task registered."""
         reg, log = _registry_with_log()
         desc = _descriptor("task-emit-1")
         reg.register(desc)
@@ -110,6 +122,7 @@ class TestRegistryEmitsEvents:
         assert reg_evt["payload"]["task_id"] == "task-emit-1"
 
     def test_start_attempt_emits_event(self) -> None:
+        """Verifies start attempt emits event."""
         reg, log = _registry_with_log()
         desc = _descriptor("task-emit-2")
         reg.register(desc)
@@ -119,6 +132,7 @@ class TestRegistryEmitsEvents:
         assert "task.attempt_started" in types
 
     def test_complete_attempt_success_emits_completed(self) -> None:
+        """Verifies complete attempt success emits completed."""
         reg, log = _registry_with_log()
         desc = _descriptor("task-emit-3")
         reg.register(desc)
@@ -129,6 +143,7 @@ class TestRegistryEmitsEvents:
         assert "task.attempt_completed" in types
 
     def test_complete_attempt_failure_emits_failed(self) -> None:
+        """Verifies complete attempt failure emits failed."""
         reg, log = _registry_with_log()
         desc = _descriptor("task-emit-4")
         reg.register(desc)
@@ -139,6 +154,7 @@ class TestRegistryEmitsEvents:
         assert "task.attempt_failed" in types
 
     def test_update_state_reflecting_emits_event(self) -> None:
+        """Verifies update state reflecting emits event."""
         reg, log = _registry_with_log()
         desc = _descriptor("task-emit-5")
         reg.register(desc)
@@ -147,6 +163,7 @@ class TestRegistryEmitsEvents:
         assert "task.reflecting" in types
 
     def test_update_state_restarting_emits_event(self) -> None:
+        """Verifies update state restarting emits event."""
         reg, log = _registry_with_log()
         desc = _descriptor("task-emit-6")
         reg.register(desc)
@@ -155,6 +172,7 @@ class TestRegistryEmitsEvents:
         assert "task.restarting" in types
 
     def test_update_state_completed_emits_event(self) -> None:
+        """Verifies update state completed emits event."""
         reg, log = _registry_with_log()
         desc = _descriptor("task-emit-7")
         reg.register(desc)
@@ -163,6 +181,7 @@ class TestRegistryEmitsEvents:
         assert "task.completed" in types
 
     def test_no_appender_does_not_raise(self) -> None:
+        """Verifies no appender does not raise."""
         reg = TaskRegistry()  # no event_appender
         desc = _descriptor("task-nolog")
         reg.register(desc)
@@ -178,7 +197,10 @@ class TestRegistryEmitsEvents:
 
 
 class TestReplayIntoRegistry:
+    """Test suite for ReplayIntoRegistry."""
+
     def test_replay_restores_registered_task(self) -> None:
+        """Verifies replay restores registered task."""
         reg, log = _registry_with_log()
         desc = _descriptor("task-replay-1")
         reg.register(desc)
@@ -189,6 +211,7 @@ class TestReplayIntoRegistry:
         assert fresh.get("task-replay-1") is not None
 
     def test_replay_restores_attempt_history(self) -> None:
+        """Verifies replay restores attempt history."""
         reg, log = _registry_with_log()
         desc = _descriptor("task-replay-2")
         reg.register(desc)
@@ -202,6 +225,7 @@ class TestReplayIntoRegistry:
         assert attempts[0].run_id == "run-r2"
 
     def test_replay_restores_lifecycle_state(self) -> None:
+        """Verifies replay restores lifecycle state."""
         reg, log = _registry_with_log()
         desc = _descriptor("task-replay-3")
         reg.register(desc)
@@ -217,6 +241,7 @@ class TestReplayIntoRegistry:
         assert health.lifecycle_state == "reflecting"
 
     def test_replay_is_idempotent(self) -> None:
+        """Verifies replay is idempotent."""
         reg, log = _registry_with_log()
         desc = _descriptor("task-replay-idem")
         reg.register(desc)
@@ -232,6 +257,7 @@ class TestReplayIntoRegistry:
         assert attempts[0].run_id == "run-idem-1"
 
     def test_replay_multiple_tasks(self) -> None:
+        """Verifies replay multiple tasks."""
         reg, log = _registry_with_log()
         ids = [f"task-multi-{i}" for i in range(5)]
         for tid in ids:
@@ -243,6 +269,7 @@ class TestReplayIntoRegistry:
             assert fresh.get(tid) is not None
 
     def test_replay_restores_session_index(self) -> None:
+        """Verifies replay restores session index."""
         reg, log = _registry_with_log()
         for i in range(3):
             reg.register(_descriptor(f"task-sess-{i}", session_id="sess-shared"))
@@ -253,6 +280,7 @@ class TestReplayIntoRegistry:
         assert len(session_tasks) == 3
 
     def test_replay_returns_event_count(self) -> None:
+        """Verifies replay returns event count."""
         reg, log = _registry_with_log()
         for i in range(4):
             reg.register(_descriptor(f"task-count-{i}"))

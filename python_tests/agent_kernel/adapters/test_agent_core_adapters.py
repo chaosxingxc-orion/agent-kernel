@@ -24,7 +24,6 @@ from agent_kernel.kernel.contracts import Action, EffectClass, RunProjection
 
 def test_runner_adapter_maps_runner_request_without_inventing_kernel_truth() -> None:
     """RunnerAdapter should only translate platform input into a start request."""
-
     adapter = AgentCoreRunnerAdapter()
 
     request = adapter.from_runner_start(
@@ -44,7 +43,6 @@ def test_runner_adapter_maps_runner_request_without_inventing_kernel_truth() -> 
 
 def test_runner_adapter_maps_child_spawn_request_verbatim() -> None:
     """RunnerAdapter should translate child spawn requests without side effects."""
-
     adapter = AgentCoreRunnerAdapter()
 
     request = adapter.from_runner_child_spawn(
@@ -62,7 +60,6 @@ def test_runner_adapter_maps_child_spawn_request_verbatim() -> None:
 
 def test_session_adapter_translates_callback_to_kernel_signal() -> None:
     """SessionAdapter should convert session callbacks into kernel signals only."""
-
     adapter = AgentCoreSessionAdapter()
 
     request = adapter.translate_callback(

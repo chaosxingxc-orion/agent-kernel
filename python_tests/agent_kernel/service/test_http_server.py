@@ -27,6 +27,7 @@ from agent_kernel.service.http_server import create_app
 
 
 def _make_gateway() -> MagicMock:
+    """Make gateway."""
     gw = MagicMock()
     gw.query_projection = AsyncMock(
         return_value=RunProjection(
@@ -50,17 +51,20 @@ def _make_gateway() -> MagicMock:
 
 
 def _make_facade() -> KernelFacade:
+    """Make facade."""
     return KernelFacade(workflow_gateway=_make_gateway())
 
 
 @pytest.fixture()
 def app():
+    """Builds a test application instance."""
     facade = _make_facade()
     return create_app(facade)
 
 
 @pytest.fixture()
 def client(app):
+    """Builds a test client instance."""
     transport = httpx.ASGITransport(app=app)
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 
@@ -71,7 +75,10 @@ def client(app):
 
 
 class TestManifestAndHealth:
+    """Test suite for ManifestAndHealth."""
+
     def test_get_manifest(self, client) -> None:
+        """Verifies get manifest."""
         resp = asyncio.run(client.get("/manifest"))
         assert resp.status_code == 200
         data = resp.json()
@@ -80,11 +87,13 @@ class TestManifestAndHealth:
         assert "child_run_orchestration" in data["supported_trace_features"]
 
     def test_health_liveness(self, client) -> None:
+        """Verifies health liveness."""
         resp = asyncio.run(client.get("/health/liveness"))
         assert resp.status_code == 200
         assert resp.json()["status"] == "alive"
 
     def test_health_readiness(self, client) -> None:
+        """Verifies health readiness."""
         resp = asyncio.run(client.get("/health/readiness"))
         # Without a health_probe, returns minimal static response.
         assert resp.status_code in (200, 503)
@@ -96,8 +105,11 @@ class TestManifestAndHealth:
 
 
 class TestRunLifecycle:
+    """Test suite for RunLifecycle."""
+
     def test_post_runs_creates_run(self, client, app) -> None:
         # Mock start_run on the facade.
+        """Verifies post runs creates run."""
         facade = app.state.facade
         facade.start_run = AsyncMock(
             return_value=StartRunResponse(
@@ -119,12 +131,14 @@ class TestRunLifecycle:
         assert resp.json()["run_id"] == "run-new"
 
     def test_get_run(self, client) -> None:
+        """Verifies get run."""
         resp = asyncio.run(client.get("/runs/run-1"))
         assert resp.status_code == 200
         data = resp.json()
         assert data["run_id"] == "run-1"
 
     def test_post_signal(self, client, app) -> None:
+        """Verifies post signal."""
         facade = app.state.facade
         facade.signal_run = AsyncMock()
         resp = asyncio.run(
@@ -139,6 +153,7 @@ class TestRunLifecycle:
         assert resp.status_code == 200
 
     def test_post_cancel(self, client, app) -> None:
+        """Verifies post cancel."""
         facade = app.state.facade
         facade.cancel_run = AsyncMock()
         resp = asyncio.run(
@@ -147,6 +162,7 @@ class TestRunLifecycle:
         assert resp.status_code == 200
 
     def test_post_resume(self, client, app) -> None:
+        """Verifies post resume."""
         facade = app.state.facade
         facade.resume_run = AsyncMock()
         resp = asyncio.run(
@@ -161,7 +177,10 @@ class TestRunLifecycle:
 
 
 class TestTraceEndpoints:
+    """Test suite for TraceEndpoints."""
+
     def test_get_trace(self, client) -> None:
+        """Verifies get trace."""
         resp = asyncio.run(client.get("/runs/run-1/trace"))
         assert resp.status_code == 200
         data = resp.json()
@@ -169,6 +188,7 @@ class TestTraceEndpoints:
         assert "run_state" in data
 
     def test_get_postmortem(self, client) -> None:
+        """Verifies get postmortem."""
         resp = asyncio.run(client.get("/runs/run-1/postmortem"))
         assert resp.status_code == 200
         data = resp.json()
@@ -182,12 +202,16 @@ class TestTraceEndpoints:
 
 
 class TestChildRuns:
+    """Test suite for ChildRuns."""
+
     def test_get_children_empty(self, client) -> None:
+        """Verifies get children empty."""
         resp = asyncio.run(client.get("/runs/run-1/children"))
         assert resp.status_code == 200
         assert resp.json() == []
 
     def test_post_children(self, client, app) -> None:
+        """Verifies post children."""
         facade = app.state.facade
         facade.spawn_child_run = AsyncMock(
             return_value=SpawnChildRunResponse(
@@ -214,7 +238,10 @@ class TestChildRuns:
 
 
 class TestStageAndBranch:
+    """Test suite for StageAndBranch."""
+
     def test_open_stage(self, client) -> None:
+        """Verifies open stage."""
         resp = asyncio.run(
             client.post("/runs/run-1/stages/s1/open", json={}),
         )
@@ -222,6 +249,7 @@ class TestStageAndBranch:
 
     def test_mark_stage_state(self, client) -> None:
         # First open a stage.
+        """Verifies mark stage state."""
         asyncio.run(client.post("/runs/run-1/stages/s1/open", json={}))
         resp = asyncio.run(
             client.put(
@@ -232,6 +260,7 @@ class TestStageAndBranch:
         assert resp.status_code == 200
 
     def test_open_branch(self, client) -> None:
+        """Verifies open branch."""
         resp = asyncio.run(
             client.post(
                 "/runs/run-1/branches",
@@ -245,6 +274,7 @@ class TestStageAndBranch:
 
     def test_mark_branch_state(self, client) -> None:
         # First open branch.
+        """Verifies mark branch state."""
         asyncio.run(
             client.post(
                 "/runs/run-1/branches",
@@ -269,7 +299,10 @@ class TestStageAndBranch:
 
 
 class TestHumanGates:
+    """Test suite for HumanGates."""
+
     def test_open_human_gate(self, client) -> None:
+        """Verifies open human gate."""
         resp = asyncio.run(
             client.post(
                 "/runs/run-1/human-gates",
@@ -284,6 +317,7 @@ class TestHumanGates:
         assert resp.status_code == 201
 
     def test_submit_approval(self, client, app) -> None:
+        """Verifies submit approval."""
         facade = app.state.facade
         facade.submit_approval = AsyncMock()
         resp = asyncio.run(
@@ -304,7 +338,10 @@ class TestHumanGates:
 
 
 class TestTaskViews:
+    """Test suite for TaskViews."""
+
     def test_record_task_view(self, client, app) -> None:
+        """Verifies record task view."""
         from agent_kernel.kernel.persistence.sqlite_task_view_log import (
             SQLiteTaskViewLog,
         )
@@ -331,7 +368,10 @@ class TestTaskViews:
 
 
 class TestSerialization:
+    """Test suite for Serialization."""
+
     def test_serialize_dataclass_handles_frozenset(self) -> None:
+        """Verifies serialize dataclass handles frozenset."""
         from agent_kernel.service.serialization import serialize_dataclass
 
         manifest = KernelManifest(
@@ -350,6 +390,7 @@ class TestSerialization:
         assert result["supported_action_types"] == ["tool_call"]
 
     def test_serialize_none_returns_empty_dict(self) -> None:
+        """Verifies serialize none returns empty dict."""
         from agent_kernel.service.serialization import serialize_dataclass
 
         assert serialize_dataclass(None) == {}
@@ -361,6 +402,8 @@ class TestSerialization:
 
 
 class TestKernelConfigWiring:
+    """Test suite for KernelConfigWiring."""
+
     def test_create_app_default_uses_kernel_config(self) -> None:
         """Verify create_app_default() propagates KernelConfig values."""
         from agent_kernel.config import KernelConfig

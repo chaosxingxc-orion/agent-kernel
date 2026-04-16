@@ -1,4 +1,4 @@
-"""Tests for FailureCodeRegistry and TraceFailureCode.is_budget_exhausted."""
+"""Verifies for failurecoderegistry and tracefailurecode.is budget exhausted."""
 
 from agent_kernel.kernel.contracts import TraceFailureCode
 from agent_kernel.kernel.failure_code_registry import FailureCodeRegistry
@@ -8,21 +8,25 @@ class TestFailureCodeRegistry:
     """Unit tests for FailureCodeRegistry."""
 
     def test_register_and_get_recovery(self) -> None:
+        """Verifies register and get recovery."""
         reg = FailureCodeRegistry()
         reg.register_recovery(TraceFailureCode.MODEL_REFUSAL, "retry_with_fallback")
         assert reg.get_recovery(TraceFailureCode.MODEL_REFUSAL) == "retry_with_fallback"
 
     def test_register_and_get_gate(self) -> None:
+        """Verifies register and get gate."""
         reg = FailureCodeRegistry()
         reg.register_gate(TraceFailureCode.UNSAFE_ACTION_BLOCKED, "human_review")
         assert reg.get_gate(TraceFailureCode.UNSAFE_ACTION_BLOCKED) == "human_review"
 
     def test_get_unmapped_returns_none(self) -> None:
+        """Verifies get unmapped returns none."""
         reg = FailureCodeRegistry()
         assert reg.get_recovery(TraceFailureCode.NO_PROGRESS) is None
         assert reg.get_gate(TraceFailureCode.NO_PROGRESS) is None
 
     def test_register_batch(self) -> None:
+        """Verifies register batch."""
         reg = FailureCodeRegistry()
         reg.register_batch(
             recovery={
@@ -38,6 +42,7 @@ class TestFailureCodeRegistry:
         assert reg.get_gate(TraceFailureCode.CALLBACK_TIMEOUT) == "ops_gate"
 
     def test_has_mapping(self) -> None:
+        """Verifies has mapping."""
         reg = FailureCodeRegistry()
         assert not reg.has_mapping(TraceFailureCode.HARNESS_DENIED)
         reg.register_recovery(TraceFailureCode.HARNESS_DENIED, "abort")
@@ -53,10 +58,12 @@ class TestTraceFailureCodeBudgetHelper:
     """Unit tests for TraceFailureCode.is_budget_exhausted."""
 
     def test_is_budget_exhausted_true_cases(self) -> None:
+        """Verifies is budget exhausted true cases."""
         assert TraceFailureCode.is_budget_exhausted(TraceFailureCode.EXPLORATION_BUDGET_EXHAUSTED)
         assert TraceFailureCode.is_budget_exhausted(TraceFailureCode.EXECUTION_BUDGET_EXHAUSTED)
 
     def test_is_budget_exhausted_false_cases(self) -> None:
+        """Verifies is budget exhausted false cases."""
         non_budget_codes = [
             TraceFailureCode.MISSING_EVIDENCE,
             TraceFailureCode.INVALID_CONTEXT,

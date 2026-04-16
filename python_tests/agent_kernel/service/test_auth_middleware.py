@@ -1,4 +1,4 @@
-"""Tests for ApiKeyMiddleware authentication layer."""
+"""Verifies for apikeymiddleware authentication layer."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ _SECRET = "test-secret-key-42"
 
 
 def _echo(_request: Request) -> JSONResponse:
+    """Echoes the input test payload."""
     return JSONResponse({"ok": True})
 
 
@@ -40,6 +41,8 @@ def _build_app(*, api_key: str | None) -> ApiKeyMiddleware:
 
 
 class TestApiKeyMiddleware:
+    """Test suite for ApiKeyMiddleware."""
+
     def test_no_api_key_configured_allows_all(self) -> None:
         """When api_key is None, every request passes through."""
         app = _build_app(api_key=None)
@@ -49,6 +52,7 @@ class TestApiKeyMiddleware:
         assert resp.json() == {"ok": True}
 
     def test_valid_api_key_passes(self) -> None:
+        """Verifies valid api key passes."""
         app = _build_app(api_key=_SECRET)
         client = TestClient(app)
         resp = client.get(
@@ -59,6 +63,7 @@ class TestApiKeyMiddleware:
         assert resp.json() == {"ok": True}
 
     def test_invalid_api_key_returns_401(self) -> None:
+        """Verifies invalid api key returns 401."""
         app = _build_app(api_key=_SECRET)
         client = TestClient(app)
         resp = client.get(
@@ -69,6 +74,7 @@ class TestApiKeyMiddleware:
         assert resp.json() == {"error": "unauthorized"}
 
     def test_missing_auth_header_returns_401(self) -> None:
+        """Verifies missing auth header returns 401."""
         app = _build_app(api_key=_SECRET)
         client = TestClient(app)
         resp = client.post("/runs")
@@ -76,6 +82,7 @@ class TestApiKeyMiddleware:
         assert resp.json() == {"error": "unauthorized"}
 
     def test_health_endpoints_exempt_from_auth(self) -> None:
+        """Verifies health endpoints exempt from auth."""
         app = _build_app(api_key=_SECRET)
         client = TestClient(app)
         # No Authorization header — should still pass.
@@ -85,6 +92,7 @@ class TestApiKeyMiddleware:
             assert resp.json() == {"ok": True}
 
     def test_manifest_exempt_from_auth(self) -> None:
+        """Verifies manifest exempt from auth."""
         app = _build_app(api_key=_SECRET)
         client = TestClient(app)
         resp = client.get("/manifest")

@@ -59,6 +59,7 @@ class PostgresRecoveryOutcomeStore(RecoveryOutcomeStore):
         )
 
     async def _ensure_schema(self) -> None:
+        """Ensures required database schema objects exist."""
         pool = self._bridge.pool
         async with pool.acquire() as conn:
             await conn.execute(
@@ -83,6 +84,7 @@ class PostgresRecoveryOutcomeStore(RecoveryOutcomeStore):
             )
 
     async def _write_outcome(self, outcome: RecoveryOutcome) -> None:
+        """Writes one recovery outcome record."""
         pool = self._bridge.pool
         async with pool.acquire() as conn:
             await conn.execute(
@@ -107,6 +109,7 @@ class PostgresRecoveryOutcomeStore(RecoveryOutcomeStore):
             )
 
     async def _latest_for_run(self, run_id: str) -> Any | None:
+        """Latest for run."""
         pool = self._bridge.pool
         async with pool.acquire() as conn:
             return await conn.fetchrow(

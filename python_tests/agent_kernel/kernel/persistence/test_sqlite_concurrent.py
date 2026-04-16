@@ -28,10 +28,12 @@ from agent_kernel.kernel.persistence.sqlite_turn_intent_log import SQLiteTurnInt
 
 
 def _utc_now() -> str:
+    """Utc now."""
     return datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
 
 
 def _make_commit(run_id: str, seq: int) -> ActionCommit:
+    """Make commit."""
     return ActionCommit(
         run_id=run_id,
         commit_id=f"commit-{seq}",
@@ -61,6 +63,7 @@ class TestSQLiteEventLogConcurrency:
     """Verifies that concurrent append and load calls do not corrupt data."""
 
     def _make_log(self) -> SQLiteKernelRuntimeEventLog:
+        """Make log."""
         return SQLiteKernelRuntimeEventLog(":memory:")
 
     @pytest.mark.asyncio
@@ -71,6 +74,7 @@ class TestSQLiteEventLogConcurrency:
         n = 20
 
         async def _append(seq: int) -> None:
+            """Appends test data."""
             await log.append_action_commit(_make_commit(run_id, seq))
 
         await asyncio.gather(*[_append(i) for i in range(n)])
@@ -90,6 +94,7 @@ class TestSQLiteEventLogConcurrency:
         appends_per_run = 10
 
         async def _append_run(run_id: str) -> None:
+            """Append run."""
             for seq in range(appends_per_run):
                 await log.append_action_commit(_make_commit(run_id, seq))
 
@@ -109,10 +114,12 @@ class TestSQLiteEventLogConcurrency:
         results: list[list] = []
 
         async def _write() -> None:
+            """Writes test data."""
             for i in range(15):
                 await log.append_action_commit(_make_commit(run_id, i))
 
         async def _read() -> None:
+            """Reads test data."""
             events = await log.load(run_id, after_offset=0)
             results.append(events)
 
@@ -131,6 +138,7 @@ class TestSQLiteEventLogConcurrency:
         errors: list[Exception] = []
 
         def _worker(thread_id: int) -> None:
+            """Runs worker behavior for the test."""
             loop = asyncio.new_event_loop()
             try:
                 for seq in range(appends_per_thread):
@@ -180,9 +188,11 @@ class TestSQLiteRecoveryOutcomeStoreConcurrency:
     """Verifies thread-safe write_outcome under concurrent asyncio tasks."""
 
     def _make_store(self) -> SQLiteRecoveryOutcomeStore:
+        """Make store."""
         return SQLiteRecoveryOutcomeStore(":memory:")
 
     def _make_outcome(self, run_id: str, action_id: str) -> RecoveryOutcome:
+        """Make outcome."""
         return RecoveryOutcome(
             run_id=run_id,
             action_id=action_id,
@@ -199,6 +209,7 @@ class TestSQLiteRecoveryOutcomeStoreConcurrency:
         n = 12
 
         async def _write(i: int) -> None:
+            """Writes test data."""
             await store.write_outcome(self._make_outcome(run_id, f"action-{i}"))
 
         await asyncio.gather(*[_write(i) for i in range(n)])
@@ -229,9 +240,11 @@ class TestSQLiteTurnIntentLogConcurrency:
     """Verifies thread-safe write_intent under concurrent asyncio tasks."""
 
     def _make_log(self) -> SQLiteTurnIntentLog:
+        """Make log."""
         return SQLiteTurnIntentLog(":memory:")
 
     def _make_intent(self, run_id: str, offset: int) -> TurnIntentRecord:
+        """Make intent."""
         return TurnIntentRecord(
             run_id=run_id,
             intent_commit_ref=f"commit-{offset}",
@@ -251,6 +264,7 @@ class TestSQLiteTurnIntentLogConcurrency:
         n = 10
 
         async def _write(i: int) -> None:
+            """Writes test data."""
             await log.write_intent(self._make_intent(run_id, i))
 
         await asyncio.gather(*[_write(i) for i in range(n)])

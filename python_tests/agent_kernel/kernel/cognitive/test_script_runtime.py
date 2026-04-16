@@ -1,4 +1,4 @@
-"""Tests for ScriptRuntime implementations."""
+"""Verifies for scriptruntime implementations."""
 
 from __future__ import annotations
 
@@ -49,6 +49,7 @@ class TestEchoScriptRuntime:
 
     @pytest.mark.asyncio
     async def test_echo_empty_parameters(self) -> None:
+        """Verifies echo empty parameters."""
         runtime = EchoScriptRuntime()
         result = await runtime.execute_script(_make_input(host_kind="echo", parameters={}))
         assert result.exit_code == 0
@@ -57,6 +58,7 @@ class TestEchoScriptRuntime:
 
     @pytest.mark.asyncio
     async def test_echo_parameters_reflected_in_output_json(self) -> None:
+        """Verifies echo parameters reflected in output json."""
         runtime = EchoScriptRuntime()
         params = {"key": "value", "count": 3}
         result = await runtime.execute_script(_make_input(host_kind="echo", parameters=params))
@@ -65,23 +67,27 @@ class TestEchoScriptRuntime:
 
     @pytest.mark.asyncio
     async def test_echo_always_exit_code_zero(self) -> None:
+        """Verifies echo always exit code zero."""
         runtime = EchoScriptRuntime()
         result = await runtime.execute_script(_make_input(host_kind="echo"))
         assert result.exit_code == 0
 
     @pytest.mark.asyncio
     async def test_echo_script_id_preserved(self) -> None:
+        """Verifies echo script id preserved."""
         runtime = EchoScriptRuntime()
         result = await runtime.execute_script(_make_input(script_id="my-script", host_kind="echo"))
         assert result.script_id == "my-script"
 
     @pytest.mark.asyncio
     async def test_echo_validate_always_true(self) -> None:
+        """Verifies echo validate always true."""
         runtime = EchoScriptRuntime()
         assert await runtime.validate_script("any content", "echo") is True
 
     @pytest.mark.asyncio
     async def test_echo_nested_parameters(self) -> None:
+        """Verifies echo nested parameters."""
         runtime = EchoScriptRuntime()
         params = {"nested": {"a": 1, "b": [1, 2, 3]}}
         result = await runtime.execute_script(_make_input(host_kind="echo", parameters=params))
@@ -98,6 +104,7 @@ class TestInProcessPythonScriptRuntime:
 
     @pytest.mark.asyncio
     async def test_print_stdout_captured(self) -> None:
+        """Verifies print stdout captured."""
         runtime = InProcessPythonScriptRuntime()
         result = await runtime.execute_script(_make_input(script_content="print('hello')"))
         assert result.exit_code == 0
@@ -105,6 +112,7 @@ class TestInProcessPythonScriptRuntime:
 
     @pytest.mark.asyncio
     async def test_multiple_print_lines(self) -> None:
+        """Verifies multiple print lines."""
         runtime = InProcessPythonScriptRuntime()
         script = "print('line1')\nprint('line2')"
         result = await runtime.execute_script(_make_input(script_content=script))
@@ -113,6 +121,7 @@ class TestInProcessPythonScriptRuntime:
 
     @pytest.mark.asyncio
     async def test_parameters_accessible_in_script(self) -> None:
+        """Verifies parameters accessible in script."""
         runtime = InProcessPythonScriptRuntime()
         script = "print(__params__['greeting'])"
         result = await runtime.execute_script(
@@ -122,6 +131,7 @@ class TestInProcessPythonScriptRuntime:
 
     @pytest.mark.asyncio
     async def test_script_id_in_result(self) -> None:
+        """Verifies script id in result."""
         runtime = InProcessPythonScriptRuntime()
         result = await runtime.execute_script(
             _make_input(script_id="my-py-script", script_content="pass")
@@ -130,6 +140,7 @@ class TestInProcessPythonScriptRuntime:
 
     @pytest.mark.asyncio
     async def test_runtime_error_captured_in_stderr(self) -> None:
+        """Verifies runtime error captured in stderr."""
         runtime = InProcessPythonScriptRuntime()
         script = "raise ValueError('bad input')"
         result = await runtime.execute_script(_make_input(script_content=script))
@@ -138,6 +149,7 @@ class TestInProcessPythonScriptRuntime:
 
     @pytest.mark.asyncio
     async def test_syntax_error_captured(self) -> None:
+        """Verifies syntax error captured."""
         runtime = InProcessPythonScriptRuntime()
         script = "def broken(:"
         result = await runtime.execute_script(_make_input(script_content=script))
@@ -159,21 +171,25 @@ class TestInProcessPythonScriptRuntime:
 
     @pytest.mark.asyncio
     async def test_validate_valid_python(self) -> None:
+        """Verifies validate valid python."""
         runtime = InProcessPythonScriptRuntime()
         assert await runtime.validate_script("x = 1 + 2", "in_process_python") is True
 
     @pytest.mark.asyncio
     async def test_validate_syntax_error(self) -> None:
+        """Verifies validate syntax error."""
         runtime = InProcessPythonScriptRuntime()
         assert await runtime.validate_script("def :(", "in_process_python") is False
 
     @pytest.mark.asyncio
     async def test_validate_wrong_host_kind(self) -> None:
+        """Verifies validate wrong host kind."""
         runtime = InProcessPythonScriptRuntime()
         assert await runtime.validate_script("x = 1", "local_process") is False
 
     @pytest.mark.asyncio
     async def test_empty_script_succeeds(self) -> None:
+        """Verifies empty script succeeds."""
         runtime = InProcessPythonScriptRuntime()
         result = await runtime.execute_script(_make_input(script_content=""))
         assert result.exit_code == 0
@@ -190,6 +206,7 @@ class TestLocalProcessScriptRuntime:
 
     @pytest.mark.asyncio
     async def test_echo_command_succeeds(self) -> None:
+        """Verifies echo command succeeds."""
         runtime = LocalProcessScriptRuntime()
         result = await runtime.execute_script(
             _make_input(
@@ -202,6 +219,7 @@ class TestLocalProcessScriptRuntime:
 
     @pytest.mark.asyncio
     async def test_exit_code_nonzero_on_failure(self) -> None:
+        """Verifies exit code nonzero on failure."""
         runtime = LocalProcessScriptRuntime()
         # 'exit 1' should return exit code 1.
         result = await runtime.execute_script(
@@ -227,6 +245,7 @@ class TestLocalProcessScriptRuntime:
 
     @pytest.mark.asyncio
     async def test_json_stdout_parsed_to_output_json(self) -> None:
+        """Verifies json stdout parsed to output json."""
         runtime = LocalProcessScriptRuntime()
         result = await runtime.execute_script(
             _make_input(
@@ -241,16 +260,19 @@ class TestLocalProcessScriptRuntime:
 
     @pytest.mark.asyncio
     async def test_validate_non_empty_script(self) -> None:
+        """Verifies validate non empty script."""
         runtime = LocalProcessScriptRuntime()
         assert await runtime.validate_script("echo hello", "local_process") is True
 
     @pytest.mark.asyncio
     async def test_validate_empty_script_returns_false(self) -> None:
+        """Verifies validate empty script returns false."""
         runtime = LocalProcessScriptRuntime()
         assert await runtime.validate_script("   ", "local_process") is False
 
     @pytest.mark.asyncio
     async def test_script_id_in_result(self) -> None:
+        """Verifies script id in result."""
         runtime = LocalProcessScriptRuntime()
         result = await runtime.execute_script(
             _make_input(
@@ -309,6 +331,7 @@ class TestDedupeAwareScriptRuntime:
         script_id: str = "script-1",
         run_id: str = "run-1",
     ) -> ScriptActivityInput:
+        """Make script input."""
         return ScriptActivityInput(
             run_id=run_id,
             action_id=action_id,
@@ -318,6 +341,7 @@ class TestDedupeAwareScriptRuntime:
         )
 
     def test_execute_calls_inner_runtime_on_first_call(self) -> None:
+        """Verifies execute calls inner runtime on first call."""
         from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
 
         inner = EchoScriptRuntime()
@@ -328,12 +352,16 @@ class TestDedupeAwareScriptRuntime:
         assert result.exit_code == 0
 
     def test_second_call_returns_noop_without_calling_inner(self) -> None:
+        """Verifies second call returns noop without calling inner."""
         from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
 
         calls: list[str] = []
 
         class _CountingInner:
+            """Test suite for  CountingInner."""
+
             async def execute_script(self, input_value: ScriptActivityInput) -> ScriptResult:
+                """Execute script."""
                 calls.append(input_value.action_id)
                 return ScriptResult(
                     script_id=input_value.script_id,
@@ -352,6 +380,7 @@ class TestDedupeAwareScriptRuntime:
         assert len(calls) == 1  # inner called only once
 
     def test_dedupe_key_is_acknowledged_after_success(self) -> None:
+        """Verifies dedupe key is acknowledged after success."""
         from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
 
         inner = EchoScriptRuntime()
@@ -365,12 +394,16 @@ class TestDedupeAwareScriptRuntime:
         assert record.state == "acknowledged"
 
     def test_different_action_ids_are_independent(self) -> None:
+        """Verifies different action ids are independent."""
         from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
 
         calls: list[str] = []
 
         class _CountingInner:
+            """Test suite for  CountingInner."""
+
             async def execute_script(self, input_value: ScriptActivityInput) -> ScriptResult:
+                """Execute script."""
                 calls.append(input_value.action_id)
                 return ScriptResult(
                     script_id=input_value.script_id,

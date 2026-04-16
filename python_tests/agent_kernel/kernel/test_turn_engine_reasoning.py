@@ -1,4 +1,4 @@
-"""Tests for TurnEngine reasoning state and optional action support."""
+"""Verifies for turnengine reasoning state and optional action support."""
 
 from __future__ import annotations
 
@@ -37,6 +37,7 @@ def _make_turn_engine(reasoning_loop: ReasoningLoop | None = None) -> TurnEngine
 
 
 def _make_turn_input(run_id: str = "run-1") -> TurnInput:
+    """Make turn input."""
     return TurnInput(
         run_id=run_id,
         through_offset=1,
@@ -46,6 +47,7 @@ def _make_turn_input(run_id: str = "run-1") -> TurnInput:
 
 
 def _make_action(run_id: str = "run-1") -> Action:
+    """Make action."""
     return Action(
         action_id="act-1",
         run_id=run_id,
@@ -64,6 +66,7 @@ class _SimpleExecutor:
         envelope: Any,
         execution_context: Any | None = None,
     ) -> dict[str, Any]:
+        """Executes the test operation."""
         return {"acknowledged": True}
 
 
@@ -82,7 +85,7 @@ def _make_echo_reasoning_loop(tool_bindings: list[str] | None = None) -> Reasoni
 
 
 class TestNoActionNoLoop:
-    """Tests for action=None without a reasoning loop."""
+    """Verifies for action=none without a reasoning loop."""
 
     def test_returns_completed_noop_when_no_action_and_no_loop(self) -> None:
         """Should return completed_noop when action=None and no reasoning_loop."""
@@ -111,7 +114,7 @@ class TestNoActionNoLoop:
 
 
 class TestReasoningStateEmitted:
-    """Tests that the 'reasoning' state is emitted when a loop is used."""
+    """Verifies that the 'reasoning' state is emitted when a loop is used."""
 
     def test_reasoning_state_emitted_in_events(self) -> None:
         """When using a reasoning loop, 'reasoning' state should appear in events."""
@@ -139,7 +142,7 @@ class TestReasoningStateEmitted:
 
 
 class TestReasoningLoopDispatches:
-    """Tests that the reasoning loop produces a dispatchable action."""
+    """Verifies that the reasoning loop produces a dispatchable action."""
 
     def test_reasoning_loop_with_tools_leads_to_dispatch(self) -> None:
         """When EchoLLMGateway returns a tool call, the engine should dispatch."""
@@ -148,6 +151,8 @@ class TestReasoningLoopDispatches:
         from agent_kernel.kernel.contracts import ContextWindow, ToolDefinition
 
         class ToolAwareContextPort:
+            """Test suite for ToolAwareContextPort."""
+
             async def assemble(
                 self,
                 run_id: str,
@@ -156,6 +161,7 @@ class TestReasoningLoopDispatches:
                 inference_config: InferenceConfig | None = None,
                 recovery_context: dict | None = None,
             ) -> ContextWindow:
+                """Assembles a test context payload."""
                 return ContextWindow(
                     system_instructions="",
                     tool_definitions=(
@@ -183,6 +189,8 @@ class TestReasoningLoopDispatches:
         from agent_kernel.kernel.contracts import ContextWindow, ToolDefinition
 
         class ToolAwareContextPort:
+            """Test suite for ToolAwareContextPort."""
+
             async def assemble(
                 self,
                 run_id: str,
@@ -191,6 +199,7 @@ class TestReasoningLoopDispatches:
                 inference_config: InferenceConfig | None = None,
                 recovery_context: dict | None = None,
             ) -> ContextWindow:
+                """Assembles a test context payload."""
                 return ContextWindow(
                     system_instructions="",
                     tool_definitions=(
@@ -223,7 +232,7 @@ class TestReasoningLoopDispatches:
 
 
 class TestBackwardCompatibility:
-    """Tests that passing an explicit action still works correctly."""
+    """Verifies that passing an explicit action still works correctly."""
 
     def test_explicit_action_dispatches_without_reasoning_loop(self) -> None:
         """Passing an explicit Action without a loop should dispatch normally."""
@@ -237,7 +246,10 @@ class TestBackwardCompatibility:
         called: list[bool] = []
 
         class SpyContextPort:
+            """Test suite for SpyContextPort."""
+
             async def assemble(self, *args: Any, **kwargs: Any) -> Any:
+                """Assembles a test context payload."""
                 called.append(True)
                 from agent_kernel.kernel.contracts import ContextWindow
 

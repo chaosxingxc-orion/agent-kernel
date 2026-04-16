@@ -130,6 +130,7 @@ class SQLiteTaskViewLog:
                 raise
 
     def _ensure_schema(self) -> None:
+        """Ensures required database schema objects exist."""
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS task_view_log (
               task_view_id TEXT PRIMARY KEY,
@@ -154,6 +155,7 @@ class SQLiteTaskViewLog:
 
 
 def _policy_versions_to_dict(pv: RunPolicyVersions | None) -> dict | None:
+    """Policy versions to dict."""
     if pv is None:
         return None
     return {
@@ -166,6 +168,7 @@ def _policy_versions_to_dict(pv: RunPolicyVersions | None) -> dict | None:
 
 
 def _row_to_record(row: sqlite3.Row) -> TaskViewRecord:
+    """Row to record."""
     pv_dict = json.loads(row["policy_versions_json"]) if row["policy_versions_json"] else None
     pv = RunPolicyVersions(**pv_dict) if pv_dict else None
     return TaskViewRecord(

@@ -329,6 +329,7 @@ class TemporalSDKWorkflowGateway(TemporalWorkflowGateway):
         parent_run_id: str,
         child_run_id: str,
     ) -> str:
+        """Workflow id for child."""
         return (
             f"{self._config.workflow_id_prefix}"
             f":{self._config.child_workflow_suffix}"

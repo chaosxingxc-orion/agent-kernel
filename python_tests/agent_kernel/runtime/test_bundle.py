@@ -1,4 +1,4 @@
-"""Tests for agent_kernel runtime bundle assembly and basic collaboration."""
+"""Verifies for agent kernel runtime bundle assembly and basic collaboration."""
 
 from __future__ import annotations
 
@@ -69,14 +69,17 @@ class _FakeHandle:
     )
 
     async def signal(self, signal_fn: str, payload: dict[str, Any]) -> None:
+        """Signals the fake workflow handle."""
         del signal_fn
         self.signal_calls.append(payload)
 
     async def query(self, query_fn: str) -> dict[str, Any]:
+        """Returns query data from the fake workflow handle."""
         del query_fn
         return self.query_result
 
     async def cancel(self, reason: str) -> None:
+        """Cancels the fake workflow handle."""
         del reason
 
 
@@ -93,10 +96,12 @@ class _FakeTemporalClient:
         run_input: Any,
         **kwargs: Any,
     ) -> None:
+        """Start workflow."""
         del workflow_fn
         self.started.append({"run_input": run_input, "kwargs": kwargs})
 
     def get_workflow_handle(self, workflow_id: str) -> _FakeHandle:
+        """Get workflow handle."""
         if workflow_id not in self.handles:
             self.handles[workflow_id] = _FakeHandle()
         return self.handles[workflow_id]
@@ -110,10 +115,12 @@ class _RecordingActivityGateway:
     mcp_requests: list[MCPActivityInput] = field(default_factory=list)
 
     async def execute_tool(self, request: ToolActivityInput) -> dict[str, Any]:
+        """Execute tool."""
         self.tool_requests.append(request)
         return {"route": "tool", "tool_name": request.tool_name}
 
     async def execute_mcp(self, request: MCPActivityInput) -> dict[str, Any]:
+        """Execute mcp."""
         self.mcp_requests.append(request)
         return {"route": "mcp", "server_name": request.server_name}
 
@@ -122,9 +129,11 @@ class _Session:
     """Minimal openjiuwen-like session object."""
 
     def __init__(self, session_id: str) -> None:
+        """Initializes _Session."""
         self._session_id = session_id
 
     def session_id(self) -> str:
+        """Session id."""
         return self._session_id
 
 
@@ -401,10 +410,12 @@ def test_bundle_builds_activity_gateway_from_handler_maps_and_routes() -> None:
     mcp_requests: list[MCPActivityInput] = []
 
     async def tool_handler(request: ToolActivityInput) -> dict[str, Any]:
+        """Tool handler."""
         tool_requests.append(request)
         return {"route": "tool", "tool_name": request.tool_name}
 
     async def mcp_handler(request: MCPActivityInput) -> dict[str, Any]:
+        """Mcp handler."""
         mcp_requests.append(request)
         return {"route": "mcp", "server_name": request.server_name}
 
@@ -593,7 +604,7 @@ def test_bundle_prod_safety_rejects_in_memory_decision_deduper(
 
 
 class TestBundleTaskRegistryWiring:
-    """Tests for task_registry field wiring in AgentKernelRuntimeBundle."""
+    """Verifies for task registry field wiring in agentkernelruntimebundle."""
 
     def test_bundle_has_task_registry_field(self) -> None:
         """Bundle should expose a non-None task_registry after build."""
@@ -629,7 +640,7 @@ class TestBundleTaskRegistryWiring:
 
 
 class TestProductionSafetyExecutorCheck:
-    """Tests for the no-op executor production safety guard."""
+    """Verifies for the no-op executor production safety guard."""
 
     def test_production_safety_rejects_no_op_executor(self, tmp_path: Path) -> None:
         """Prod safety should reject bundle built with no-op AsyncExecutorService."""

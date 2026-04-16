@@ -275,6 +275,8 @@ class AgentKernelRuntimeBundle:
             event_log_config: Optional event log backend
                 configuration.
             dedupe_config: Optional dedupe backend configuration.
+            decision_deduper_config: Optional decision-deduper backend
+                configuration.
             recovery_outcome_config: Optional recovery outcome store
                 backend configuration.
             turn_intent_log_config: Optional turn intent log backend
@@ -495,6 +497,8 @@ class AgentKernelRuntimeBundle:
             event_log_config: Optional event log backend
                 configuration.
             dedupe_config: Optional dedupe backend configuration.
+            decision_deduper_config: Optional decision-deduper backend
+                configuration.
             recovery_outcome_config: Optional recovery outcome store
                 backend configuration.
             turn_intent_log_config: Optional turn intent log backend

@@ -1,4 +1,4 @@
-"""Tests for tool/MCP adapter alignment with openjiuwen-like metadata."""
+"""Verifies for tool/mcp adapter alignment with openjiuwen-like metadata."""
 
 from __future__ import annotations
 
@@ -11,16 +11,21 @@ from agent_kernel.kernel.contracts import Action, EffectClass
 
 @dataclass(frozen=True, slots=True)
 class _FakeToolInfo:
+    """Test suite for  FakeToolInfo."""
+
     name: str
 
 
 @dataclass(frozen=True, slots=True)
 class _FakeMcpToolInfo:
+    """Test suite for  FakeMcpToolInfo."""
+
     name: str
     server_name: str
 
 
 def _make_action(input_json: dict | None = None) -> Action:
+    """Make action."""
     return Action(
         action_id="action-1",
         run_id="run-1",
@@ -31,6 +36,7 @@ def _make_action(input_json: dict | None = None) -> Action:
 
 
 def test_resolve_tool_from_openjiuwen_tool_info_object() -> None:
+    """Verifies resolve tool from openjiuwen tool info object."""
     adapter = AgentCoreToolMCPAdapter()
     binding = asyncio.run(
         adapter.resolve_tool(
@@ -45,6 +51,7 @@ def test_resolve_tool_from_openjiuwen_tool_info_object() -> None:
 
 
 def test_resolve_tool_falls_back_to_action_payload_and_type() -> None:
+    """Verifies resolve tool falls back to action payload and type."""
     adapter = AgentCoreToolMCPAdapter()
     payload_binding = asyncio.run(adapter.resolve_tool(_make_action({"name": "filesystem_read"})))
     fallback_binding = asyncio.run(adapter.resolve_tool(_make_action()))
@@ -54,6 +61,7 @@ def test_resolve_tool_falls_back_to_action_payload_and_type() -> None:
 
 
 def test_resolve_mcp_from_mcp_tool_info_object() -> None:
+    """Verifies resolve mcp from mcp tool info object."""
     adapter = AgentCoreToolMCPAdapter()
     binding = asyncio.run(
         adapter.resolve_mcp(
@@ -67,6 +75,7 @@ def test_resolve_mcp_from_mcp_tool_info_object() -> None:
 
 
 def test_resolve_mcp_from_action_payload() -> None:
+    """Verifies resolve mcp from action payload."""
     adapter = AgentCoreToolMCPAdapter()
     binding = asyncio.run(
         adapter.resolve_mcp(
@@ -86,6 +95,7 @@ def test_resolve_mcp_from_action_payload() -> None:
 
 
 def test_resolve_tool_normalizes_capability_scope() -> None:
+    """Verifies resolve tool normalizes capability scope."""
     adapter = AgentCoreToolMCPAdapter()
     binding = asyncio.run(
         adapter.resolve_tool(
@@ -109,6 +119,7 @@ def test_resolve_tool_normalizes_capability_scope() -> None:
 
 
 def test_resolve_tool_supports_single_capability_field() -> None:
+    """Verifies resolve tool supports single capability field."""
     adapter = AgentCoreToolMCPAdapter()
     binding = asyncio.run(
         adapter.resolve_tool(
@@ -125,6 +136,7 @@ def test_resolve_tool_supports_single_capability_field() -> None:
 
 
 def test_resolve_mcp_supports_schema_and_credential_fallback_from_mcp_payload() -> None:
+    """Verifies resolve mcp supports schema and credential fallback from mcp payload."""
     adapter = AgentCoreToolMCPAdapter()
     binding = asyncio.run(
         adapter.resolve_mcp(
@@ -148,6 +160,7 @@ def test_resolve_mcp_supports_schema_and_credential_fallback_from_mcp_payload() 
 
 
 def test_resolve_mcp_schema_prefers_metadata_and_falls_back_per_field() -> None:
+    """Verifies resolve mcp schema prefers metadata and falls back per field."""
     adapter = AgentCoreToolMCPAdapter()
     binding = asyncio.run(
         adapter.resolve_mcp(
@@ -174,6 +187,7 @@ def test_resolve_mcp_schema_prefers_metadata_and_falls_back_per_field() -> None:
 
 
 def test_resolve_mcp_supports_server_and_capability_alias_fields() -> None:
+    """Verifies resolve mcp supports server and capability alias fields."""
     adapter = AgentCoreToolMCPAdapter()
     nested_binding = asyncio.run(
         adapter.resolve_mcp(

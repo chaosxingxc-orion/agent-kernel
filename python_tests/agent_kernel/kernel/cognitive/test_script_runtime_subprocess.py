@@ -1,4 +1,4 @@
-"""Tests for SubprocessScriptRuntime — uses real subprocess, no mocking."""
+"""Verifies for subprocessscriptruntime — uses real subprocess, no mocking."""
 
 import asyncio
 
@@ -86,10 +86,12 @@ class TestValidateScript:
     """Unit tests for the validate_script helper."""
 
     def test_valid_script_returns_true(self) -> None:
+        """Verifies valid script returns true."""
         runtime = SubprocessScriptRuntime()
         assert asyncio.run(runtime.validate_script("x = 1 + 2", "subprocess")) is True
 
     def test_syntax_error_returns_false(self) -> None:
+        """Verifies syntax error returns false."""
         runtime = SubprocessScriptRuntime()
         assert asyncio.run(runtime.validate_script("def f(:", "subprocess")) is False
 

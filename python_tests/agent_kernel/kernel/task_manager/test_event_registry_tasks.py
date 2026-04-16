@@ -1,4 +1,4 @@
-"""Tests for task.* event types in KERNEL_EVENT_REGISTRY."""
+"""Verifies for task.* event types in kernel event registry."""
 
 from __future__ import annotations
 
@@ -21,18 +21,23 @@ _EXPECTED_TASK_EVENTS = {
 
 
 class TestTaskEventTypes:
+    """Test suite for TaskEventTypes."""
+
     def test_all_task_event_types_registered(self) -> None:
+        """Verifies all task event types registered."""
         known = KERNEL_EVENT_REGISTRY.known_types()
         missing = _EXPECTED_TASK_EVENTS - known
         assert not missing, f"Missing task event types: {missing}"
 
     @pytest.mark.parametrize("event_type", sorted(_EXPECTED_TASK_EVENTS))
     def test_task_event_type_has_descriptor(self, event_type: str) -> None:
+        """Verifies task event type has descriptor."""
         descriptor = KERNEL_EVENT_REGISTRY.get(event_type)
         assert descriptor is not None, f"No descriptor for {event_type}"
 
     @pytest.mark.parametrize("event_type", sorted(_EXPECTED_TASK_EVENTS))
     def test_task_event_authority_is_task_manager(self, event_type: str) -> None:
+        """Verifies task event authority is task manager."""
         descriptor = KERNEL_EVENT_REGISTRY.get(event_type)
         assert descriptor is not None
         assert descriptor.authority == "TaskManager", (
@@ -40,30 +45,36 @@ class TestTaskEventTypes:
         )
 
     def test_task_registered_affects_replay(self) -> None:
+        """Verifies task registered affects replay."""
         d = KERNEL_EVENT_REGISTRY.get("task.registered")
         assert d is not None
         assert d.affects_replay is True
 
     def test_task_completed_affects_replay(self) -> None:
+        """Verifies task completed affects replay."""
         d = KERNEL_EVENT_REGISTRY.get("task.completed")
         assert d is not None
         assert d.affects_replay is True
 
     def test_task_attempt_started_affects_replay(self) -> None:
+        """Verifies task attempt started affects replay."""
         d = KERNEL_EVENT_REGISTRY.get("task.attempt_started")
         assert d is not None
         assert d.affects_replay is True
 
     def test_task_event_descriptions_non_empty(self) -> None:
+        """Verifies task event descriptions non empty."""
         for event_type in _EXPECTED_TASK_EVENTS:
             d = KERNEL_EVENT_REGISTRY.get(event_type)
             assert d is not None
             assert d.description, f"{event_type} has empty description"
 
     def test_known_types_returns_frozenset(self) -> None:
+        """Verifies known types returns frozenset."""
         known = KERNEL_EVENT_REGISTRY.known_types()
         assert isinstance(known, frozenset)
 
     def test_task_events_are_subset_of_all_known(self) -> None:
+        """Verifies task events are subset of all known."""
         known = KERNEL_EVENT_REGISTRY.known_types()
         assert _EXPECTED_TASK_EVENTS.issubset(known)

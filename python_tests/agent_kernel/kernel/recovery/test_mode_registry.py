@@ -1,4 +1,4 @@
-"""Tests for RecoveryModeRegistry and KERNEL_RECOVERY_MODE_REGISTRY (P4a)."""
+"""Verifies for recoverymoderegistry and kernel recovery mode registry (p4a)."""
 
 from __future__ import annotations
 
@@ -11,28 +11,35 @@ from agent_kernel.kernel.recovery.mode_registry import (
 
 
 class TestRecoveryModeRegistry:
+    """Test suite for RecoveryModeRegistry."""
+
     def test_register_and_get(self) -> None:
+        """Verifies register and get."""
         registry = RecoveryModeRegistry()
         registry.register("my_action", "my_mode")
         assert registry.get("my_action") == "my_mode"
 
     def test_get_unknown_returns_none(self) -> None:
+        """Verifies get unknown returns none."""
         registry = RecoveryModeRegistry()
         assert registry.get("nonexistent") is None
 
     def test_duplicate_registration_raises(self) -> None:
+        """Verifies duplicate registration raises."""
         registry = RecoveryModeRegistry()
         registry.register("my_action", "mode_a")
         with pytest.raises(ValueError, match="my_action"):
             registry.register("my_action", "mode_b")
 
     def test_known_actions_returns_registered_actions(self) -> None:
+        """Verifies known actions returns registered actions."""
         registry = RecoveryModeRegistry()
         registry.register("action_x", "mode_x")
         registry.register("action_y", "mode_y")
         assert registry.known_actions() == frozenset({"action_x", "action_y"})
 
     def test_known_actions_is_immutable(self) -> None:
+        """Verifies known actions is immutable."""
         registry = RecoveryModeRegistry()
         actions = registry.known_actions()
         assert isinstance(actions, frozenset)
@@ -42,15 +49,19 @@ class TestKernelRecoveryModeRegistry:
     """Verifies that the built-in mappings are pre-populated."""
 
     def test_schedule_compensation_maps_to_static_compensation(self) -> None:
+        """Verifies schedule compensation maps to static compensation."""
         assert KERNEL_RECOVERY_MODE_REGISTRY.get("schedule_compensation") == "static_compensation"
 
     def test_notify_human_operator_maps_to_human_escalation(self) -> None:
+        """Verifies notify human operator maps to human escalation."""
         assert KERNEL_RECOVERY_MODE_REGISTRY.get("notify_human_operator") == "human_escalation"
 
     def test_abort_run_maps_to_abort(self) -> None:
+        """Verifies abort run maps to abort."""
         assert KERNEL_RECOVERY_MODE_REGISTRY.get("abort_run") == "abort"
 
     def test_unknown_planner_action_returns_none(self) -> None:
+        """Verifies unknown planner action returns none."""
         assert KERNEL_RECOVERY_MODE_REGISTRY.get("__nonexistent__") is None
 
 
@@ -64,8 +75,14 @@ class TestGateUsesRegistry:
         from agent_kernel.kernel.recovery.gate import PlannedRecoveryGateService
 
         class _BrokenPlanner:
+            """Test suite for  BrokenPlanner."""
+
             def build_plan_from_input(self, recovery_input: object) -> object:
+                """Build plan from input."""
+
                 class _FakePlan:
+                    """Test suite for  FakePlan."""
+
                     action = "__unknown_custom_action__"
                     reason = "test"
                     compensation_action_id = None

@@ -23,12 +23,16 @@ import pytest
 
 
 class TestSQLiteDedupeStoreWAL:
+    """Test suite for SQLiteDedupeStoreWAL."""
+
     def _make_file_store(self, tmp_path):
+        """Make file store."""
         from agent_kernel.kernel.persistence.sqlite_dedupe_store import SQLiteDedupeStore
 
         return SQLiteDedupeStore(str(tmp_path / "dedupe.db"))
 
     def test_journal_mode_is_wal(self, tmp_path) -> None:
+        """Verifies journal mode is wal."""
         store = self._make_file_store(tmp_path)
         cursor = store._conn.execute("PRAGMA journal_mode")
         mode = cursor.fetchone()[0]
@@ -63,23 +67,29 @@ class TestSQLiteDedupeStoreWAL:
 
 
 class TestTurnEngineActionTypeValidation:
+    """Test suite for TurnEngineActionTypeValidation."""
+
     def test_validate_action_type_imported_in_turn_engine(self) -> None:
+        """Verifies validate action type imported in turn engine."""
         import agent_kernel.kernel.turn_engine as te
 
         assert hasattr(te, "validate_action_type")
 
     def test_known_action_type_does_not_raise(self) -> None:
+        """Verifies known action type does not raise."""
         from agent_kernel.kernel.action_type_registry import validate_action_type
 
         # Known types should return True without raising.
         assert validate_action_type("tool_call") is True
 
     def test_unknown_action_type_returns_false_non_strict(self) -> None:
+        """Verifies unknown action type returns false non strict."""
         from agent_kernel.kernel.action_type_registry import validate_action_type
 
         assert validate_action_type("completely_unknown_xyz") is False
 
     def test_unknown_action_type_strict_raises(self) -> None:
+        """Verifies unknown action type strict raises."""
         from agent_kernel.kernel.action_type_registry import validate_action_type
 
         with pytest.raises(ValueError):
@@ -92,6 +102,8 @@ class TestTurnEngineActionTypeValidation:
 
 
 class TestTurnEngineRegisterPhase:
+    """Test suite for TurnEngineRegisterPhase."""
+
     def setup_method(self) -> None:
         """Reset _TURN_PHASES to original before each test to avoid state leak."""
         from agent_kernel.kernel.turn_engine import TurnEngine
@@ -99,14 +111,18 @@ class TestTurnEngineRegisterPhase:
         self._original = TurnEngine._TURN_PHASES
 
     def teardown_method(self) -> None:
+        """Teardown method."""
         from agent_kernel.kernel.turn_engine import TurnEngine
 
         TurnEngine._TURN_PHASES = self._original
 
     def test_register_phase_appends_by_default(self) -> None:
+        """Verifies register phase appends by default."""
         from agent_kernel.kernel.turn_engine import TurnEngine
 
         class _TestEngine(TurnEngine):
+            """Test suite for  TestEngine."""
+
             pass
 
         _TestEngine._TURN_PHASES = TurnEngine._TURN_PHASES  # fresh copy
@@ -114,9 +130,12 @@ class TestTurnEngineRegisterPhase:
         assert _TestEngine._TURN_PHASES[-1] == "_phase_custom"
 
     def test_register_phase_after(self) -> None:
+        """Verifies register phase after."""
         from agent_kernel.kernel.turn_engine import TurnEngine
 
         class _TestEngine(TurnEngine):
+            """Test suite for  TestEngine."""
+
             pass
 
         _TestEngine._TURN_PHASES = TurnEngine._TURN_PHASES
@@ -126,9 +145,12 @@ class TestTurnEngineRegisterPhase:
         assert idx_new == idx_snap + 1
 
     def test_register_phase_before(self) -> None:
+        """Verifies register phase before."""
         from agent_kernel.kernel.turn_engine import TurnEngine
 
         class _TestEngine(TurnEngine):
+            """Test suite for  TestEngine."""
+
             pass
 
         _TestEngine._TURN_PHASES = TurnEngine._TURN_PHASES
@@ -138,9 +160,12 @@ class TestTurnEngineRegisterPhase:
         assert idx_new == idx_exec - 1
 
     def test_register_phase_duplicate_raises(self) -> None:
+        """Verifies register phase duplicate raises."""
         from agent_kernel.kernel.turn_engine import TurnEngine
 
         class _TestEngine(TurnEngine):
+            """Test suite for  TestEngine."""
+
             pass
 
         _TestEngine._TURN_PHASES = TurnEngine._TURN_PHASES
@@ -149,9 +174,12 @@ class TestTurnEngineRegisterPhase:
             _TestEngine.register_phase("_phase_audit")
 
     def test_register_phase_unknown_anchor_raises(self) -> None:
+        """Verifies register phase unknown anchor raises."""
         from agent_kernel.kernel.turn_engine import TurnEngine
 
         class _TestEngine(TurnEngine):
+            """Test suite for  TestEngine."""
+
             pass
 
         _TestEngine._TURN_PHASES = TurnEngine._TURN_PHASES
@@ -159,9 +187,12 @@ class TestTurnEngineRegisterPhase:
             _TestEngine.register_phase("_phase_new", after="_phase_nonexistent")
 
     def test_register_phase_both_after_and_before_raises(self) -> None:
+        """Verifies register phase both after and before raises."""
         from agent_kernel.kernel.turn_engine import TurnEngine
 
         class _TestEngine(TurnEngine):
+            """Test suite for  TestEngine."""
+
             pass
 
         _TestEngine._TURN_PHASES = TurnEngine._TURN_PHASES
@@ -175,47 +206,60 @@ class TestTurnEngineRegisterPhase:
 
 
 class TestNewObservabilityHooks:
+    """Test suite for NewObservabilityHooks."""
+
     def _make_hook(self):
+        """Make hook."""
         from agent_kernel.runtime.observability_hooks import LoggingObservabilityHook
 
         return LoggingObservabilityHook(use_json=True, logger_name="test_r5d")
 
     def test_on_dedupe_hit_protocol_exists(self) -> None:
+        """Verifies on dedupe hit protocol exists."""
         from agent_kernel.kernel.contracts import ObservabilityHook
 
         assert hasattr(ObservabilityHook, "on_dedupe_hit")
 
     def test_on_reflection_round_protocol_exists(self) -> None:
+        """Verifies on reflection round protocol exists."""
         from agent_kernel.kernel.contracts import ObservabilityHook
 
         assert hasattr(ObservabilityHook, "on_reflection_round")
 
     def test_on_circuit_breaker_trip_protocol_exists(self) -> None:
+        """Verifies on circuit breaker trip protocol exists."""
         from agent_kernel.kernel.contracts import ObservabilityHook
 
         assert hasattr(ObservabilityHook, "on_circuit_breaker_trip")
 
     def test_logging_hook_on_dedupe_hit_does_not_raise(self) -> None:
+        """Verifies logging hook on dedupe hit does not raise."""
         hook = self._make_hook()
         hook.on_dedupe_hit(run_id="r1", action_id="a1", outcome="accepted")
 
     def test_logging_hook_on_reflection_round_does_not_raise(self) -> None:
+        """Verifies logging hook on reflection round does not raise."""
         hook = self._make_hook()
         hook.on_reflection_round(run_id="r1", action_id="a1", round_num=1, corrected=True)
 
     def test_logging_hook_on_circuit_breaker_trip_does_not_raise(self) -> None:
+        """Verifies logging hook on circuit breaker trip does not raise."""
         hook = self._make_hook()
         hook.on_circuit_breaker_trip(
             run_id="r1", effect_class="my_effect", failure_count=3, tripped=True
         )
 
     def test_composite_hook_fans_out_dedupe_hit(self) -> None:
+        """Verifies composite hook fans out dedupe hit."""
         from agent_kernel.runtime.observability_hooks import CompositeObservabilityHook
 
         calls: list[str] = []
 
         class _StubHook:
+            """Test suite for  StubHook."""
+
             def on_dedupe_hit(self, *, run_id, action_id, outcome):
+                """On dedupe hit."""
                 calls.append(outcome)
 
         composite = CompositeObservabilityHook(hooks=[_StubHook()])  # type: ignore[arg-type]
@@ -223,6 +267,7 @@ class TestNewObservabilityHooks:
         assert calls == ["duplicate"]
 
     def test_metrics_hook_has_new_attributes(self) -> None:
+        """Verifies metrics hook has new attributes."""
         from agent_kernel.runtime.observability_hooks import MetricsObservabilityHook
 
         hook = MetricsObservabilityHook()
@@ -238,7 +283,10 @@ class TestNewObservabilityHooks:
 
 
 class TestGateDedupeStoreAutoInject:
+    """Test suite for GateDedupeStoreAutoInject."""
+
     def test_gate_accepts_dedupe_store_param(self) -> None:
+        """Verifies gate accepts dedupe store param."""
         from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
         from agent_kernel.kernel.recovery.gate import PlannedRecoveryGateService
 
@@ -247,24 +295,32 @@ class TestGateDedupeStoreAutoInject:
         assert gate._dedupe_store is store
 
     def test_gate_dedupe_store_defaults_to_none(self) -> None:
+        """Verifies gate dedupe store defaults to none."""
         from agent_kernel.kernel.recovery.gate import PlannedRecoveryGateService
 
         gate = PlannedRecoveryGateService()
         assert gate._dedupe_store is None
 
     def test_gate_injects_dedupe_store_into_compensation_execute(self) -> None:
-        """When static_compensation is decided, compensation_registry.execute is
-        called with the gate's dedupe_store."""
+        """Verifies dedupe store propagation for static compensation.
+
+        When static_compensation is decided, compensation_registry.execute is
+        called with the gate's dedupe_store.
+        """
         from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
         from agent_kernel.kernel.recovery.gate import PlannedRecoveryGateService
 
         execute_calls: list[dict] = []
 
         class _StubRegistry:
+            """Test suite for  StubRegistry."""
+
             def has_handler(self, effect_class: str) -> bool:
+                """Has handler."""
                 return True
 
             async def execute(self, action: Any, *, dedupe_store=None, run_id=None) -> bool:
+                """Executes the test operation."""
                 execute_calls.append({"dedupe_store": dedupe_store, "run_id": run_id})
                 return True
 
@@ -282,7 +338,10 @@ class TestGateDedupeStoreAutoInject:
 
         # Patch planner to return static_compensation
         class _StaticPlanner:
+            """Test suite for  StaticPlanner."""
+
             def build_plan_from_input(self, input_value):
+                """Build plan from input."""
                 from agent_kernel.kernel.recovery.planner import RecoveryPlan
 
                 return RecoveryPlan(
@@ -324,7 +383,10 @@ class TestGateDedupeStoreAutoInject:
 
 
 class TestTurnTraceDedupOutcome:
+    """Test suite for TurnTraceDedupOutcome."""
+
     def test_turn_trace_has_dedupe_outcome_field(self) -> None:
+        """Verifies turn trace has dedupe outcome field."""
         from agent_kernel.kernel.event_export import TurnTrace
 
         trace = TurnTrace(
@@ -340,21 +402,25 @@ class TestTurnTraceDedupOutcome:
         assert trace.dedupe_outcome is None  # default
 
     def test_turn_trace_dedupe_outcome_accepted(self) -> None:
+        """Verifies turn trace dedupe outcome accepted."""
         from agent_kernel.kernel.event_export import _infer_dedupe_outcome
 
         assert _infer_dedupe_outcome(["turn.dispatched"]) == "accepted"
 
     def test_turn_trace_dedupe_outcome_degraded(self) -> None:
+        """Verifies turn trace dedupe outcome degraded."""
         from agent_kernel.kernel.event_export import _infer_dedupe_outcome
 
         assert _infer_dedupe_outcome(["turn.dispatched", "turn.dedupe_degraded"]) == "degraded"
 
     def test_turn_trace_dedupe_outcome_duplicate(self) -> None:
+        """Verifies turn trace dedupe outcome duplicate."""
         from agent_kernel.kernel.event_export import _infer_dedupe_outcome
 
         assert _infer_dedupe_outcome(["turn.dispatch_blocked"]) == "duplicate"
 
     def test_turn_trace_dedupe_outcome_none_for_noop(self) -> None:
+        """Verifies turn trace dedupe outcome none for noop."""
         from agent_kernel.kernel.event_export import _infer_dedupe_outcome
 
         assert _infer_dedupe_outcome(["turn.completed_noop"]) is None
@@ -366,7 +432,10 @@ class TestTurnTraceDedupOutcome:
 
 
 class TestCircuitBreakerTripHook:
+    """Test suite for CircuitBreakerTripHook."""
+
     def test_gate_emits_circuit_breaker_trip_on_failure(self) -> None:
+        """Verifies gate emits circuit breaker trip on failure."""
         from agent_kernel.kernel.contracts import (
             CircuitBreakerPolicy,
             RecoveryInput,
@@ -377,10 +446,14 @@ class TestCircuitBreakerTripHook:
         trips: list[dict] = []
 
         class _StubHook:
+            """Test suite for  StubHook."""
+
             def on_recovery_triggered(self, *, run_id, reason_code, mode):
+                """On recovery triggered."""
                 pass
 
             def on_circuit_breaker_trip(self, *, run_id, effect_class, failure_count, tripped):
+                """On circuit breaker trip."""
                 trips.append({"run_id": run_id, "tripped": tripped, "count": failure_count})
 
         policy = CircuitBreakerPolicy(threshold=5, half_open_after_ms=60_000)
@@ -390,7 +463,10 @@ class TestCircuitBreakerTripHook:
         )
 
         class _AbortPlanner:
+            """Test suite for  AbortPlanner."""
+
             def build_plan_from_input(self, input_value):
+                """Build plan from input."""
                 from agent_kernel.kernel.recovery.planner import RecoveryPlan
 
                 return RecoveryPlan(

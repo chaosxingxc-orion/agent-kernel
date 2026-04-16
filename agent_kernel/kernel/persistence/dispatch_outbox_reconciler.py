@@ -417,14 +417,19 @@ class DispatchOutboxReconciler:
         target = self._target_event_schema_version
 
         class _MigratingEventLogView:
+            """_MigratingEventLogView."""
+
             def __init__(self, inner: Any) -> None:
+                """Initializes _MigratingEventLogView."""
                 self._inner = inner
 
             async def load(self, run_id: str, after_offset: int = 0) -> list[Any]:
+                """Loads events using the legacy-compatible API shape."""
                 events = await self._inner.load(run_id, after_offset=after_offset)
                 return migrator.migrate_batch(list(events), target_version=target)
 
             def list_events(self) -> list[Any]:
+                """Lists events from the underlying event log."""
                 if hasattr(self._inner, "list_events"):
                     events = self._inner.list_events()
                     return migrator.migrate_batch(list(events), target_version=target)
@@ -435,6 +440,7 @@ class DispatchOutboxReconciler:
 
             @property
             def _events(self) -> list[Any]:
+                """Returns events currently stored in the migration view."""
                 return self.list_events()
 
         return _MigratingEventLogView(event_log)
@@ -519,6 +525,7 @@ class ScheduledOutboxReconciler:
             return self._task
 
         async def _loop() -> None:
+            """Runs the background loop until stopped."""
             try:
                 while True:
                     await asyncio.sleep(self._interval_s)

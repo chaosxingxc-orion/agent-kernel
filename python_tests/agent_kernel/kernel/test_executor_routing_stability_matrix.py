@@ -16,19 +16,24 @@ _CASE_COUNT = 1000
 
 @dataclass(slots=True)
 class _Gateway:
+    """Test suite for  Gateway."""
+
     tool_requests: list[ToolActivityInput] = field(default_factory=list)
     mcp_requests: list[MCPActivityInput] = field(default_factory=list)
 
     async def execute_tool(self, request: ToolActivityInput) -> dict[str, Any]:
+        """Execute tool."""
         self.tool_requests.append(request)
         return {"route": "tool"}
 
     async def execute_mcp(self, request: MCPActivityInput) -> dict[str, Any]:
+        """Execute mcp."""
         self.mcp_requests.append(request)
         return {"route": "mcp"}
 
 
 def _action_for(seed: int) -> Action:
+    """Action for."""
     if seed % 3 == 0:
         return Action(
             action_id=f"a-{seed}",

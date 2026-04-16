@@ -24,11 +24,13 @@ _temporal_probe_result: tuple[bool, str] | None = None
 
 
 def _should_consider_temporal_integration(item: pytest.Item) -> bool:
+    """Should consider temporal integration."""
     node_path = str(item.nodeid).replace("\\", "/")
     return any(hint in node_path for hint in _TEMPORAL_INTEGRATION_HINTS)
 
 
 def _temporal_probe() -> tuple[bool, str]:
+    """Temporal probe."""
     global _temporal_probe_result
     if _temporal_probe_result is not None:
         return _temporal_probe_result
@@ -48,6 +50,7 @@ def _temporal_probe() -> tuple[bool, str]:
         return _temporal_probe_result
 
     async def _probe_once() -> None:
+        """Probe once."""
         async with await WorkflowEnvironment.start_time_skipping():
             return None
 
@@ -60,6 +63,7 @@ def _temporal_probe() -> tuple[bool, str]:
 
 
 def pytest_collection_modifyitems(config: Any, items: list[pytest.Item]) -> None:
+    """Pytest collection modifyitems."""
     del config
     supported, reason = _temporal_probe()
     if supported:

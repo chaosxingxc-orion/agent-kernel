@@ -34,6 +34,7 @@ class IdempotencyKeyPolicy:
 
     @staticmethod
     def _content_hash(action: Action, snapshot_hash: str) -> str:
+        """Returns a stable content hash for idempotency inputs."""
         input_json_value = getattr(action, "input_json", None)
         if not isinstance(input_json_value, dict):
             input_json_value = {}

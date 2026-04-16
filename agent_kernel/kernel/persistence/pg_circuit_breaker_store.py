@@ -69,6 +69,7 @@ class PostgresCircuitBreakerStore(CircuitBreakerStore):
         return self._bridge.run_sync(self._list_effect_classes())
 
     async def _ensure_schema(self) -> None:
+        """Ensures required database schema objects exist."""
         pool = self._bridge.pool
         async with pool.acquire() as conn:
             await conn.execute(
@@ -82,6 +83,7 @@ class PostgresCircuitBreakerStore(CircuitBreakerStore):
             )
 
     async def _get_row(self, effect_class: str) -> Any | None:
+        """Fetches one persisted row for the requested key."""
         pool = self._bridge.pool
         async with pool.acquire() as conn:
             return await conn.fetchrow(
@@ -94,6 +96,7 @@ class PostgresCircuitBreakerStore(CircuitBreakerStore):
             )
 
     async def _record_failure(self, effect_class: str) -> int:
+        """Records a failed probe attempt for a service."""
         now = time.time()
         pool = self._bridge.pool
         async with pool.acquire() as conn:
@@ -116,6 +119,7 @@ class PostgresCircuitBreakerStore(CircuitBreakerStore):
         return int(row["failure_count"])
 
     async def _reset(self, effect_class: str) -> None:
+        """Resets failure counters for a service."""
         pool = self._bridge.pool
         async with pool.acquire() as conn:
             await conn.execute(
@@ -124,6 +128,7 @@ class PostgresCircuitBreakerStore(CircuitBreakerStore):
             )
 
     async def _list_effect_classes(self) -> list[str]:
+        """List effect classes."""
         pool = self._bridge.pool
         async with pool.acquire() as conn:
             rows = await conn.fetch(

@@ -52,6 +52,7 @@ class _SharedConnectionEventLog:
     """
 
     def __init__(self, conn: sqlite3.Connection, lock: threading.Lock) -> None:
+        """Initializes _SharedConnectionEventLog."""
         self._conn = conn
         self._lock = lock
 
@@ -128,6 +129,7 @@ class _SharedConnectionEventLog:
     # --- private helpers ---
 
     def _next_offset(self, run_id: str) -> int:
+        """Allocates the next commit offset."""
         cursor = self._conn.execute(
             "SELECT COALESCE(MAX(commit_offset), 0) FROM colocated_runtime_events "
             "WHERE stream_run_id = ?",
@@ -136,6 +138,7 @@ class _SharedConnectionEventLog:
         return int(cursor.fetchone()[0]) + 1
 
     def _insert_commit_row(self, commit: ActionCommit) -> int:
+        """Insert commit row."""
         cursor = self._conn.execute(
             """
             INSERT INTO colocated_action_commits (
@@ -153,6 +156,7 @@ class _SharedConnectionEventLog:
         events: list[RuntimeEvent],
         start_offset: int,
     ) -> None:
+        """Insert event rows."""
         query = """
             INSERT INTO colocated_runtime_events (
                 commit_sequence, event_index, stream_run_id, event_run_id,
@@ -184,6 +188,7 @@ class _SharedConnectionEventLog:
             )
 
     def _row_to_event(self, row: sqlite3.Row) -> RuntimeEvent:
+        """Row to event."""
         payload_raw = row["payload_json"]
         payload = json.loads(payload_raw) if payload_raw is not None else None
         return RuntimeEvent(
@@ -214,6 +219,7 @@ class _SharedConnectionDedupeStore:
     """
 
     def __init__(self, conn: sqlite3.Connection, lock: threading.Lock) -> None:
+        """Initializes _SharedConnectionDedupeStore."""
         self._conn = conn
         self._lock = lock
 
@@ -536,6 +542,7 @@ class _SharedConnectionDedupeStore:
     # --- private helpers (caller must hold lock) ---
 
     def _get(self, key: str) -> DedupeRecord | None:
+        """Gets a record by identifier."""
         cursor = self._conn.execute(
             """
             SELECT dispatch_idempotency_key, operation_fingerprint,
@@ -558,6 +565,7 @@ class _SharedConnectionDedupeStore:
         )
 
     def _require(self, key: str) -> DedupeRecord:
+        """Requires that a record exists and returns it."""
         with self._lock:
             record = self._get(key)
         if record is None:
@@ -571,6 +579,7 @@ class _SharedConnectionDedupeStore:
         peer_operation_id: str | None,
         external_ack_ref: str | None,
     ) -> None:
+        """Updates selected fields and returns the latest record."""
         with self._lock:
             cursor = self._conn.execute(
                 """

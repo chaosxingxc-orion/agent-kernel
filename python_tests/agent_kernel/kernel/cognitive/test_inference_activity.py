@@ -1,4 +1,4 @@
-"""Tests for execute_inference activity logic."""
+"""Verifies for execute inference activity logic."""
 
 from __future__ import annotations
 
@@ -201,7 +201,7 @@ class TestExecuteInferenceTokenBudget:
 
 
 class TestExecuteInferenceErrorPropagation:
-    """Tests that gateway errors propagate unchanged."""
+    """Verifies that gateway errors propagate unchanged."""
 
     def test_gateway_exception_propagates(self) -> None:
         """Exceptions from gateway.infer() should propagate to the caller."""

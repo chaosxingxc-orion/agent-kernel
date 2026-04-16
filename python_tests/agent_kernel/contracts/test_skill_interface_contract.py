@@ -9,7 +9,6 @@ import agent_kernel.skills.contracts as skill_contracts
 
 def test_skill_request_and_execution_input_match_interface_contract() -> None:
     """Skill invocation DTOs must preserve documented request fields."""
-
     assert [field.name for field in fields(skill_contracts.SkillRequest)] == [
         "run_id",
         "action_id",
@@ -36,7 +35,6 @@ def test_skill_request_and_execution_input_match_interface_contract() -> None:
 
 def test_managed_skill_runtime_extension_is_defined() -> None:
     """ManagedSkillRuntime should expose validate/warmup/shutdown hooks."""
-
     managed_runtime = skill_contracts.ManagedSkillRuntime
     for method_name in ("execute", "validate", "warmup", "shutdown"):
         assert hasattr(managed_runtime, method_name), method_name

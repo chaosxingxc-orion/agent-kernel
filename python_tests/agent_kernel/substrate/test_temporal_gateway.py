@@ -1,4 +1,4 @@
-"""Tests for Temporal SDK gateway request/response mapping behavior."""
+"""Verifies for temporal sdk gateway request/response mapping behavior."""
 
 from __future__ import annotations
 
@@ -24,28 +24,36 @@ from agent_kernel.substrate.temporal.gateway import (
 
 @dataclass(slots=True)
 class _FakeHandle:
+    """Test suite for  FakeHandle."""
+
     query_result: Any = None
     signal_calls: list[tuple[Any, Any]] = field(default_factory=list)
     query_calls: list[Any] = field(default_factory=list)
     cancel_calls: list[str] = field(default_factory=list)
 
     async def signal(self, signal_fn: Any, payload: Any) -> None:
+        """Signals the fake workflow handle."""
         self.signal_calls.append((signal_fn, payload))
 
     async def query(self, query_fn: Any) -> Any:
+        """Returns query data from the fake workflow handle."""
         self.query_calls.append(query_fn)
         return self.query_result
 
     async def cancel(self, reason: str) -> None:
+        """Cancels the fake workflow handle."""
         self.cancel_calls.append(reason)
 
 
 @dataclass(slots=True)
 class _FakeClient:
+    """Test suite for  FakeClient."""
+
     start_calls: list[dict[str, Any]] = field(default_factory=list)
     handles: dict[str, _FakeHandle] = field(default_factory=dict)
 
     async def start_workflow(self, workflow_fn: Any, run_input: Any, **kwargs: Any) -> None:
+        """Start workflow."""
         self.start_calls.append(
             {
                 "workflow_fn": workflow_fn,
@@ -55,6 +63,7 @@ class _FakeClient:
         )
 
     def get_workflow_handle(self, workflow_id: str) -> _FakeHandle:
+        """Get workflow handle."""
         if workflow_id not in self.handles:
             self.handles[workflow_id] = _FakeHandle()
         return self.handles[workflow_id]
@@ -62,20 +71,26 @@ class _FakeClient:
 
 @dataclass(slots=True)
 class _NoReasonCancelHandle:
+    """Test suite for  NoReasonCancelHandle."""
+
     cancel_called: bool = False
 
     async def signal(self, signal_fn: Any, payload: Any) -> None:
+        """Signals the fake workflow handle."""
         del signal_fn, payload
 
     async def query(self, query_fn: Any) -> Any:
+        """Returns query data from the fake workflow handle."""
         del query_fn
         return None
 
     async def cancel(self) -> None:
+        """Cancels the fake workflow handle."""
         self.cancel_called = True
 
 
 def test_start_workflow_builds_workflow_id_and_task_queue() -> None:
+    """Verifies start workflow builds workflow id and task queue."""
     client = _FakeClient()
     gateway = TemporalSDKWorkflowGateway(
         client,
@@ -101,6 +116,7 @@ def test_start_workflow_builds_workflow_id_and_task_queue() -> None:
 
 
 def test_signal_and_cancel_route_to_workflow_handle() -> None:
+    """Verifies signal and cancel route to workflow handle."""
     client = _FakeClient()
     gateway = TemporalSDKWorkflowGateway(client)
 
@@ -136,6 +152,7 @@ def test_cancel_workflow_falls_back_when_sdk_handle_does_not_accept_reason() -> 
 
 
 def test_query_projection_accepts_kernel_projection_payload() -> None:
+    """Verifies query projection accepts kernel projection payload."""
     client = _FakeClient()
     handle = client.get_workflow_handle("run:run-2")
     handle.query_result = RunProjection(
@@ -154,6 +171,7 @@ def test_query_projection_accepts_kernel_projection_payload() -> None:
 
 
 def test_query_projection_accepts_query_run_response_payload() -> None:
+    """Verifies query projection accepts query run response payload."""
     client = _FakeClient()
     handle = client.get_workflow_handle("run:run-3")
     handle.query_result = QueryRunResponse(
@@ -175,6 +193,7 @@ def test_query_projection_accepts_query_run_response_payload() -> None:
 
 
 def test_start_child_workflow_uses_child_workflow_id_namespace() -> None:
+    """Verifies start child workflow uses child workflow id namespace."""
     client = _FakeClient()
     gateway = TemporalSDKWorkflowGateway(client)
 
@@ -207,6 +226,7 @@ def test_stream_run_events_raises_when_query_hook_not_configured() -> None:
     gateway = TemporalSDKWorkflowGateway(client)
 
     async def _collect() -> list[Any]:
+        """Collects values for assertion."""
         collected_events: list[Any] = []
         async for event in gateway.stream_run_events("run-stream-2"):
             collected_events.append(event)
@@ -255,6 +275,7 @@ def test_stream_run_events_uses_query_hook_and_normalizes_payload() -> None:
     )
 
     async def _collect() -> list[RuntimeEvent]:
+        """Collects values for assertion."""
         collected_events: list[RuntimeEvent] = []
         async for event in gateway.stream_run_events("run-stream-3"):
             collected_events.append(event)

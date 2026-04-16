@@ -99,6 +99,7 @@ class SQLiteDedupeStore:
             return self._reserve_locked(envelope)
 
     def _reserve_locked(self, envelope: IdempotencyEnvelope) -> DedupeReservation:
+        """Reserves a dedupe key while holding the DB lock."""
         self._conn.execute("BEGIN IMMEDIATE")
         try:
             existing_record = self.get(envelope.dispatch_idempotency_key)

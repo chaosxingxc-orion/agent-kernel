@@ -1,4 +1,4 @@
-"""Tests for context adapter mapping between platform and kernel runtime."""
+"""Verifies for context adapter mapping between platform and kernel runtime."""
 
 from __future__ import annotations
 

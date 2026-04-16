@@ -1,4 +1,4 @@
-"""Tests for v6.4 remote-service idempotency default policy."""
+"""Verifies for v6.4 remote-service idempotency default policy."""
 
 from __future__ import annotations
 

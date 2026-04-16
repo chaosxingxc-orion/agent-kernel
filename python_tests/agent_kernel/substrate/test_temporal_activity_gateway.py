@@ -1,4 +1,4 @@
-"""Tests for Temporal activity gateway callable-based adapter behavior."""
+"""Verifies for temporal activity gateway callable-based adapter behavior."""
 
 from __future__ import annotations
 
@@ -35,7 +35,6 @@ class _CallRecorder:
 
 def _make_action() -> Action:
     """Builds one minimal valid Action contract fixture for tests."""
-
     return Action(
         action_id="action-1",
         run_id="run-1",
@@ -46,7 +45,6 @@ def _make_action() -> Action:
 
 def _make_projection() -> RunProjection:
     """Builds one minimal valid RunProjection fixture for tests."""
-
     return RunProjection(
         run_id="run-1",
         lifecycle_state="ready",
@@ -58,32 +56,36 @@ def _make_projection() -> RunProjection:
 
 def test_activity_gateway_executes_registered_handlers() -> None:
     """Gateway should execute tool and MCP handlers only from explicit registry."""
-
     recorder = _CallRecorder()
 
     async def admission_activity(
         payload: AdmissionActivityInput,
     ) -> AdmissionResult:
+        """Admission activity."""
         recorder.calls.append(("admission", payload))
         return AdmissionResult(admitted=True, reason_code="ok")
 
     async def tool_activity(payload: ToolActivityInput) -> dict[str, Any]:
+        """Tool activity."""
         recorder.calls.append(("tool", payload))
         return {"tool": payload.tool_name, "ok": True}
 
     async def mcp_activity(payload: MCPActivityInput) -> dict[str, Any]:
+        """Mcp activity."""
         recorder.calls.append(("mcp", payload))
         return {"server": payload.server_name, "operation": payload.operation}
 
     async def verification_activity(
         payload: VerificationActivityInput,
     ) -> dict[str, Any]:
+        """Verification activity."""
         recorder.calls.append(("verification", payload))
         return {"kind": payload.verification_kind, "passed": True}
 
     async def reconciliation_activity(
         payload: ReconciliationActivityInput,
     ) -> dict[str, Any]:
+        """Reconciliation activity."""
         recorder.calls.append(("reconciliation", payload))
         return {"reconciled": payload.expected_state == payload.observed_state}
 
@@ -166,7 +168,6 @@ def test_activity_gateway_executes_registered_handlers() -> None:
 
 def test_activity_gateway_raises_for_unregistered_tool_handler() -> None:
     """Gateway should fail fast when a tool handler was not registered."""
-
     gateway = TemporalSDKActivityGateway(
         TemporalActivityBindings(
             admission_activity=lambda _payload: AdmissionResult(
@@ -197,7 +198,6 @@ def test_activity_gateway_raises_for_unregistered_tool_handler() -> None:
 
 def test_activity_gateway_raises_for_unregistered_mcp_handler() -> None:
     """Gateway should fail fast when an MCP handler was not registered."""
-
     gateway = TemporalSDKActivityGateway(
         TemporalActivityBindings(
             admission_activity=lambda _payload: AdmissionResult(

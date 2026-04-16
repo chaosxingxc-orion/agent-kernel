@@ -106,6 +106,7 @@ class SQLiteRecoveryOutcomeStore(RecoveryOutcomeStore):
         )
 
     def _ensure_schema(self) -> None:
+        """Ensures required database schema objects exist."""
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS recovery_outcome (

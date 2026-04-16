@@ -1,4 +1,4 @@
-"""Tests for facade workflow gateway signal compatibility adapter."""
+"""Verifies for facade workflow gateway signal compatibility adapter."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from agent_kernel.kernel.contracts import SignalRunRequest
 
 
 def _signal_request() -> SignalRunRequest:
+    """Signal request."""
     return SignalRunRequest(
         run_id="run-1",
         signal_type="tool_result",
@@ -21,6 +22,7 @@ def _signal_request() -> SignalRunRequest:
 
 
 def test_adapter_prefers_signal_workflow_when_available() -> None:
+    """Verifies adapter prefers signal workflow when available."""
     gateway = MagicMock()
     gateway.signal_workflow = AsyncMock()
     gateway.signal_run = AsyncMock()
@@ -33,6 +35,7 @@ def test_adapter_prefers_signal_workflow_when_available() -> None:
 
 
 def test_adapter_falls_back_to_signal_run_when_signal_workflow_not_awaitable() -> None:
+    """Verifies adapter falls back to signal run when signal workflow not awaitable."""
     gateway = MagicMock()
     # MagicMock default call returns non-awaitable sentinel.
     gateway.signal_workflow = MagicMock()
@@ -46,6 +49,7 @@ def test_adapter_falls_back_to_signal_run_when_signal_workflow_not_awaitable() -
 
 
 def test_adapter_raises_when_gateway_has_no_compatible_signal_api() -> None:
+    """Verifies adapter raises when gateway has no compatible signal api."""
     gateway = MagicMock()
     del gateway.signal_workflow
     del gateway.signal_run

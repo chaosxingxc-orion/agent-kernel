@@ -45,6 +45,7 @@ class KafkaEventExportPort:
         self._producer = None
 
     async def _ensure_producer(self) -> Any:
+        """Lazily initializes and returns the Kafka producer."""
         if self._producer is not None:
             return self._producer
         try:

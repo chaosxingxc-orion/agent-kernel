@@ -23,7 +23,10 @@ import pytest
 
 
 class TestMetricsHookAdmissionDispatch:
+    """Test suite for MetricsHookAdmissionDispatch."""
+
     def test_on_admission_evaluated_no_op_without_otel(self) -> None:
+        """Verifies on admission evaluated no op without otel."""
         from agent_kernel.runtime.observability_hooks import MetricsObservabilityHook
 
         hook = MetricsObservabilityHook()
@@ -31,6 +34,7 @@ class TestMetricsHookAdmissionDispatch:
         hook.on_admission_evaluated(run_id="r1", action_id="a1", admitted=True, latency_ms=5)
 
     def test_on_dispatch_attempted_no_op_without_otel(self) -> None:
+        """Verifies on dispatch attempted no op without otel."""
         from agent_kernel.runtime.observability_hooks import MetricsObservabilityHook
 
         hook = MetricsObservabilityHook()
@@ -39,6 +43,7 @@ class TestMetricsHookAdmissionDispatch:
         )
 
     def test_metrics_hook_has_admission_and_dispatch_instruments(self) -> None:
+        """Verifies metrics hook has admission and dispatch instruments."""
         from agent_kernel.runtime.observability_hooks import MetricsObservabilityHook
 
         hook = MetricsObservabilityHook()
@@ -48,12 +53,14 @@ class TestMetricsHookAdmissionDispatch:
         assert hasattr(hook, "_dispatch_attempt_latency")
 
     def test_on_admission_evaluated_false_no_op_without_otel(self) -> None:
+        """Verifies on admission evaluated false no op without otel."""
         from agent_kernel.runtime.observability_hooks import MetricsObservabilityHook
 
         hook = MetricsObservabilityHook()
         hook.on_admission_evaluated(run_id="r1", action_id="a1", admitted=False, latency_ms=3)
 
     def test_logging_hook_on_admission_evaluated_unchanged(self) -> None:
+        """Verifies logging hook on admission evaluated unchanged."""
         from agent_kernel.runtime.observability_hooks import LoggingObservabilityHook
 
         hook = LoggingObservabilityHook(use_json=True, logger_name="test_r7a")
@@ -69,6 +76,8 @@ class TestMetricsHookAdmissionDispatch:
 
 
 class TestReflectionExhaustionEscalation:
+    """Test suite for ReflectionExhaustionEscalation."""
+
     def test_fallback_decision_escalates_when_escalate_on_exhaustion_true(self) -> None:
         """_fallback_decision returns human_escalation when escalate_on_exhaustion=True."""
         from agent_kernel.kernel.contracts import (
@@ -150,11 +159,17 @@ class TestReflectionExhaustionEscalation:
         policy = ReflectionPolicy(max_rounds=2, reflection_timeout_ms=5_000)
 
         class _StubLoop:
+            """Test suite for  StubLoop."""
+
             async def run_once(self, **kw: Any) -> Any:
+                """Run once."""
                 pass
 
         class _StubBuilder:
+            """Test suite for  StubBuilder."""
+
             def build(self, **kw: Any) -> Any:
+                """Builds a test fixture value."""
                 pass
 
         gate = PlannedRecoveryGateService(
@@ -198,11 +213,17 @@ class TestReflectionExhaustionEscalation:
         )
 
         class _StubLoop:
+            """Test suite for  StubLoop."""
+
             async def run_once(self, **kw: Any) -> Any:
+                """Run once."""
                 pass
 
         class _StubBuilder:
+            """Test suite for  StubBuilder."""
+
             def build(self, **kw: Any) -> Any:
+                """Builds a test fixture value."""
                 pass
 
         gate = PlannedRecoveryGateService(
@@ -236,13 +257,17 @@ class TestReflectionExhaustionEscalation:
 
 
 class TestBranchRollbackIntentEvent:
+    """Test suite for BranchRollbackIntentEvent."""
+
     def test_branch_rollback_intent_registered_in_registry(self) -> None:
+        """Verifies branch rollback intent registered in registry."""
         from agent_kernel.kernel.event_registry import KERNEL_EVENT_REGISTRY
 
         descriptor = KERNEL_EVENT_REGISTRY.get("turn.branch_rollback_intent")
         assert descriptor is not None
 
     def test_branch_rollback_intent_is_diagnostic(self) -> None:
+        """Verifies branch rollback intent is diagnostic."""
         from agent_kernel.kernel.event_registry import KERNEL_EVENT_REGISTRY
 
         descriptor = KERNEL_EVENT_REGISTRY.get("turn.branch_rollback_intent")
@@ -250,6 +275,7 @@ class TestBranchRollbackIntentEvent:
         assert descriptor.affects_replay is False
 
     def test_branch_rollback_intent_authority_is_executor(self) -> None:
+        """Verifies branch rollback intent authority is executor."""
         from agent_kernel.kernel.event_registry import KERNEL_EVENT_REGISTRY
 
         descriptor = KERNEL_EVENT_REGISTRY.get("turn.branch_rollback_intent")
@@ -263,6 +289,8 @@ class TestBranchRollbackIntentEvent:
 
 
 class TestCrashReplayDeterminism:
+    """Test suite for CrashReplayDeterminism."""
+
     def test_executor_raise_produces_unknown_effect_state(self) -> None:
         """R6d guarantee: executor exception leaves dedupe in unknown_effect."""
         from agent_kernel.kernel.capability_snapshot import (
@@ -274,18 +302,25 @@ class TestCrashReplayDeterminism:
         from agent_kernel.kernel.turn_engine import TurnEngine, TurnInput, _build_turn_identity
 
         class _AlwaysAdmit:
+            """Test suite for  AlwaysAdmit."""
+
             async def admit(self, action: Any, snapshot: Any) -> bool:
+                """Admit."""
                 return True
 
             async def check(self, action: Any, snapshot: Any) -> bool:
+                """Checks the test assertion condition."""
                 return True
 
         store = InMemoryDedupeStore()
 
         class _RaisingExecutor:
+            """Test suite for  RaisingExecutor."""
+
             async def execute(
                 self, action: Any, snapshot: Any, envelope: Any, execution_context: Any = None
             ) -> dict:
+                """Executes the test operation."""
                 raise RuntimeError("simulated crash")
 
         engine = TurnEngine(
@@ -335,16 +370,23 @@ class TestCrashReplayDeterminism:
         from agent_kernel.kernel.turn_engine import TurnEngine, TurnInput, _build_turn_identity
 
         class _AlwaysAdmit:
+            """Test suite for  AlwaysAdmit."""
+
             async def admit(self, action: Any, snapshot: Any) -> bool:
+                """Admit."""
                 return True
 
             async def check(self, action: Any, snapshot: Any) -> bool:
+                """Checks the test assertion condition."""
                 return True
 
         class _AlwaysAckExecutor:
+            """Test suite for  AlwaysAckExecutor."""
+
             async def execute(
                 self, action: Any, snapshot: Any, envelope: Any, execution_context: Any = None
             ) -> dict:
+                """Executes the test operation."""
                 return {"acknowledged": True}
 
         action = MagicMock(spec=Action)
@@ -398,6 +440,8 @@ class TestCrashReplayDeterminism:
 
 
 class TestSQLiteDedupeStoreWALCheckpoint:
+    """Test suite for SQLiteDedupeStoreWALCheckpoint."""
+
     def test_close_performs_wal_checkpoint(self, tmp_path) -> None:
         """close() should run PRAGMA wal_checkpoint(TRUNCATE) before closing."""
         from agent_kernel.kernel.persistence.sqlite_dedupe_store import SQLiteDedupeStore
@@ -419,7 +463,7 @@ class TestSQLiteDedupeStoreWALCheckpoint:
         store.close()
 
     def test_close_does_not_raise_on_double_close(self, tmp_path) -> None:
-        """double close() should not raise (best-effort checkpoint)."""
+        """Double close() should not raise (best-effort checkpoint)."""
         from agent_kernel.kernel.persistence.sqlite_dedupe_store import SQLiteDedupeStore
 
         store = SQLiteDedupeStore(str(tmp_path / "dbl.db"))
@@ -444,20 +488,30 @@ class TestSQLiteDedupeStoreWALCheckpoint:
 
 
 class TestTurnEnginePhaseTimeout:
+    """Test suite for TurnEnginePhaseTimeout."""
+
     def test_phase_timeout_ms_accepted_by_constructor(self) -> None:
+        """Verifies phase timeout ms accepted by constructor."""
         from agent_kernel.kernel.capability_snapshot import CapabilitySnapshotBuilder
         from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
         from agent_kernel.kernel.turn_engine import TurnEngine
 
         class _AlwaysAdmit:
+            """Test suite for  AlwaysAdmit."""
+
             async def admit(self, a: Any, s: Any) -> bool:
+                """Admit."""
                 return True
 
             async def check(self, a: Any, s: Any) -> bool:
+                """Checks the test assertion condition."""
                 return True
 
         class _AlwaysAck:
+            """Test suite for  AlwaysAck."""
+
             async def execute(self, a: Any, s: Any, e: Any, execution_context: Any = None) -> dict:
+                """Executes the test operation."""
                 return {"acknowledged": True}
 
         engine = TurnEngine(
@@ -470,18 +524,24 @@ class TestTurnEnginePhaseTimeout:
         assert engine._phase_timeout_s == pytest.approx(5.0)
 
     def test_phase_timeout_none_by_default(self) -> None:
+        """Verifies phase timeout none by default."""
         from agent_kernel.kernel.capability_snapshot import CapabilitySnapshotBuilder
         from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
         from agent_kernel.kernel.turn_engine import TurnEngine
 
         class _Stub:
+            """Test suite for  Stub."""
+
             async def admit(self, a: Any, s: Any) -> bool:
+                """Admit."""
                 return True
 
             async def check(self, a: Any, s: Any) -> bool:
+                """Checks the test assertion condition."""
                 return True
 
             async def execute(self, a: Any, s: Any, e: Any, execution_context: Any = None) -> dict:
+                """Executes the test operation."""
                 return {"acknowledged": True}
 
         engine = TurnEngine(
@@ -503,17 +563,24 @@ class TestTurnEnginePhaseTimeout:
         from agent_kernel.kernel.turn_engine import TurnEngine, TurnInput
 
         class _AlwaysAdmit:
+            """Test suite for  AlwaysAdmit."""
+
             async def admit(self, action: Any, snapshot: Any) -> bool:
+                """Admit."""
                 return True
 
             async def check(self, action: Any, snapshot: Any) -> bool:
+                """Checks the test assertion condition."""
                 return True
 
         class _SlowExecutor:
+            """Test suite for  SlowExecutor."""
+
             async def execute(
                 self, action: Any, snapshot: Any, envelope: Any, execution_context: Any = None
             ) -> dict:
                 # Sleep longer than the timeout.
+                """Executes the test operation."""
                 await asyncio.sleep(10.0)
                 return {"acknowledged": True}
 
@@ -556,16 +623,23 @@ class TestTurnEnginePhaseTimeout:
         from agent_kernel.kernel.turn_engine import TurnEngine, TurnInput
 
         class _AlwaysAdmit:
+            """Test suite for  AlwaysAdmit."""
+
             async def admit(self, action: Any, snapshot: Any) -> bool:
+                """Admit."""
                 return True
 
             async def check(self, action: Any, snapshot: Any) -> bool:
+                """Checks the test assertion condition."""
                 return True
 
         class _FastExecutor:
+            """Test suite for  FastExecutor."""
+
             async def execute(
                 self, action: Any, snapshot: Any, envelope: Any, execution_context: Any = None
             ) -> dict:
+                """Executes the test operation."""
                 return {"acknowledged": True}
 
         engine = TurnEngine(

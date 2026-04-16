@@ -62,6 +62,7 @@ class PostgresKernelRuntimeEventLog(KernelRuntimeEventLog):
         return [self._row_to_runtime_event(row) for row in rows]
 
     async def _ensure_schema(self) -> None:
+        """Ensures required database schema objects exist."""
         pool = self._bridge.pool
         async with pool.acquire() as conn:
             await conn.execute(
@@ -110,6 +111,7 @@ class PostgresKernelRuntimeEventLog(KernelRuntimeEventLog):
             )
 
     async def _append_action_commit_impl(self, commit: ActionCommit) -> str:
+        """Append action commit impl."""
         pool = self._bridge.pool
         async with pool.acquire() as conn, conn.transaction():
             await conn.execute(
@@ -190,6 +192,7 @@ class PostgresKernelRuntimeEventLog(KernelRuntimeEventLog):
         return f"commit-ref-{commit_sequence}"
 
     async def _load_rows(self, run_id: str, after_offset: int) -> list[Any]:
+        """Loads persisted event rows for a run."""
         pool = self._bridge.pool
         async with pool.acquire() as conn:
             return await conn.fetch(
@@ -217,6 +220,7 @@ class PostgresKernelRuntimeEventLog(KernelRuntimeEventLog):
             )
 
     async def _max_offset_impl(self, run_id: str) -> int:
+        """Max offset impl."""
         pool = self._bridge.pool
         async with pool.acquire() as conn:
             value = await conn.fetchval(
@@ -231,6 +235,7 @@ class PostgresKernelRuntimeEventLog(KernelRuntimeEventLog):
 
     @staticmethod
     def _row_to_runtime_event(row: Any) -> RuntimeEvent:
+        """Row to runtime event."""
         payload = row["payload_json"]
         if payload is not None and not isinstance(payload, dict):
             payload = dict(payload)

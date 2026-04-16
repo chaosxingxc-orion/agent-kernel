@@ -25,6 +25,7 @@ def _make_action(
     effect_class: str = "test",
     action_type: str = "tool_call",
 ) -> Any:
+    """Make action."""
     from agent_kernel.kernel.capability_snapshot import CapabilitySnapshotInput
     from agent_kernel.kernel.contracts import Action
 
@@ -48,6 +49,7 @@ def _make_turn_input(
     based_on_offset: int = 0,
     through_offset: int = 1,
 ) -> Any:
+    """Make turn input."""
     from agent_kernel.kernel.turn_engine import TurnInput
 
     return TurnInput(
@@ -59,35 +61,49 @@ def _make_turn_input(
 
 
 class _AlwaysAdmit:
+    """Test suite for  AlwaysAdmit."""
+
     async def admit(self, action: Any, snapshot: Any) -> bool:
+        """Admit."""
         return True
 
     async def check(self, action: Any, snapshot: Any) -> bool:
+        """Checks the test assertion condition."""
         return True
 
 
 class _AlwaysAckExecutor:
+    """Test suite for  AlwaysAckExecutor."""
+
     async def execute(
         self, action: Any, snapshot: Any, envelope: Any, execution_context: Any = None
     ) -> dict:
+        """Executes the test operation."""
         return {"acknowledged": True}
 
 
 class _UnknownEffectExecutor:
+    """Test suite for  UnknownEffectExecutor."""
+
     async def execute(
         self, action: Any, snapshot: Any, envelope: Any, execution_context: Any = None
     ) -> dict:
+        """Executes the test operation."""
         return {"acknowledged": False}
 
 
 class _RaisingExecutor:
+    """Test suite for  RaisingExecutor."""
+
     async def execute(
         self, action: Any, snapshot: Any, envelope: Any, execution_context: Any = None
     ) -> dict:
+        """Executes the test operation."""
         raise RuntimeError("simulated executor crash")
 
 
 def _build_engine(dedupe_store: Any, executor: Any = None) -> Any:
+    """Build engine."""
     from agent_kernel.kernel.capability_snapshot import CapabilitySnapshotBuilder
     from agent_kernel.kernel.turn_engine import TurnEngine
 
@@ -128,6 +144,8 @@ def _pre_populate_dedupe(store: Any, turn_input: Any, action: Any, final_state: 
 
 
 class TestTurnFidelityRecord:
+    """Test suite for TurnFidelityRecord."""
+
     def test_frozen_slots_mutation_raises(self) -> None:
         """TurnFidelityRecord is frozen — mutation raises FrozenInstanceError."""
         from agent_kernel.kernel.replay_fidelity import TurnFidelityRecord
@@ -187,6 +205,8 @@ class TestTurnFidelityRecord:
 
 
 class TestFidelityReport:
+    """Test suite for FidelityReport."""
+
     def _make_report(
         self,
         hash1: str | None,
@@ -194,6 +214,7 @@ class TestFidelityReport:
         count1: int = 2,
         count2: int = 2,
     ) -> Any:
+        """Make report."""
         from agent_kernel.kernel.replay_fidelity import FidelityReport, TurnFidelityRecord
 
         return FidelityReport(
@@ -213,14 +234,17 @@ class TestFidelityReport:
         )
 
     def test_snapshot_hash_matches_true_when_equal(self) -> None:
+        """Verifies snapshot hash matches true when equal."""
         report = self._make_report("sha-a", "sha-a")
         assert report.snapshot_hash_matches is True
 
     def test_snapshot_hash_matches_false_when_differ(self) -> None:
+        """Verifies snapshot hash matches false when differ."""
         report = self._make_report("sha-a", "sha-b")
         assert report.snapshot_hash_matches is False
 
     def test_is_idempotent_true_when_hash_and_count_match(self) -> None:
+        """Verifies is idempotent true when hash and count match."""
         report = self._make_report("sha-a", "sha-a", count1=2, count2=2)
         assert report.is_idempotent is True
 
@@ -235,12 +259,14 @@ class TestFidelityReport:
         assert report.snapshot_hash_matches is True
 
     def test_none_none_idempotent_depends_on_event_count(self) -> None:
+        """Verifies none none idempotent depends on event count."""
         report_same = self._make_report(None, None, count1=0, count2=0)
         report_diff = self._make_report(None, None, count1=0, count2=1)
         assert report_same.is_idempotent is True
         assert report_diff.is_idempotent is False
 
     def test_run_id_stored_correctly(self) -> None:
+        """Verifies run id stored correctly."""
         from agent_kernel.kernel.replay_fidelity import FidelityReport, TurnFidelityRecord
 
         rec = TurnFidelityRecord(
@@ -256,6 +282,8 @@ class TestFidelityReport:
 
 
 class TestReplayFidelityVerifierInMemory:
+    """Test suite for ReplayFidelityVerifierInMemory."""
+
     def test_successful_turn_replay_blocked_is_idempotent(self) -> None:
         """Original dispatches; replay is blocked by dedupe → is_idempotent=True."""
         from agent_kernel.kernel.dedupe_store import InMemoryDedupeStore
@@ -535,6 +563,8 @@ class TestReplayFidelityVerifierInMemory:
 
 
 class TestReplayFidelityVerifierSQLite:
+    """Test suite for ReplayFidelityVerifierSQLite."""
+
     def test_full_round_trip_sqlite_dedupe_in_memory_event_log(self) -> None:
         """SQLiteDedupeStore in-memory + InMemoryKernelRuntimeEventLog round-trip."""
         from agent_kernel.kernel.minimal_runtime import InMemoryKernelRuntimeEventLog

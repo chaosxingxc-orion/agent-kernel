@@ -28,7 +28,6 @@ async def _stream_stub(events: list[RuntimeEvent]):
 
 def test_start_run_uses_gateway_and_returns_facade_safe_shape() -> None:
     """KernelFacade must remain the only platform entrypoint."""
-
     gateway = AsyncMock()
     gateway.start_workflow.return_value = {
         "workflow_id": "temporal-run-1",
@@ -55,7 +54,6 @@ def test_start_run_uses_gateway_and_returns_facade_safe_shape() -> None:
 
 def test_start_run_binds_context_when_context_adapter_is_configured() -> None:
     """KernelFacade should bind context through adapter before start."""
-
     gateway = AsyncMock()
     gateway.start_workflow.return_value = {
         "workflow_id": "temporal-run-2",
@@ -91,7 +89,6 @@ def test_start_run_binds_context_when_context_adapter_is_configured() -> None:
 
 def test_query_run_exports_projection_without_temporal_leakage() -> None:
     """KernelFacade must expose kernel truth, not raw Temporal."""
-
     gateway = AsyncMock()
     gateway.query_projection.return_value = RunProjection(
         run_id="run-1",
@@ -117,7 +114,6 @@ def test_query_run_exports_projection_without_temporal_leakage() -> None:
 
 def test_query_run_updates_checkpoint_adapter_when_configured() -> None:
     """KernelFacade should forward queried projection into adapter."""
-
     gateway = AsyncMock()
     projection = RunProjection(
         run_id="run-9",
@@ -143,7 +139,6 @@ def test_query_run_updates_checkpoint_adapter_when_configured() -> None:
 
 def test_query_run_dashboard_returns_dashboard_friendly_projection_view() -> None:
     """KernelFacade should export minimal dashboard read-model."""
-
     gateway = AsyncMock()
     gateway.query_projection.return_value = RunProjection(
         run_id="run-11",
@@ -172,7 +167,6 @@ def test_query_run_dashboard_returns_dashboard_friendly_projection_view() -> Non
 
 def test_query_run_dashboard_uses_state_fallback_correlation_hint() -> None:
     """KernelFacade should provide deterministic fallback hints."""
-
     gateway = AsyncMock()
     gateway.query_projection.return_value = RunProjection(
         run_id="run-12",
@@ -192,7 +186,6 @@ def test_query_run_dashboard_uses_state_fallback_correlation_hint() -> None:
 
 def test_spawn_child_run_routes_through_gateway_and_returns_child_view() -> None:
     """KernelFacade should start child workflow and signal parent."""
-
     gateway = AsyncMock()
     gateway.start_child_workflow.return_value = {
         "workflow_id": "temporal-child-1",
@@ -257,7 +250,6 @@ def test_spawn_child_run_prefers_child_projection_lifecycle_when_query_succeeds(
 
 def test_signal_run_routes_callbacks_back_into_workflow() -> None:
     """KernelFacade must route signals into gateway unchanged."""
-
     gateway = AsyncMock()
     facade = KernelFacade(gateway)
 
@@ -319,6 +311,7 @@ def test_stream_run_events_defaults_to_authoritative_facts_only() -> None:
     facade = KernelFacade(gateway)
 
     async def _collect() -> list[RuntimeEvent]:
+        """Collects values for assertion."""
         collected_events: list[RuntimeEvent] = []
         async for event in facade.stream_run_events("run-stream-1"):
             collected_events.append(event)
@@ -374,6 +367,7 @@ def test_stream_run_events_optionally_passes_derived_diagnostic_events() -> None
     facade = KernelFacade(gateway)
 
     async def _collect() -> list[RuntimeEvent]:
+        """Collects values for assertion."""
         collected_events: list[RuntimeEvent] = []
         async for event in facade.stream_run_events(
             "run-stream-2",
@@ -390,7 +384,6 @@ def test_stream_run_events_optionally_passes_derived_diagnostic_events() -> None
 
 def test_cancel_run_signals_cancel_intent_before_workflow_cancel() -> None:
     """KernelFacade should signal cancel intent before hard cancel."""
-
     gateway = AsyncMock()
     facade = KernelFacade(gateway)
 
@@ -433,7 +426,6 @@ def test_cancel_run_signals_cancel_intent_before_workflow_cancel() -> None:
 
 def test_resume_run_routes_checkpoint_resume_into_workflow_signal() -> None:
     """KernelFacade should map resume input via adapter and signal."""
-
     gateway = AsyncMock()
     checkpoint_adapter = AsyncMock()
     checkpoint_adapter.import_resume_request.return_value = Mock(
@@ -472,7 +464,6 @@ def test_resume_run_routes_checkpoint_resume_into_workflow_signal() -> None:
 
 def test_cancel_run_uses_deterministic_correlation_when_caused_by_missing() -> None:
     """KernelFacade should fallback observability ids."""
-
     gateway = AsyncMock()
     facade = KernelFacade(gateway)
 
@@ -512,7 +503,6 @@ def test_cancel_run_tolerates_expected_completion_race() -> None:
 
 def test_resume_run_uses_deterministic_correlation_when_caused_by_missing() -> None:
     """KernelFacade should fallback resume ids without cause."""
-
     gateway = AsyncMock()
     checkpoint_adapter = AsyncMock()
     checkpoint_adapter.import_resume_request.return_value = Mock(
@@ -542,7 +532,6 @@ def test_resume_run_uses_deterministic_correlation_when_caused_by_missing() -> N
 
 def test_resume_run_requires_checkpoint_adapter() -> None:
     """KernelFacade should fail fast when resume lacks adapter."""
-
     gateway = AsyncMock()
     facade = KernelFacade(gateway)
 
@@ -555,7 +544,6 @@ def test_resume_run_requires_checkpoint_adapter() -> None:
 
 def test_escalate_recovery_signals_workflow_with_observability_payload() -> None:
     """KernelFacade should route recovery escalation with stable ids."""
-
     gateway = AsyncMock()
     facade = KernelFacade(gateway)
 

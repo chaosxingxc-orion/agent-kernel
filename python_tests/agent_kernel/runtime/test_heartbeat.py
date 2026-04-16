@@ -34,6 +34,7 @@ from agent_kernel.runtime.heartbeat import (
 def _make_monitor(
     state_timeout_s: dict[str, int] | None = None,
 ) -> RunHeartbeatMonitor:
+    """Make monitor."""
     policy = HeartbeatPolicy(state_timeout_s=state_timeout_s or {})
     return RunHeartbeatMonitor(policy=policy)
 
@@ -44,6 +45,7 @@ def _touch_run(
     lifecycle_state: str,
     timestamp_ms: int | None = None,
 ) -> None:
+    """Touch run."""
     ts = timestamp_ms if timestamp_ms is not None else int(time.time() * 1000)
     monitor.on_run_lifecycle_transition(
         run_id=run_id,
@@ -67,7 +69,10 @@ def _fake_gateway(signal_calls: list[Any] | None = None) -> Any:
 
 
 class TestHeartbeatPolicy:
+    """Test suite for HeartbeatPolicy."""
+
     def test_returns_none_for_unmonitored_state(self) -> None:
+        """Verifies returns none for unmonitored state."""
         policy = HeartbeatPolicy()
         assert policy.timeout_for("ready") is None
         assert policy.timeout_for("completed") is None
@@ -75,6 +80,7 @@ class TestHeartbeatPolicy:
         assert policy.timeout_for("aborted") is None
 
     def test_returns_default_for_monitored_state(self) -> None:
+        """Verifies returns default for monitored state."""
         policy = HeartbeatPolicy()
         assert policy.timeout_for("dispatching") == 300
         assert policy.timeout_for("waiting_result") == 600
@@ -83,6 +89,7 @@ class TestHeartbeatPolicy:
         assert policy.timeout_for("recovering") == 180
 
     def test_override_timeout_takes_priority(self) -> None:
+        """Verifies override timeout takes priority."""
         policy = HeartbeatPolicy(state_timeout_s={"dispatching": 30})
         assert policy.timeout_for("dispatching") == 30
         # Other states still use defaults
@@ -95,31 +102,39 @@ class TestHeartbeatPolicy:
 
 
 class TestRunHeartbeatMonitorStateTracking:
+    """Test suite for RunHeartbeatMonitorStateTracking."""
+
     def test_unknown_run_is_alive(self) -> None:
+        """Verifies unknown run is alive."""
         monitor = _make_monitor()
         assert monitor.is_alive("unknown-run") is True
 
     def test_run_in_unmonitored_state_is_alive(self) -> None:
+        """Verifies run in unmonitored state is alive."""
         monitor = _make_monitor()
         _touch_run(monitor, "run-1", "ready")
         assert monitor.is_alive("run-1") is True
 
     def test_recently_touched_monitored_run_is_alive(self) -> None:
+        """Verifies recently touched monitored run is alive."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 300})
         _touch_run(monitor, "run-1", "dispatching")
         assert monitor.is_alive("run-1") is True
 
     def test_stale_monitored_run_is_not_alive(self) -> None:
+        """Verifies stale monitored run is not alive."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 1})
         old_ms = int(time.time() * 1000) - 5_000  # 5 s ago, timeout = 1 s
         _touch_run(monitor, "run-1", "dispatching", timestamp_ms=old_ms)
         assert monitor.is_alive("run-1") is False
 
     def test_last_seen_age_returns_none_for_unknown_run(self) -> None:
+        """Verifies last seen age returns none for unknown run."""
         monitor = _make_monitor()
         assert monitor.last_seen_age_s("nonexistent") is None
 
     def test_last_seen_age_positive_for_tracked_run(self) -> None:
+        """Verifies last seen age positive for tracked run."""
         monitor = _make_monitor()
         _touch_run(monitor, "run-1", "dispatching")
         age = monitor.last_seen_age_s("run-1")
@@ -127,6 +142,7 @@ class TestRunHeartbeatMonitorStateTracking:
         assert age >= 0.0
 
     def test_on_turn_state_transition_touches_run(self) -> None:
+        """Verifies on turn state transition touches run."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 300})
         # First establish state via lifecycle transition
         _touch_run(monitor, "run-1", "dispatching")
@@ -148,6 +164,7 @@ class TestRunHeartbeatMonitorStateTracking:
         assert age_after <= age_before + 0.1
 
     def test_terminal_state_clears_entry(self) -> None:
+        """Verifies terminal state clears entry."""
         monitor = _make_monitor()
         _touch_run(monitor, "run-1", "dispatching")
         assert monitor.last_seen_age_s("run-1") is not None
@@ -155,12 +172,14 @@ class TestRunHeartbeatMonitorStateTracking:
         assert monitor.last_seen_age_s("run-1") is None
 
     def test_aborted_state_clears_entry(self) -> None:
+        """Verifies aborted state clears entry."""
         monitor = _make_monitor()
         _touch_run(monitor, "run-1", "dispatching")
         _touch_run(monitor, "run-1", "aborted")
         assert monitor.last_seen_age_s("run-1") is None
 
     def test_clear_removes_entry(self) -> None:
+        """Verifies clear removes entry."""
         monitor = _make_monitor()
         _touch_run(monitor, "run-1", "dispatching")
         monitor.clear("run-1")
@@ -168,6 +187,7 @@ class TestRunHeartbeatMonitorStateTracking:
         assert monitor.last_seen_age_s("run-1") is None
 
     def test_record_heartbeat_refreshes_last_seen(self) -> None:
+        """Verifies record heartbeat refreshes last seen."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 300})
         old_ms = int(time.time() * 1000) - 5_000
         _touch_run(monitor, "run-1", "dispatching", timestamp_ms=old_ms)
@@ -182,7 +202,10 @@ class TestRunHeartbeatMonitorStateTracking:
 
 
 class TestRunHeartbeatMonitorTimeoutDetection:
+    """Test suite for RunHeartbeatMonitorTimeoutDetection."""
+
     def test_get_timed_out_runs_returns_stale_run(self) -> None:
+        """Verifies get timed out runs returns stale run."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 1})
         old_ms = int(time.time() * 1000) - 5_000
         _touch_run(monitor, "run-stale", "dispatching", timestamp_ms=old_ms)
@@ -190,12 +213,14 @@ class TestRunHeartbeatMonitorTimeoutDetection:
         assert "run-stale" in timed_out
 
     def test_get_timed_out_runs_excludes_fresh_run(self) -> None:
+        """Verifies get timed out runs excludes fresh run."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 300})
         _touch_run(monitor, "run-fresh", "dispatching")
         timed_out = monitor.get_timed_out_runs()
         assert "run-fresh" not in timed_out
 
     def test_get_timed_out_runs_no_repeat_after_signal(self) -> None:
+        """Verifies get timed out runs no repeat after signal."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 1})
         old_ms = int(time.time() * 1000) - 5_000
         _touch_run(monitor, "run-1", "dispatching", timestamp_ms=old_ms)
@@ -205,6 +230,7 @@ class TestRunHeartbeatMonitorTimeoutDetection:
         assert "run-1" not in second, "Already-signalled run must not be returned again"
 
     def test_after_clear_run_no_longer_timed_out(self) -> None:
+        """Verifies after clear run no longer timed out."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 1})
         old_ms = int(time.time() * 1000) - 5_000
         _touch_run(monitor, "run-1", "dispatching", timestamp_ms=old_ms)
@@ -215,6 +241,7 @@ class TestRunHeartbeatMonitorTimeoutDetection:
         assert "run-1" not in monitor.get_timed_out_runs()
 
     def test_unmonitored_state_never_times_out(self) -> None:
+        """Verifies unmonitored state never times out."""
         monitor = _make_monitor()
         old_ms = int(time.time() * 1000) - 1_000_000
         _touch_run(monitor, "run-idle", "ready", timestamp_ms=old_ms)
@@ -227,11 +254,15 @@ class TestRunHeartbeatMonitorTimeoutDetection:
 
 
 class TestRunHeartbeatMonitorConcurrency:
+    """Test suite for RunHeartbeatMonitorConcurrency."""
+
     def test_concurrent_touch_does_not_corrupt_entries(self) -> None:
+        """Verifies concurrent touch does not corrupt entries."""
         monitor = _make_monitor()
         errors: list[Exception] = []
 
         def _writer(run_id: str) -> None:
+            """Writer."""
             try:
                 for i in range(100):
                     monitor.on_run_lifecycle_transition(
@@ -258,6 +289,7 @@ class TestRunHeartbeatMonitorConcurrency:
         errors: list[Exception] = []
 
         def _continuous_writer() -> None:
+            """Continuous writer."""
             try:
                 i = 0
                 while not stop_event.is_set():
@@ -272,6 +304,7 @@ class TestRunHeartbeatMonitorConcurrency:
                 errors.append(exc)
 
         def _continuous_reader() -> None:
+            """Continuous reader."""
             try:
                 for _ in range(50):
                     monitor.get_timed_out_runs()
@@ -291,10 +324,12 @@ class TestRunHeartbeatMonitorConcurrency:
         assert not writer.is_alive(), "Writer thread did not stop"
 
     def test_concurrent_clear_and_touch_no_exception(self) -> None:
+        """Verifies concurrent clear and touch no exception."""
         monitor = _make_monitor()
         errors: list[Exception] = []
 
         def _touch() -> None:
+            """Touch."""
             try:
                 for _ in range(200):
                     _touch_run(monitor, "run-shared", "dispatching")
@@ -302,6 +337,7 @@ class TestRunHeartbeatMonitorConcurrency:
                 errors.append(exc)
 
         def _clear() -> None:
+            """Clear."""
             try:
                 for _ in range(200):
                     monitor.clear("run-shared")
@@ -324,8 +360,11 @@ class TestRunHeartbeatMonitorConcurrency:
 
 
 class TestRunHeartbeatMonitorWatchdogOnce:
+    """Test suite for RunHeartbeatMonitorWatchdogOnce."""
+
     @pytest.mark.asyncio
     async def test_watchdog_signals_timed_out_run(self) -> None:
+        """Verifies watchdog signals timed out run."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 1})
         old_ms = int(time.time() * 1000) - 5_000
         _touch_run(monitor, "run-stale", "dispatching", timestamp_ms=old_ms)
@@ -343,6 +382,7 @@ class TestRunHeartbeatMonitorWatchdogOnce:
 
     @pytest.mark.asyncio
     async def test_watchdog_skips_fresh_run(self) -> None:
+        """Verifies watchdog skips fresh run."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 300})
         _touch_run(monitor, "run-fresh", "dispatching")
 
@@ -355,6 +395,7 @@ class TestRunHeartbeatMonitorWatchdogOnce:
 
     @pytest.mark.asyncio
     async def test_watchdog_does_not_repeat_signal_for_stuck_run(self) -> None:
+        """Verifies watchdog does not repeat signal for stuck run."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 1})
         old_ms = int(time.time() * 1000) - 5_000
         _touch_run(monitor, "run-stuck", "dispatching", timestamp_ms=old_ms)
@@ -369,6 +410,7 @@ class TestRunHeartbeatMonitorWatchdogOnce:
 
     @pytest.mark.asyncio
     async def test_watchdog_swallows_gateway_exception(self) -> None:
+        """Verifies watchdog swallows gateway exception."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 1})
         old_ms = int(time.time() * 1000) - 5_000
         _touch_run(monitor, "run-bad", "dispatching", timestamp_ms=old_ms)
@@ -386,13 +428,17 @@ class TestRunHeartbeatMonitorWatchdogOnce:
 
 
 class TestRunHeartbeatMonitorHealthCheck:
+    """Test suite for RunHeartbeatMonitorHealthCheck."""
+
     def test_ok_when_no_runs_tracked(self) -> None:
+        """Verifies ok when no runs tracked."""
         monitor = _make_monitor()
         check_fn = monitor.make_health_check_fn()
         status, _msg = check_fn()
         assert status == HealthStatus.OK
 
     def test_ok_when_all_runs_healthy(self) -> None:
+        """Verifies ok when all runs healthy."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 300})
         _touch_run(monitor, "run-1", "dispatching")
         check_fn = monitor.make_health_check_fn()
@@ -400,6 +446,7 @@ class TestRunHeartbeatMonitorHealthCheck:
         assert status == HealthStatus.OK
 
     def test_unhealthy_when_run_timed_out_and_signalled(self) -> None:
+        """Verifies unhealthy when run timed out and signalled."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 1})
         old_ms = int(time.time() * 1000) - 5_000
         _touch_run(monitor, "run-bad", "dispatching", timestamp_ms=old_ms)
@@ -411,6 +458,7 @@ class TestRunHeartbeatMonitorHealthCheck:
 
     def test_degraded_when_run_near_timeout(self) -> None:
         # Set timeout to 10 s; place run 9 s ago (90% = within 80% threshold)
+        """Verifies degraded when run near timeout."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 10})
         old_ms = int(time.time() * 1000) - 9_000
         _touch_run(monitor, "run-near", "dispatching", timestamp_ms=old_ms)
@@ -426,8 +474,11 @@ class TestRunHeartbeatMonitorHealthCheck:
 
 
 class TestHeartbeatWatchdog:
+    """Test suite for HeartbeatWatchdog."""
+
     @pytest.mark.asyncio
     async def test_watchdog_calls_watchdog_once_on_schedule(self) -> None:
+        """Verifies watchdog calls watchdog once on schedule."""
         monitor = _make_monitor(state_timeout_s={"dispatching": 1})
         old_ms = int(time.time() * 1000) - 5_000
         _touch_run(monitor, "run-1", "dispatching", timestamp_ms=old_ms)
@@ -445,6 +496,7 @@ class TestHeartbeatWatchdog:
 
     @pytest.mark.asyncio
     async def test_watchdog_stop_is_idempotent(self) -> None:
+        """Verifies watchdog stop is idempotent."""
         monitor = _make_monitor()
         gateway = _fake_gateway()
         watchdog = HeartbeatWatchdog(monitor=monitor, gateway=gateway, interval_s=60)
@@ -454,6 +506,7 @@ class TestHeartbeatWatchdog:
 
     @pytest.mark.asyncio
     async def test_double_start_logs_warning_and_does_not_duplicate(self) -> None:
+        """Verifies double start logs warning and does not duplicate."""
         monitor = _make_monitor()
         gateway = _fake_gateway()
         watchdog = HeartbeatWatchdog(monitor=monitor, gateway=gateway, interval_s=60)
@@ -467,7 +520,10 @@ class TestHeartbeatWatchdog:
         """_loop must not crash when watchdog_once raises."""
 
         class _BrokenMonitor(RunHeartbeatMonitor):
+            """Test suite for  BrokenMonitor."""
+
             async def watchdog_once(self, gateway: Any) -> None:  # type: ignore[override]
+                """Watchdog once."""
                 raise RuntimeError("simulated scan crash")
 
         monitor = _BrokenMonitor()
@@ -484,13 +540,17 @@ class TestHeartbeatWatchdog:
 
 
 class TestKernelSelfHeartbeat:
+    """Test suite for KernelSelfHeartbeat."""
+
     @pytest.mark.asyncio
     async def test_is_stale_before_first_refresh(self) -> None:
+        """Verifies is stale before first refresh."""
         hb = KernelSelfHeartbeat()
         assert hb.is_stale() is True
 
     @pytest.mark.asyncio
     async def test_not_stale_after_refresh(self) -> None:
+        """Verifies not stale after refresh."""
         event_log = MagicMock()
         event_log.load = AsyncMock(return_value=[])
         projection = MagicMock()
@@ -502,6 +562,7 @@ class TestKernelSelfHeartbeat:
 
     @pytest.mark.asyncio
     async def test_event_log_check_returns_ok_when_responsive(self) -> None:
+        """Verifies event log check returns ok when responsive."""
         event_log = MagicMock()
         event_log.load = AsyncMock(return_value=[])
         projection = MagicMock()
@@ -516,6 +577,7 @@ class TestKernelSelfHeartbeat:
 
     @pytest.mark.asyncio
     async def test_event_log_check_returns_unhealthy_before_first_refresh(self) -> None:
+        """Verifies event log check returns unhealthy before first refresh."""
         hb = KernelSelfHeartbeat()
         # Never refreshed → unhealthy (not yet checked)
         check_fn = hb.event_log_check()
@@ -525,6 +587,7 @@ class TestKernelSelfHeartbeat:
 
     @pytest.mark.asyncio
     async def test_projection_check_returns_ok_when_responsive(self) -> None:
+        """Verifies projection check returns ok when responsive."""
         event_log = MagicMock()
         event_log.load = AsyncMock(return_value=[])
         projection = MagicMock()
@@ -539,6 +602,7 @@ class TestKernelSelfHeartbeat:
 
     @pytest.mark.asyncio
     async def test_refresh_marks_unhealthy_when_event_log_raises(self) -> None:
+        """Verifies refresh marks unhealthy when event log raises."""
         event_log = MagicMock()
         event_log.load = AsyncMock(side_effect=RuntimeError("storage failure"))
         projection = MagicMock()

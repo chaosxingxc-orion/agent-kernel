@@ -101,6 +101,7 @@ class SchemaMigrationManager:
         return len(pending)
 
     def _ensure_migrations_table(self) -> None:
+        """Ensure migrations table."""
         self._connection.execute(
             """
             CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -113,10 +114,12 @@ class SchemaMigrationManager:
         self._connection.commit()
 
     def _applied_versions(self) -> frozenset[int]:
+        """Returns schema migration versions already applied."""
         cursor = self._connection.execute("SELECT version FROM schema_migrations")
         return frozenset(row[0] for row in cursor.fetchall())
 
     def _apply(self, migration: Migration) -> None:
+        """Applies pending schema migrations in order."""
         logger.info(
             "Applying schema migration v%d: %s",
             migration.version,

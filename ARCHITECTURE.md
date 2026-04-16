@@ -1,5 +1,24 @@
 # ARCHITECTURE
 
+## Documentation And Style Refresh (2026-04-16)
+
+The codebase now uses a unified style baseline aligned with the Google Python
+Style Guide for code, docstrings, and test sources.
+
+Applied scope:
+
+- `agent_kernel/`
+- `python_tests/`
+- `scripts/`
+- Excluded: vendored third-party sources under `external/`
+
+Validation snapshot after refresh:
+
+- `python -m ruff check agent_kernel python_tests scripts`
+- `python -m ruff check agent_kernel python_tests scripts --select D`
+- `python -m ruff format --check agent_kernel python_tests scripts`
+- `python -m pytest -q` -> `7216 passed, 2 skipped, 6 warnings`
+
 agent-kernel v0.2.0 -- 企业级 Agent 内核，基于六权限生命周期协议构建。
 
 ---

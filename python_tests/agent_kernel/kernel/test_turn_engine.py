@@ -1,4 +1,4 @@
-"""Tests for v6.4 TurnEngine canonical path and FSM guardrails."""
+"""Verifies for v6.4 turnengine canonical path and fsm guardrails."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ class _StubSnapshotBuilder:
     should_fail: bool = False
 
     def build(self, *_args: Any, **_kwargs: Any) -> CapabilitySnapshot:
+        """Builds a test fixture value."""
         if self.should_fail:
             raise CapabilitySnapshotBuildError("missing critical input")
         return CapabilitySnapshot(
@@ -57,6 +58,7 @@ class _StubAdmissionService:
     calls: int = 0
 
     async def admit(self, *_args: Any, **_kwargs: Any) -> bool:
+        """Admit."""
         self.calls += 1
         return self.admitted
 
@@ -74,6 +76,7 @@ class _StubExecutor:
         _snapshot: CapabilitySnapshot,
         envelope: IdempotencyEnvelope,
     ) -> dict[str, Any]:
+        """Executes the test operation."""
         self.envelopes.append(envelope)
         return self.result
 
@@ -92,6 +95,7 @@ class _ContextAwareStubExecutor:
         _envelope: IdempotencyEnvelope,
         execution_context: ExecutionContext | None = None,
     ) -> dict[str, Any]:
+        """Executes the test operation."""
         if execution_context is not None:
             self.contexts.append(execution_context)
         return self.result
@@ -104,6 +108,7 @@ class _FailingReserveDedupeStore(DedupeStorePort):
     records: dict[str, str] = field(default_factory=dict)
 
     def reserve(self, envelope: IdempotencyEnvelope) -> DedupeReservation:
+        """Reserves a test key."""
         del envelope
         raise RuntimeError("dedupe unavailable")
 
@@ -112,6 +117,7 @@ class _FailingReserveDedupeStore(DedupeStorePort):
         envelope: IdempotencyEnvelope,
         peer_operation_id: str | None = None,
     ) -> DedupeReservation:
+        """Reserve and dispatch."""
         del envelope, peer_operation_id
         raise RuntimeError("dedupe unavailable")
 
@@ -120,6 +126,7 @@ class _FailingReserveDedupeStore(DedupeStorePort):
         dispatch_idempotency_key: str,
         peer_operation_id: str | None = None,
     ) -> None:
+        """Mark dispatched."""
         del peer_operation_id
         self.records[dispatch_idempotency_key] = "dispatched"
 
@@ -128,13 +135,16 @@ class _FailingReserveDedupeStore(DedupeStorePort):
         dispatch_idempotency_key: str,
         external_ack_ref: str | None = None,
     ) -> None:
+        """Mark acknowledged."""
         del external_ack_ref
         self.records[dispatch_idempotency_key] = "acknowledged"
 
     def mark_unknown_effect(self, dispatch_idempotency_key: str) -> None:
+        """Mark unknown effect."""
         self.records[dispatch_idempotency_key] = "unknown_effect"
 
     def get(self, dispatch_idempotency_key: str) -> Any:
+        """Gets test data."""
         return self.records.get(dispatch_idempotency_key)
 
 
@@ -531,12 +541,15 @@ class _CapturingHook:
 
     # required by Protocol — unused in these tests
     def on_turn_state_transition(self, *_a: Any, **_kw: Any) -> None:
+        """On turn state transition."""
         pass
 
     def on_recovery_triggered(self, *_a: Any, **_kw: Any) -> None:
+        """On recovery triggered."""
         pass
 
     def on_parallel_branch_result(self, *_a: Any, **_kw: Any) -> None:
+        """On parallel branch result."""
         pass
 
     def on_admission_evaluated(
@@ -547,6 +560,7 @@ class _CapturingHook:
         admitted: bool,
         latency_ms: int,
     ) -> None:
+        """On admission evaluated."""
         self.admission_calls.append(
             {
                 "run_id": run_id,
@@ -564,6 +578,7 @@ class _CapturingHook:
         dedupe_outcome: str,
         latency_ms: int,
     ) -> None:
+        """On dispatch attempted."""
         self.dispatch_calls.append(
             {
                 "run_id": run_id,
@@ -575,6 +590,7 @@ class _CapturingHook:
 
 
 def _build_engine_with_hook(hook: _CapturingHook, admitted: bool = True) -> TurnEngine:
+    """Build engine with hook."""
     return TurnEngine(
         snapshot_builder=_StubSnapshotBuilder(),
         admission_service=_StubAdmissionService(admitted=admitted),
@@ -588,6 +604,7 @@ class TestObservabilityHookCallbacks:
     """Verifies that TurnEngine invokes P4c hooks with correct arguments."""
 
     def test_on_admission_evaluated_called_when_admitted(self) -> None:
+        """Verifies on admission evaluated called when admitted."""
         hook = _CapturingHook()
         engine = _build_engine_with_hook(hook, admitted=True)
         asyncio.run(engine.run_turn(_build_turn_input(), _build_action()))
@@ -600,6 +617,7 @@ class TestObservabilityHookCallbacks:
         assert call["latency_ms"] >= 0
 
     def test_on_admission_evaluated_called_when_blocked(self) -> None:
+        """Verifies on admission evaluated called when blocked."""
         hook = _CapturingHook()
         engine = _build_engine_with_hook(hook, admitted=False)
         asyncio.run(engine.run_turn(_build_turn_input(), _build_action()))
@@ -610,6 +628,7 @@ class TestObservabilityHookCallbacks:
         assert len(hook.dispatch_calls) == 0
 
     def test_on_dispatch_attempted_called_on_successful_dispatch(self) -> None:
+        """Verifies on dispatch attempted called on successful dispatch."""
         hook = _CapturingHook()
         engine = _build_engine_with_hook(hook, admitted=True)
         asyncio.run(engine.run_turn(_build_turn_input(), _build_action()))
@@ -642,6 +661,7 @@ class TestTurnEngineDispatchTableExtensibility:
     """Verifies that _TURN_PHASES can be extended in subclasses."""
 
     def test_turn_phases_is_class_variable_with_six_phases(self) -> None:
+        """Verifies turn phases is class variable with six phases."""
         from agent_kernel.kernel.turn_engine import TurnEngine
 
         assert hasattr(TurnEngine, "_TURN_PHASES")
@@ -654,9 +674,12 @@ class TestTurnEngineDispatchTableExtensibility:
         intercepted: list[str] = []
 
         class _CustomEngine(TurnEngine):
+            """Test suite for  CustomEngine."""
+
             _TURN_PHASES = ("_phase_audit", *TurnEngine._TURN_PHASES)
 
             async def _phase_audit(self, ctx: TurnPhaseContext) -> None:
+                """Phase audit."""
                 intercepted.append("audit_called")
 
         engine = _CustomEngine(
@@ -674,7 +697,10 @@ class TestTurnEngineDispatchTableExtensibility:
         from agent_kernel.kernel.turn_engine import TurnEngine, TurnPhaseContext, TurnResult
 
         class _AlwaysBlockEngine(TurnEngine):
+            """Test suite for  AlwaysBlockEngine."""
+
             async def _phase_admission(self, ctx: TurnPhaseContext) -> None:
+                """Phase admission."""
                 ctx.emitted_events.append(
                     __import__(
                         "agent_kernel.kernel.turn_engine",

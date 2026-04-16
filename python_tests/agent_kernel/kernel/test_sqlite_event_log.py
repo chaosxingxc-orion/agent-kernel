@@ -1,4 +1,4 @@
-"""Tests for SQLite-backed kernel runtime event log persistence."""
+"""Verifies for sqlite-backed kernel runtime event log persistence."""
 
 from __future__ import annotations
 

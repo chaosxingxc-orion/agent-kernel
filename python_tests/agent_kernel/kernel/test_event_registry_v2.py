@@ -1,4 +1,4 @@
-"""Tests for event types added in v0.2: approval_submitted."""
+"""Verifies for event types added in v0.2: approval submitted."""
 
 from __future__ import annotations
 
@@ -6,15 +6,20 @@ from agent_kernel.kernel.event_registry import KERNEL_EVENT_REGISTRY
 
 
 class TestApprovalEvents:
+    """Test suite for ApprovalEvents."""
+
     def test_approval_submitted_registered(self) -> None:
+        """Verifies approval submitted registered."""
         assert KERNEL_EVENT_REGISTRY.get("run.approval_submitted") is not None
 
     def test_approval_submitted_affects_replay(self) -> None:
+        """Verifies approval submitted affects replay."""
         d = KERNEL_EVENT_REGISTRY.get("run.approval_submitted")
         assert d is not None
         assert d.affects_replay is True
 
     def test_approval_in_known_types(self) -> None:
+        """Verifies approval in known types."""
         known = KERNEL_EVENT_REGISTRY.known_types()
         assert "run.approval_submitted" in known
 

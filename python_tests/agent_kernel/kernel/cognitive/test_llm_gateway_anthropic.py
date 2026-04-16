@@ -34,6 +34,7 @@ FAKE_CONFIG = LLMGatewayConfig(
 
 
 def _make_inference_config() -> InferenceConfig:
+    """Make inference config."""
     return InferenceConfig(
         model_ref="claude-sonnet-4-6",
         token_budget=TokenBudget(max_input=8192, max_output=512),
@@ -42,6 +43,7 @@ def _make_inference_config() -> InferenceConfig:
 
 
 def _make_context(tool_names: list[str] | None = None) -> ContextWindow:
+    """Make context."""
     tool_definitions = tuple(
         ToolDefinition(
             name=name,
@@ -91,7 +93,7 @@ def _make_fake_text_response() -> MagicMock:
 
 
 class TestAnthropicLLMGatewayInfer:
-    """Tests for AnthropicLLMGateway.infer()."""
+    """Verifies for anthropicllmgateway.infer()."""
 
     @pytest.mark.asyncio
     async def test_infer_returns_model_output_with_tool_call(self) -> None:
@@ -164,7 +166,7 @@ class TestAnthropicLLMGatewayInfer:
 
 
 class TestAnthropicLLMGatewayCountTokens:
-    """Tests for AnthropicLLMGateway.count_tokens()."""
+    """Verifies for anthropicllmgateway.count tokens()."""
 
     @pytest.mark.asyncio
     async def test_count_tokens_returns_int_from_api(self) -> None:

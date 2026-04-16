@@ -1,4 +1,4 @@
-"""Tests for agent_kernel.config.KernelConfig."""
+"""Verifies for agent kernel.config.kernelconfig."""
 
 from __future__ import annotations
 
@@ -14,63 +14,83 @@ class TestDefaultValues:
     """Verify every default matches the historically hardcoded value."""
 
     def test_facade_max_tracked_runs(self) -> None:
+        """Verifies facade max tracked runs."""
         assert KernelConfig().max_tracked_runs == 10_000
 
     def test_runtime_max_retained_runs(self) -> None:
+        """Verifies runtime max retained runs."""
         assert KernelConfig().max_retained_runs == 5_000
 
     def test_local_gateway_max_turn_cache_size(self) -> None:
+        """Verifies local gateway max turn cache size."""
         assert KernelConfig().max_turn_cache_size == 5_000
 
     def test_http_port(self) -> None:
+        """Verifies http port."""
         assert KernelConfig().http_port == 8_400
 
     def test_max_request_body_bytes(self) -> None:
+        """Verifies max request body bytes."""
         assert KernelConfig().max_request_body_bytes == 1_048_576
 
     def test_api_key_default_none(self) -> None:
+        """Verifies api key default none."""
         assert KernelConfig().api_key is None
 
     def test_heartbeat_dispatching_timeout(self) -> None:
+        """Verifies heartbeat dispatching timeout."""
         assert KernelConfig().heartbeat_dispatching_timeout_s == 300
 
     def test_heartbeat_waiting_result_timeout(self) -> None:
+        """Verifies heartbeat waiting result timeout."""
         assert KernelConfig().heartbeat_waiting_result_timeout_s == 600
 
     def test_heartbeat_waiting_external_timeout(self) -> None:
+        """Verifies heartbeat waiting external timeout."""
         assert KernelConfig().heartbeat_waiting_external_timeout_s == 3_600
 
     def test_heartbeat_waiting_human_timeout(self) -> None:
+        """Verifies heartbeat waiting human timeout."""
         assert KernelConfig().heartbeat_waiting_human_timeout_s == 86_400
 
     def test_heartbeat_recovering_timeout(self) -> None:
+        """Verifies heartbeat recovering timeout."""
         assert KernelConfig().heartbeat_recovering_timeout_s == 180
 
     def test_heartbeat_min_interval(self) -> None:
+        """Verifies heartbeat min interval."""
         assert KernelConfig().heartbeat_min_interval_s == 5
 
     def test_heartbeat_stale_check_age(self) -> None:
+        """Verifies heartbeat stale check age."""
         assert KernelConfig().heartbeat_stale_check_age_s == 60
 
     def test_default_model_ref(self) -> None:
+        """Verifies default model ref."""
         assert KernelConfig().default_model_ref == "echo"
 
     def test_default_tenant_policy_ref(self) -> None:
+        """Verifies default tenant policy ref."""
         assert KernelConfig().default_tenant_policy_ref == "policy:default"
 
     def test_default_permission_mode(self) -> None:
+        """Verifies default permission mode."""
         assert KernelConfig().default_permission_mode == "strict"
 
     def test_phase_timeout_default_none(self) -> None:
+        """Verifies phase timeout default none."""
         assert KernelConfig().phase_timeout_s is None
 
     def test_circuit_breaker_threshold(self) -> None:
+        """Verifies circuit breaker threshold."""
         assert KernelConfig().circuit_breaker_threshold == 5
 
     def test_circuit_breaker_half_open_ms(self) -> None:
+        """Verifies circuit breaker half open ms."""
         assert KernelConfig().circuit_breaker_half_open_ms == 30_000
 
     def test_history_reset_threshold(self) -> None:
+        """Verifies history reset threshold."""
         assert KernelConfig().history_reset_threshold == 10_000
 
 
@@ -102,10 +122,12 @@ class TestFromEnvOverrides:
 
     @pytest.fixture(autouse=True)
     def _set_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Set env."""
         for key, value in self._ENV_OVERRIDES.items():
             monkeypatch.setenv(key, value)
 
     def test_int_overrides(self) -> None:
+        """Verifies int overrides."""
         cfg = KernelConfig.from_env()
         assert cfg.max_tracked_runs == 500
         assert cfg.max_retained_runs == 250
@@ -124,6 +146,7 @@ class TestFromEnvOverrides:
         assert cfg.history_reset_threshold == 20_000
 
     def test_str_overrides(self) -> None:
+        """Verifies str overrides."""
         cfg = KernelConfig.from_env()
         assert cfg.api_key == "secret-key-42"
         assert cfg.default_model_ref == "gpt-4"
@@ -131,6 +154,7 @@ class TestFromEnvOverrides:
         assert cfg.default_permission_mode == "permissive"
 
     def test_float_override(self) -> None:
+        """Verifies float override."""
         cfg = KernelConfig.from_env()
         assert cfg.phase_timeout_s == pytest.approx(15.5)
 
@@ -139,6 +163,7 @@ class TestFromEnvNoVarsReturnsDefaults:
     """Verify from_env() with no env vars returns the same as the default constructor."""
 
     def test_matches_defaults(self) -> None:
+        """Verifies matches defaults."""
         cfg = KernelConfig.from_env()
         default = KernelConfig()
         assert cfg == default
@@ -148,16 +173,19 @@ class TestFrozen:
     """Verify that KernelConfig instances are immutable."""
 
     def test_assignment_raises(self) -> None:
+        """Verifies assignment raises."""
         cfg = KernelConfig()
         with pytest.raises(FrozenInstanceError):
             cfg.max_tracked_runs = 999  # type: ignore[misc]
 
     def test_assignment_on_str_field_raises(self) -> None:
+        """Verifies assignment on str field raises."""
         cfg = KernelConfig()
         with pytest.raises(FrozenInstanceError):
             cfg.default_model_ref = "other"  # type: ignore[misc]
 
     def test_assignment_on_optional_field_raises(self) -> None:
+        """Verifies assignment on optional field raises."""
         cfg = KernelConfig()
         with pytest.raises(FrozenInstanceError):
             cfg.phase_timeout_s = 10.0  # type: ignore[misc]

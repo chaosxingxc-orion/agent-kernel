@@ -30,6 +30,7 @@ from agent_kernel.kernel.persistence.sqlite_colocated_bundle import ColocatedSQL
 
 
 def _utc_now() -> str:
+    """Utc now."""
     return datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
 
 
@@ -39,6 +40,7 @@ def _make_event(
     idempotency_key: str | None = None,
     commit_offset: int = 1,
 ) -> RuntimeEvent:
+    """Make event."""
     return RuntimeEvent(
         run_id=run_id,
         event_id=f"evt-{commit_offset}",
@@ -58,6 +60,7 @@ def _make_commit(
     events: list[RuntimeEvent],
     commit_id: str = "commit-1",
 ) -> ActionCommit:
+    """Make commit."""
     return ActionCommit(
         run_id=run_id,
         commit_id=commit_id,
@@ -67,6 +70,7 @@ def _make_commit(
 
 
 def _make_envelope(run_id: str, key_suffix: str = "action-1") -> IdempotencyEnvelope:
+    """Make envelope."""
     return IdempotencyEnvelope(
         dispatch_idempotency_key=f"{run_id}:{key_suffix}",
         operation_fingerprint="fp-xyz",
@@ -113,11 +117,13 @@ class TestColocatedSQLiteBundleSchema:
         bundle.close()
 
     def test_event_log_attribute_exists(self) -> None:
+        """Verifies event log attribute exists."""
         bundle = _bundle()
         assert bundle.event_log is not None
         bundle.close()
 
     def test_dedupe_store_attribute_exists(self) -> None:
+        """Verifies dedupe store attribute exists."""
         bundle = _bundle()
         assert bundle.dedupe_store is not None
         bundle.close()
@@ -140,7 +146,7 @@ class TestColocatedSQLiteBundleSchema:
 
 
 class TestAtomicDispatchRecord:
-    """Tests for the atomic_dispatch_record() method."""
+    """Verifies for the atomic dispatch record() method."""
 
     @pytest.mark.asyncio
     async def test_success_returns_commit_ref_and_accepted_reservation(self) -> None:
@@ -260,7 +266,7 @@ class TestAtomicDispatchRecord:
 
 
 class TestEventLogOperations:
-    """Tests for the SharedConnectionEventLog (event_log) sub-store."""
+    """Verifies for the sharedconnectioneventlog (event log) sub-store."""
 
     @pytest.mark.asyncio
     async def test_append_action_commit_success(self) -> None:
@@ -355,9 +361,10 @@ class TestEventLogOperations:
 
 
 class TestDedupeStoreOperations:
-    """Tests for the SharedConnectionDedupeStore (dedupe_store) sub-store."""
+    """Verifies for the sharedconnectiondedupestore (dedupe store) sub-store."""
 
     def test_reserve_returns_accepted(self) -> None:
+        """Verifies reserve returns accepted."""
         bundle = _bundle()
         env = _make_envelope("run-r", "k1")
         res = bundle.dedupe_store.reserve(env)
@@ -366,6 +373,7 @@ class TestDedupeStoreOperations:
         bundle.close()
 
     def test_reserve_duplicate_returns_not_accepted(self) -> None:
+        """Verifies reserve duplicate returns not accepted."""
         bundle = _bundle()
         env = _make_envelope("run-r2", "k2")
         bundle.dedupe_store.reserve(env)
@@ -375,11 +383,13 @@ class TestDedupeStoreOperations:
         bundle.close()
 
     def test_get_returns_none_for_unknown_key(self) -> None:
+        """Verifies get returns none for unknown key."""
         bundle = _bundle()
         assert bundle.dedupe_store.get("nonexistent:key") is None
         bundle.close()
 
     def test_get_returns_record_after_reserve(self) -> None:
+        """Verifies get returns record after reserve."""
         bundle = _bundle()
         env = _make_envelope("run-get", "k3")
         bundle.dedupe_store.reserve(env)
@@ -390,6 +400,7 @@ class TestDedupeStoreOperations:
         bundle.close()
 
     def test_mark_dispatched_transitions_state(self) -> None:
+        """Verifies mark dispatched transitions state."""
         bundle = _bundle()
         env = _make_envelope("run-md", "k4")
         bundle.dedupe_store.reserve(env)
@@ -400,6 +411,7 @@ class TestDedupeStoreOperations:
         bundle.close()
 
     def test_mark_acknowledged_transitions_state(self) -> None:
+        """Verifies mark acknowledged transitions state."""
         bundle = _bundle()
         env = _make_envelope("run-ma", "k5")
         bundle.dedupe_store.reserve(env)
@@ -414,6 +426,7 @@ class TestDedupeStoreOperations:
         bundle.close()
 
     def test_mark_unknown_effect_transitions_state(self) -> None:
+        """Verifies mark unknown effect transitions state."""
         bundle = _bundle()
         env = _make_envelope("run-mue", "k6")
         bundle.dedupe_store.reserve(env)
@@ -434,6 +447,7 @@ class TestDedupeStoreOperations:
         bundle.close()
 
     def test_mark_dispatched_unknown_key_raises(self) -> None:
+        """Verifies mark dispatched unknown key raises."""
         bundle = _bundle()
         with pytest.raises(DedupeStoreStateError):
             bundle.dedupe_store.mark_dispatched("nonexistent:key")
@@ -515,6 +529,7 @@ class TestColocatedBundleThreadSafety:
         lock = threading.Lock()
 
         def _worker(i: int) -> None:
+            """Runs worker behavior for the test."""
             env = _make_envelope(run_id, f"act-{i}")
             event = _make_event(
                 run_id,
@@ -553,6 +568,7 @@ class TestColocatedBundleThreadSafety:
         errors: list[Exception] = []
 
         def _worker() -> None:
+            """Runs worker behavior for the test."""
             nonlocal accepted_count
             try:
                 res = bundle.dedupe_store.reserve(env)
@@ -581,6 +597,7 @@ class TestColocatedBundleThreadSafety:
         errors: list[Exception] = []
 
         def _worker(i: int) -> None:
+            """Runs worker behavior for the test."""
             loop = asyncio.new_event_loop()
             try:
                 event = _make_event(run_id, commit_offset=i + 1)

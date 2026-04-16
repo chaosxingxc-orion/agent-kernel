@@ -1,4 +1,4 @@
-"""Tests for ToolCallOutputParser and JSONModeOutputParser."""
+"""Verifies for toolcalloutputparser and jsonmodeoutputparser."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def _make_output(
 
 
 class TestToolCallOutputParser:
-    """Tests for ToolCallOutputParser."""
+    """Test suite for ToolCallOutputParser."""
 
     def test_parse_empty_tool_calls_returns_empty_list(self) -> None:
         """parse() should return [] when ModelOutput has no tool_calls."""
@@ -160,7 +160,7 @@ class TestToolCallOutputParser:
 
 
 class TestJSONModeOutputParser:
-    """Tests for JSONModeOutputParser."""
+    """Test suite for JSONModeOutputParser."""
 
     def test_parse_valid_json_returns_actions(self) -> None:
         """parse() should return Actions from a valid JSON array."""
@@ -202,7 +202,7 @@ class TestJSONModeOutputParser:
         assert result == []
 
     def test_parse_action_run_id_from_parameter(self) -> None:
-        """parsed Actions should have run_id from the run_id parameter."""
+        """Parsed Actions should have run_id from the run_id parameter."""
         parser = JSONModeOutputParser()
         payload = json.dumps([{"action_type": "fetch", "effect_class": "read_only"}])
         output = _make_output(raw_text=payload)

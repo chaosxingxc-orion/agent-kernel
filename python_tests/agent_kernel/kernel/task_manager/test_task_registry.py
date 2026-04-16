@@ -1,4 +1,4 @@
-"""Tests for TaskRegistry: registration, attempt tracking, health, eviction."""
+"""Verifies for taskregistry: registration, attempt tracking, health, eviction."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ def _make_descriptor(
     max_attempts: int = 3,
     heartbeat_timeout_ms: int = 300_000,
 ) -> TaskDescriptor:
+    """Make descriptor."""
     return TaskDescriptor(
         task_id=task_id,
         session_id=session_id,
@@ -43,6 +44,7 @@ def _make_attempt(
     run_id: str = "r1",
     attempt_seq: int = 1,
 ) -> TaskAttempt:
+    """Make attempt."""
     return TaskAttempt(
         attempt_id=f"a-{task_id}-{attempt_seq}",
         task_id=task_id,
@@ -58,23 +60,29 @@ def _make_attempt(
 
 
 class TestRegistration:
+    """Test suite for Registration."""
+
     def test_register_and_get(self) -> None:
+        """Verifies register and get."""
         reg = TaskRegistry()
         d = _make_descriptor()
         reg.register(d)
         assert reg.get("t1") == d
 
     def test_get_unknown_returns_none(self) -> None:
+        """Verifies get unknown returns none."""
         reg = TaskRegistry()
         assert reg.get("no-such-task") is None
 
     def test_duplicate_registration_raises(self) -> None:
+        """Verifies duplicate registration raises."""
         reg = TaskRegistry()
         reg.register(_make_descriptor())
         with pytest.raises(ValueError, match="already registered"):
             reg.register(_make_descriptor())
 
     def test_initial_lifecycle_state_is_pending(self) -> None:
+        """Verifies initial lifecycle state is pending."""
         reg = TaskRegistry()
         reg.register(_make_descriptor())
         health = reg.get_health("t1")
@@ -82,6 +90,7 @@ class TestRegistration:
         assert health.lifecycle_state == "pending"
 
     def test_session_index_populated(self) -> None:
+        """Verifies session index populated."""
         reg = TaskRegistry()
         reg.register(_make_descriptor(task_id="t1", session_id="sess-A"))
         reg.register(_make_descriptor(task_id="t2", session_id="sess-A"))
@@ -91,6 +100,7 @@ class TestRegistration:
         assert ids == {"t1", "t2"}
 
     def test_list_session_tasks_unknown_session(self) -> None:
+        """Verifies list session tasks unknown session."""
         reg = TaskRegistry()
         assert reg.list_session_tasks("no-session") == []
 
@@ -101,7 +111,10 @@ class TestRegistration:
 
 
 class TestAttemptTracking:
+    """Test suite for AttemptTracking."""
+
     def test_start_attempt_transitions_to_running(self) -> None:
+        """Verifies start attempt transitions to running."""
         reg = TaskRegistry()
         reg.register(_make_descriptor())
         reg.start_attempt(_make_attempt())
@@ -111,11 +124,13 @@ class TestAttemptTracking:
         assert health.current_run_id == "r1"
 
     def test_start_attempt_unknown_task_raises(self) -> None:
+        """Verifies start attempt unknown task raises."""
         reg = TaskRegistry()
         with pytest.raises(KeyError):
             reg.start_attempt(_make_attempt(task_id="ghost"))
 
     def test_complete_attempt_completed(self) -> None:
+        """Verifies complete attempt completed."""
         reg = TaskRegistry()
         reg.register(_make_descriptor())
         reg.start_attempt(_make_attempt())
@@ -126,6 +141,7 @@ class TestAttemptTracking:
         assert health.current_run_id is None
 
     def test_complete_attempt_failed(self) -> None:
+        """Verifies complete attempt failed."""
         reg = TaskRegistry()
         reg.register(_make_descriptor())
         reg.start_attempt(_make_attempt())
@@ -135,11 +151,13 @@ class TestAttemptTracking:
         assert health.lifecycle_state == "failed"
 
     def test_complete_attempt_unknown_task_is_noop(self) -> None:
+        """Verifies complete attempt unknown task is noop."""
         reg = TaskRegistry()
         # Should not raise
         reg.complete_attempt("no-such", "r1", "completed")
 
     def test_complete_attempt_wrong_run_id_does_not_transition_state(self) -> None:
+        """Verifies complete attempt wrong run id does not transition state."""
         reg = TaskRegistry()
         reg.register(_make_descriptor())
         reg.start_attempt(_make_attempt())
@@ -150,11 +168,13 @@ class TestAttemptTracking:
         assert health.current_run_id == "r1"
 
     def test_get_attempts_empty_for_new_task(self) -> None:
+        """Verifies get attempts empty for new task."""
         reg = TaskRegistry()
         reg.register(_make_descriptor())
         assert reg.get_attempts("t1") == []
 
     def test_get_attempts_reflects_history(self) -> None:
+        """Verifies get attempts reflects history."""
         reg = TaskRegistry()
         reg.register(_make_descriptor())
         a1 = _make_attempt(attempt_seq=1)
@@ -168,6 +188,7 @@ class TestAttemptTracking:
         assert attempts[1].attempt_seq == 2
 
     def test_attempt_seq_reflected_in_health(self) -> None:
+        """Verifies attempt seq reflected in health."""
         reg = TaskRegistry()
         reg.register(_make_descriptor())
         reg.start_attempt(_make_attempt(attempt_seq=1))
@@ -182,7 +203,10 @@ class TestAttemptTracking:
 
 
 class TestUpdateState:
+    """Test suite for UpdateState."""
+
     def test_update_state_to_restarting(self) -> None:
+        """Verifies update state to restarting."""
         reg = TaskRegistry()
         reg.register(_make_descriptor())
         reg.update_state("t1", "restarting")
@@ -191,10 +215,12 @@ class TestUpdateState:
         assert health.lifecycle_state == "restarting"
 
     def test_update_state_unknown_task_is_noop(self) -> None:
+        """Verifies update state unknown task is noop."""
         reg = TaskRegistry()
         reg.update_state("ghost", "aborted")  # should not raise
 
     def test_all_terminal_states(self) -> None:
+        """Verifies all terminal states."""
         for state in ("completed", "aborted", "escalated", "reflecting"):
             reg = TaskRegistry()
             reg.register(_make_descriptor())
@@ -210,7 +236,10 @@ class TestUpdateState:
 
 
 class TestHeartbeat:
+    """Test suite for Heartbeat."""
+
     def test_heartbeat_resets_missed_beats(self) -> None:
+        """Verifies heartbeat resets missed beats."""
         reg = TaskRegistry()
         reg.register(_make_descriptor())
         reg.start_attempt(_make_attempt())
@@ -220,6 +249,7 @@ class TestHeartbeat:
         assert health.consecutive_missed_beats == 0
 
     def test_heartbeat_for_run(self) -> None:
+        """Verifies heartbeat for run."""
         reg = TaskRegistry()
         reg.register(_make_descriptor())
         reg.start_attempt(_make_attempt())
@@ -229,14 +259,17 @@ class TestHeartbeat:
         assert health.last_heartbeat_ms is not None
 
     def test_heartbeat_unknown_task_is_noop(self) -> None:
+        """Verifies heartbeat unknown task is noop."""
         reg = TaskRegistry()
         reg.heartbeat("ghost")  # should not raise
 
     def test_heartbeat_for_unknown_run_is_noop(self) -> None:
+        """Verifies heartbeat for unknown run is noop."""
         reg = TaskRegistry()
         reg.heartbeat_for_run("no-run")  # should not raise
 
     def test_stall_detection_when_timeout_exceeded(self) -> None:
+        """Verifies stall detection when timeout exceeded."""
         reg = TaskRegistry()
         reg.register(_make_descriptor(heartbeat_timeout_ms=1))
         reg.start_attempt(_make_attempt())
@@ -247,6 +280,7 @@ class TestHeartbeat:
         assert any(h.task_id == "t1" for h in stalled)
 
     def test_stall_detection_includes_restarting_state(self) -> None:
+        """Verifies stall detection includes restarting state."""
         reg = TaskRegistry()
         reg.register(_make_descriptor(heartbeat_timeout_ms=1))
         reg.start_attempt(_make_attempt())
@@ -257,6 +291,7 @@ class TestHeartbeat:
         assert any(h.task_id == "t1" for h in stalled)
 
     def test_no_stall_for_completed_task(self) -> None:
+        """Verifies no stall for completed task."""
         reg = TaskRegistry()
         reg.register(_make_descriptor(heartbeat_timeout_ms=1))
         reg.start_attempt(_make_attempt())
@@ -265,6 +300,7 @@ class TestHeartbeat:
         assert not any(h.task_id == "t1" for h in stalled)
 
     def test_is_stalled_flag_in_get_health(self) -> None:
+        """Verifies is stalled flag in get health."""
         reg = TaskRegistry()
         reg.register(_make_descriptor(heartbeat_timeout_ms=1))
         reg.start_attempt(_make_attempt())
@@ -281,7 +317,10 @@ class TestHeartbeat:
 
 
 class TestEviction:
+    """Test suite for Eviction."""
+
     def test_eviction_on_max_tasks_exceeded(self) -> None:
+        """Verifies eviction on max tasks exceeded."""
         reg = TaskRegistry(max_tasks=3)
         for i in range(4):
             d = _make_descriptor(task_id=f"t{i}")
@@ -294,6 +333,7 @@ class TestEviction:
         assert len(reg._tasks) <= 3
 
     def test_non_terminal_tasks_not_evicted(self) -> None:
+        """Verifies non terminal tasks not evicted."""
         reg = TaskRegistry(max_tasks=2)
         reg.register(_make_descriptor(task_id="active"))
         reg.start_attempt(_make_attempt(task_id="active"))

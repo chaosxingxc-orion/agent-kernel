@@ -13,6 +13,7 @@ _CASE_COUNT = 1000
 
 
 def _projection_for(seed: int) -> RunProjection:
+    """Projection for."""
     ready = seed % 4 in (0, 1)
     waiting_external = seed % 11 == 0
     return RunProjection(
@@ -25,6 +26,7 @@ def _projection_for(seed: int) -> RunProjection:
 
 
 def _action_for(seed: int) -> Action:
+    """Action for."""
     policy_tags: list[str] = []
     timeout_ms: int | None = None
     input_json: dict[str, object] | None = {"estimated_cost": float(seed % 9)}

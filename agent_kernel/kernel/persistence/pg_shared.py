@@ -86,5 +86,6 @@ class AsyncPGBridge:
         )
 
     def _run_loop(self) -> None:
+        """Runs an async helper in a dedicated event-loop thread."""
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()

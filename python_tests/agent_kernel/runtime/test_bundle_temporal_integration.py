@@ -40,9 +40,11 @@ class _Session:
     """Minimal session object for orchestrator start path."""
 
     def __init__(self, session_id: str) -> None:
+        """Initializes _Session."""
         self._session_id = session_id
 
     def session_id(self) -> str:
+        """Session id."""
         return self._session_id
 
 
@@ -53,6 +55,7 @@ if TEMPORAL_AVAILABLE:
         """Workflow used to validate bundle-created worker and query mapping."""
 
         def __init__(self) -> None:
+            """Initializes _BundleIntegrationWorkflow."""
             self._projection = {
                 "run_id": "unknown",
                 "lifecycle_state": "ready",
@@ -66,6 +69,7 @@ if TEMPORAL_AVAILABLE:
 
         @temporal_workflow.run
         async def run(self, run_input: Any) -> str:
+            """Runs the test helper implementation."""
             if isinstance(run_input, dict):
                 self._projection["run_id"] = str(run_input.get("run_id", "run-x"))
             else:
@@ -77,6 +81,7 @@ if TEMPORAL_AVAILABLE:
 
         @temporal_workflow.signal
         async def signal(self, payload: dict[str, Any]) -> None:
+            """Signals the fake workflow handle."""
             signal_type = str(payload.get("signal_type", "unknown"))
             if signal_type == "tool_result":
                 self._projection["projected_offset"] += 1
@@ -86,6 +91,7 @@ if TEMPORAL_AVAILABLE:
 
         @temporal_workflow.query
         def query(self) -> dict[str, Any]:
+            """Returns query data from the fake workflow handle."""
             return self._projection
 
     @temporal_workflow.defn
@@ -100,6 +106,7 @@ if TEMPORAL_AVAILABLE:
         }
 
         def __init__(self) -> None:
+            """Initializes _OperationalPrecedenceWorkflow."""
             self._projection = {
                 "run_id": "unknown",
                 "lifecycle_state": "created",
@@ -114,6 +121,7 @@ if TEMPORAL_AVAILABLE:
 
         @temporal_workflow.run
         async def run(self, run_input: Any) -> str:
+            """Runs the test helper implementation."""
             expected_signals = 1
             if isinstance(run_input, dict):
                 self._projection["run_id"] = str(run_input.get("run_id", "run-x"))
@@ -128,7 +136,7 @@ if TEMPORAL_AVAILABLE:
                 raw_expected_signals = input_json.get("expected_signals", 1)
             try:
                 expected_signals = max(1, int(raw_expected_signals))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 expected_signals = 1
 
             await temporal_workflow.wait_condition(
@@ -137,6 +145,7 @@ if TEMPORAL_AVAILABLE:
             return "done"
 
         def _projection_priority(self) -> str | None:
+            """Projection priority."""
             if self._projection["lifecycle_state"] == "aborted":
                 reason = str(self._projection.get("recovery_reason") or "")
                 if "cancel" in reason:
@@ -147,6 +156,7 @@ if TEMPORAL_AVAILABLE:
             return None
 
         def _signal_priority(self, signal_type: str) -> str | None:
+            """Signal priority."""
             if signal_type in self._PRIORITY_RANK:
                 return signal_type
             if signal_type in ("callback", "tool_result"):
@@ -155,6 +165,7 @@ if TEMPORAL_AVAILABLE:
 
         @temporal_workflow.signal
         async def signal(self, payload: dict[str, Any]) -> None:
+            """Signals the fake workflow handle."""
             signal_type = str(payload.get("signal_type", "unknown"))
             signal_payload = payload.get("signal_payload") or {}
             caused_by = payload.get("caused_by")
@@ -212,6 +223,7 @@ if TEMPORAL_AVAILABLE:
 
         @temporal_workflow.query
         def query(self) -> dict[str, Any]:
+            """Returns query data from the fake workflow handle."""
             return self._projection
 
 else:

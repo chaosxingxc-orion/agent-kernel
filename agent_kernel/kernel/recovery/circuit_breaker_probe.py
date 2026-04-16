@@ -44,6 +44,7 @@ class CircuitBreakerProbeScheduler:
             return self._task
 
         async def _loop() -> None:
+            """Runs the background loop until stopped."""
             try:
                 while True:
                     await asyncio.sleep(self._interval_s)

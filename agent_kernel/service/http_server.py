@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 def _error(status: int, detail: str) -> JSONResponse:
+    """Builds a typed error response payload."""
     return JSONResponse({"error": detail}, status_code=status)
 
 
@@ -152,6 +153,7 @@ async def get_run_events(request: Request) -> Response:
     )
 
     async def event_generator():
+        """Streams server-sent events for run updates."""
         try:
             async for event in facade.stream_run_events(
                 run_id,
@@ -559,6 +561,7 @@ def create_app(
         facade: The KernelFacade instance to expose via HTTP.
         api_key: Optional API key for Bearer-token authentication.
             When *None*, all endpoints are open (no auth).
+        max_body_bytes: Maximum accepted request-body size in bytes.
         metrics_collector: Optional ``KernelMetricsCollector`` instance.
             When provided, ``GET /metrics`` returns a JSON snapshot.
 
@@ -685,6 +688,7 @@ def create_app_temporal(
 
     @asynccontextmanager
     async def _lifespan(app: Starlette):  # type: ignore[type-arg]
+        """Manages application startup and shutdown lifecycle."""
         os.makedirs(data_dir, exist_ok=True)
 
         client = await create_temporal_client(

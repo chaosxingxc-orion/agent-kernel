@@ -28,6 +28,7 @@ from agent_kernel.service.http_server import create_app
 
 
 def _make_gateway() -> MagicMock:
+    """Make gateway."""
     gw = MagicMock()
     gw.start_workflow = AsyncMock(return_value={"workflow_id": "wf-1", "run_id": "r-1"})
     gw.signal_workflow = AsyncMock()
@@ -35,6 +36,7 @@ def _make_gateway() -> MagicMock:
 
 
 def _make_facade(with_registry: bool = True) -> KernelFacade:
+    """Make facade."""
     registry = TaskRegistry() if with_registry else None
     return KernelFacade(
         workflow_gateway=_make_gateway(),
@@ -46,6 +48,7 @@ def _make_descriptor(
     task_id: str = "t1",
     session_id: str = "sess-1",
 ) -> TaskDescriptor:
+    """Make descriptor."""
     return TaskDescriptor(
         task_id=task_id,
         session_id=session_id,
@@ -61,17 +64,22 @@ def _make_descriptor(
 
 
 class TestRegisterTask:
+    """Test suite for RegisterTask."""
+
     def test_register_task_succeeds_with_registry(self) -> None:
+        """Verifies register task succeeds with registry."""
         facade = _make_facade()
         facade.register_task(_make_descriptor())
         # No exception means success
 
     def test_register_task_raises_without_registry(self) -> None:
+        """Verifies register task raises without registry."""
         facade = _make_facade(with_registry=False)
         with pytest.raises(RuntimeError, match="task_registry"):
             facade.register_task(_make_descriptor())
 
     def test_duplicate_task_id_raises_value_error(self) -> None:
+        """Verifies duplicate task id raises value error."""
         facade = _make_facade()
         facade.register_task(_make_descriptor())
         with pytest.raises(ValueError, match="already registered"):
@@ -93,12 +101,16 @@ class TestRegisterTask:
 
 
 class TestGetTaskStatus:
+    """Test suite for GetTaskStatus."""
+
     def test_get_task_status_returns_none_for_unknown(self) -> None:
+        """Verifies get task status returns none for unknown."""
         facade = _make_facade()
         result = facade.get_task_status("no-such-task")
         assert result is None
 
     def test_get_task_status_returns_health_after_register(self) -> None:
+        """Verifies get task status returns health after register."""
         facade = _make_facade()
         facade.register_task(_make_descriptor())
         health = facade.get_task_status("t1")
@@ -107,11 +119,13 @@ class TestGetTaskStatus:
         assert health.lifecycle_state == "pending"
 
     def test_get_task_status_raises_without_registry(self) -> None:
+        """Verifies get task status raises without registry."""
         facade = _make_facade(with_registry=False)
         with pytest.raises(RuntimeError, match="task_registry"):
             facade.get_task_status("t1")
 
     def test_get_task_status_reflects_max_attempts(self) -> None:
+        """Verifies get task status reflects max attempts."""
         facade = _make_facade()
         facade.register_task(_make_descriptor())
         health = facade.get_task_status("t1")
@@ -125,12 +139,16 @@ class TestGetTaskStatus:
 
 
 class TestListSessionTasks:
+    """Test suite for ListSessionTasks."""
+
     def test_list_session_tasks_empty_for_unknown_session(self) -> None:
+        """Verifies list session tasks empty for unknown session."""
         facade = _make_facade()
         result = facade.list_session_tasks("no-session")
         assert result == []
 
     def test_list_session_tasks_returns_registered_tasks(self) -> None:
+        """Verifies list session tasks returns registered tasks."""
         facade = _make_facade()
         facade.register_task(_make_descriptor(task_id="t1", session_id="sess-A"))
         facade.register_task(_make_descriptor(task_id="t2", session_id="sess-A"))
@@ -140,6 +158,7 @@ class TestListSessionTasks:
         assert ids == {"t1", "t2"}
 
     def test_list_session_tasks_scoped_to_session(self) -> None:
+        """Verifies list session tasks scoped to session."""
         facade = _make_facade()
         facade.register_task(_make_descriptor(task_id="t1", session_id="sess-A"))
         facade.register_task(_make_descriptor(task_id="t2", session_id="sess-B"))
@@ -151,11 +170,13 @@ class TestListSessionTasks:
         assert tasks_b[0].task_id == "t2"
 
     def test_list_session_tasks_raises_without_registry(self) -> None:
+        """Verifies list session tasks raises without registry."""
         facade = _make_facade(with_registry=False)
         with pytest.raises(RuntimeError, match="task_registry"):
             facade.list_session_tasks("sess-A")
 
     def test_list_session_tasks_returns_descriptors(self) -> None:
+        """Verifies list session tasks returns descriptors."""
         facade = _make_facade()
         facade.register_task(_make_descriptor())
         tasks = facade.list_session_tasks("sess-1")
@@ -168,16 +189,21 @@ class TestListSessionTasks:
 
 
 class TestConstructorTaskRegistry:
+    """Test suite for ConstructorTaskRegistry."""
+
     def test_facade_constructed_without_registry(self) -> None:
+        """Verifies facade constructed without registry."""
         facade = KernelFacade(workflow_gateway=_make_gateway())
         assert facade._task_registry is None
 
     def test_facade_constructed_with_registry(self) -> None:
+        """Verifies facade constructed with registry."""
         reg = TaskRegistry()
         facade = KernelFacade(workflow_gateway=_make_gateway(), task_registry=reg)
         assert facade._task_registry is reg
 
     def test_facade_get_manifest_unaffected_by_task_registry(self) -> None:
+        """Verifies facade get manifest unaffected by task registry."""
         reg = TaskRegistry()
         facade = KernelFacade(workflow_gateway=_make_gateway(), task_registry=reg)
         manifest = facade.get_manifest()
@@ -198,11 +224,13 @@ class TestResolveEscalation:
     """
 
     def _make_gw(self) -> MagicMock:
+        """Make gw."""
         gw = MagicMock()
         gw.signal_workflow = AsyncMock()
         return gw
 
     def _make_facade(self, gw: MagicMock | None = None) -> tuple[KernelFacade, MagicMock]:
+        """Make facade."""
         gateway = gw or self._make_gw()
         return KernelFacade(workflow_gateway=gateway), gateway
 
@@ -271,6 +299,7 @@ class TestResolveEscalation:
 
 
 def _make_http_gateway() -> MagicMock:
+    """Make http gateway."""
     gw = MagicMock()
     gw.start_workflow = AsyncMock(return_value={"workflow_id": "wf-1", "run_id": "r-1"})
     gw.signal_workflow = AsyncMock()
@@ -278,6 +307,7 @@ def _make_http_gateway() -> MagicMock:
 
 
 def _make_http_app(gw: MagicMock | None = None):
+    """Make http app."""
     gateway = gw or _make_http_gateway()
     facade = KernelFacade(workflow_gateway=gateway)
     return create_app(facade), facade, gateway

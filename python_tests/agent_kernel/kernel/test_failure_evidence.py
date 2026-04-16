@@ -1,4 +1,4 @@
-"""Tests for deterministic FailureEnvelope evidence-priority behavior."""
+"""Verifies for deterministic failureenvelope evidence-priority behavior."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ class _SnapshotBuilder:
     """Builds a deterministic capability snapshot for turn tests."""
 
     def build(self, *_args: Any, **_kwargs: Any) -> CapabilitySnapshot:
+        """Builds a test fixture value."""
         return CapabilitySnapshot(
             snapshot_ref="snapshot:run-1:1:abc",
             snapshot_hash="hash-1",
@@ -40,6 +41,7 @@ class _AdmissionService:
     """Always admits to force TurnEngine into execution path."""
 
     async def admit(self, *_args: Any, **_kwargs: Any) -> bool:
+        """Admit."""
         return True
 
 
@@ -50,6 +52,7 @@ class _Executor:
     result: dict[str, Any]
 
     async def execute(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        """Executes the test operation."""
         return self.result
 
 

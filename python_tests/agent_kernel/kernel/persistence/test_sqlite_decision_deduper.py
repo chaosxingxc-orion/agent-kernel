@@ -1,4 +1,4 @@
-"""Tests for SQLiteDecisionDeduper — durable decision fingerprint deduplication."""
+"""Verifies for sqlitedecisiondeduper — durable decision fingerprint deduplication."""
 
 from __future__ import annotations
 

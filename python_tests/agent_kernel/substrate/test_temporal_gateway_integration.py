@@ -37,6 +37,7 @@ if TEMPORAL_AVAILABLE:
         """Small workflow used to validate gateway integration paths."""
 
         def __init__(self) -> None:
+            """Initializes GatewaySmokeWorkflow."""
             self._projection = {
                 "run_id": "unknown",
                 "lifecycle_state": "created",
@@ -48,6 +49,7 @@ if TEMPORAL_AVAILABLE:
 
         @temporal_workflow.run
         async def run(self, run_input: Any) -> str:
+            """Runs the test helper implementation."""
             self._projection["lifecycle_state"] = "ready"
             if isinstance(run_input, dict):
                 self._projection["run_id"] = str(run_input.get("run_id", "run-x"))
@@ -57,12 +59,14 @@ if TEMPORAL_AVAILABLE:
 
         @temporal_workflow.signal
         async def signal(self, payload: dict) -> None:
+            """Signals the fake workflow handle."""
             del payload
             self._projection["projected_offset"] += 1
             self._projection["waiting_external"] = False
 
         @temporal_workflow.query
         def query(self) -> dict:
+            """Returns query data from the fake workflow handle."""
             return self._projection
 
 else:

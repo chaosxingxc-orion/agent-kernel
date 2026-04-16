@@ -1,4 +1,4 @@
-"""Tests for ScheduledOutboxReconciler periodic reconciliation scheduler."""
+"""Verifies for scheduledoutboxreconciler periodic reconciliation scheduler."""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ class _ReconcilerStub:
         _dedupe_store: object,
         run_id: str,
     ) -> ReconciliationResult:
+        """Reconcile."""
         return ReconciliationResult(
             run_id=run_id,
             violations_found=self.per_run_found.get(run_id, 0),
@@ -35,12 +36,16 @@ class _ReconcilerStub:
 
 
 class _EventLogWithRuns:
+    """Test suite for  EventLogWithRuns."""
+
     def __init__(self, run_ids: list[str]) -> None:
+        """Initializes _EventLogWithRuns."""
         self._events_by_run = {run_id: [] for run_id in run_ids}
 
 
 @pytest.mark.asyncio
 async def test_reconcile_once_aggregates_counts_from_provider() -> None:
+    """Verifies reconcile once aggregates counts from provider."""
     reconciler = _ReconcilerStub(
         per_run_found={"r1": 2, "r2": 3},
         per_run_repaired={"r1": 1, "r2": 2},
@@ -60,6 +65,7 @@ async def test_reconcile_once_aggregates_counts_from_provider() -> None:
 
 @pytest.mark.asyncio
 async def test_reconcile_once_discovers_run_ids_from_event_log() -> None:
+    """Verifies reconcile once discovers run ids from event log."""
     reconciler = _ReconcilerStub(per_run_found={"r1": 1}, per_run_repaired={"r1": 1})
     scheduler = ScheduledOutboxReconciler(
         reconciler=reconciler,  # type: ignore[arg-type]
@@ -74,6 +80,7 @@ async def test_reconcile_once_discovers_run_ids_from_event_log() -> None:
 
 @pytest.mark.asyncio
 async def test_reconcile_once_emits_observability_on_violations() -> None:
+    """Verifies reconcile once emits observability on violations."""
     hook = MagicMock()
     reconciler = _ReconcilerStub(per_run_found={"r1": 1}, per_run_repaired={"r1": 0})
     scheduler = ScheduledOutboxReconciler(
@@ -89,6 +96,7 @@ async def test_reconcile_once_emits_observability_on_violations() -> None:
 
 @pytest.mark.asyncio
 async def test_start_is_idempotent_and_task_is_cancellable() -> None:
+    """Verifies start is idempotent and task is cancellable."""
     reconciler = _ReconcilerStub(per_run_found={}, per_run_repaired={})
     scheduler = ScheduledOutboxReconciler(
         reconciler=reconciler,  # type: ignore[arg-type]

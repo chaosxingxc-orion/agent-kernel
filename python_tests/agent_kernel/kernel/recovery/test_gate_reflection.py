@@ -1,4 +1,4 @@
-"""Tests for PlannedRecoveryGateService reflect_and_retry support."""
+"""Verifies for plannedrecoverygateservice reflect and retry support."""
 
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ from agent_kernel.kernel.recovery.reflection_builder import ReflectionContextBui
 
 
 def _make_projection(run_id: str = "run-1") -> RunProjection:
+    """Make projection."""
     return RunProjection(
         run_id=run_id,
         lifecycle_state="dispatching",
@@ -44,6 +45,7 @@ def _make_recovery_input(
     failed_action_id: str | None = "act-1",
     reflection_round: int = 0,
 ) -> RecoveryInput:
+    """Make recovery input."""
     return RecoveryInput(
         run_id=run_id,
         reason_code=reason_code,
@@ -76,6 +78,7 @@ class _ToolAwareContextPort:
         inference_config: InferenceConfig | None = None,
         recovery_context: dict | None = None,
     ) -> ContextWindow:
+        """Assembles a test context payload."""
         return ContextWindow(
             system_instructions="",
             tool_definitions=(
@@ -103,6 +106,7 @@ class _AlwaysToolCallGateway:
         config: InferenceConfig,
         idempotency_key: str,
     ) -> Any:
+        """Infers a test response payload."""
         from agent_kernel.kernel.contracts import ModelOutput
 
         return ModelOutput(
@@ -147,11 +151,13 @@ def _make_reasoning_loop_no_tools() -> ReasoningLoop:
 
 
 class TestReflectAndRetryMode:
-    """Tests that reflect_and_retry is chosen when prerequisites are met."""
+    """Verifies that reflect and retry is chosen when prerequisites are met."""
 
     def test_reflect_and_retry_mode_when_all_present(self) -> None:
-        """When policy, loop, and builder are set, a reflectable failure should yield
-        reflect_and_retry mode."""
+        """When policy, loop, and builder are set, a reflectable failure should yield.
+
+        reflect_and_retry mode.
+        """
         gate = PlannedRecoveryGateService(
             reflection_policy=_make_permissive_policy(),
             reasoning_loop=_make_reasoning_loop_with_tools(),
@@ -202,7 +208,7 @@ class TestReflectAndRetryMode:
 
 
 class TestNonReflectableFailure:
-    """Tests fallback behaviour for non-reflectable failure kinds."""
+    """Verifies fallback behaviour for non-reflectable failure kinds."""
 
     def test_non_reflectable_failure_does_not_reflect(self) -> None:
         """A non-reflectable failure kind should not trigger reflect_and_retry."""
@@ -271,7 +277,7 @@ class TestNonReflectableFailure:
 
 
 class TestRoundsExhausted:
-    """Tests fallback behaviour when reflection rounds are exhausted."""
+    """Verifies fallback behaviour when reflection rounds are exhausted."""
 
     def test_fallback_to_escalation_when_rounds_exhausted_with_escalate_flag(
         self,
@@ -339,10 +345,10 @@ class TestRoundsExhausted:
 
 
 class TestCorrectedActionAbsent:
-    """Tests that non-reflect decisions do not carry a corrected_action."""
+    """Verifies that non-reflect decisions do not carry a corrected action."""
 
     def test_no_corrected_action_for_abort(self) -> None:
-        """abort decisions should not carry corrected_action."""
+        """Abort decisions should not carry corrected_action."""
         gate = PlannedRecoveryGateService()
         recovery_input = _make_recovery_input(reason_code="permission_denied")
         decision = asyncio.run(gate.decide(recovery_input))
@@ -362,7 +368,7 @@ class TestCorrectedActionAbsent:
 
 
 class TestRecoveryDecisionBackwardCompatibility:
-    """Tests that RecoveryDecision can be constructed without corrected_action."""
+    """Verifies that recoverydecision can be constructed without corrected action."""
 
     def test_recovery_decision_without_corrected_action(self) -> None:
         """RecoveryDecision construction without corrected_action should work."""
@@ -396,8 +402,11 @@ class TestRecoveryDecisionBackwardCompatibility:
 
 
 class TestEnrichedContextActuallyUsed:
-    """Verify that the enriched context built by ReflectionContextBuilder
-    is the actual context passed to the reasoning loop, not discarded."""
+    """Verifies that enriched context built by ReflectionContextBuilder reaches the loop.
+
+    The built context is the actual context passed to the reasoning loop,
+    not discarded.
+    """
 
     def test_enriched_context_reaches_reasoning_loop(self) -> None:
         """The context_window in the reasoning result should be the enriched context.
@@ -417,6 +426,7 @@ class TestEnrichedContextActuallyUsed:
                 config: InferenceConfig,
                 idempotency_key: str,
             ) -> Any:
+                """Infers a test response payload."""
                 contexts_seen.append(context)
                 from agent_kernel.kernel.contracts import ModelOutput
 
@@ -429,6 +439,8 @@ class TestEnrichedContextActuallyUsed:
 
         # Use a context port that would return a different context if called.
         class SentinelContextPort:
+            """Test suite for SentinelContextPort."""
+
             async def assemble(
                 self,
                 run_id: str,
@@ -437,6 +449,7 @@ class TestEnrichedContextActuallyUsed:
                 inference_config: InferenceConfig | None = None,
                 recovery_context: dict | None = None,
             ) -> ContextWindow:
+                """Assembles a test context payload."""
                 return ContextWindow(system_instructions="SHOULD_NOT_BE_USED")
 
         capturing_gateway = CapturingGateway()
@@ -483,12 +496,15 @@ class TestReflectionIdempotencyKey:
         received_keys: list[str] = []
 
         class _KeyCapturingGateway:
+            """Test suite for  KeyCapturingGateway."""
+
             async def infer(
                 self,
                 context: Any,
                 config: Any,
                 idempotency_key: str,
             ) -> Any:
+                """Infers a test response payload."""
                 from agent_kernel.kernel.contracts import ModelOutput
 
                 received_keys.append(idempotency_key)
@@ -528,12 +544,15 @@ class TestReflectionIdempotencyKey:
         received_keys: list[str] = []
 
         class _KeyCapturingGateway:
+            """Test suite for  KeyCapturingGateway."""
+
             async def infer(
                 self,
                 context: Any,
                 config: Any,
                 idempotency_key: str,
             ) -> Any:
+                """Infers a test response payload."""
                 from agent_kernel.kernel.contracts import ModelOutput
 
                 received_keys.append(idempotency_key)

@@ -371,6 +371,7 @@ class OpenAILLMGateway(BaseLLMGateway):
         tools = self._build_tools(context)
 
         async def _call() -> Any:
+            """Calls the backend and returns raw model output."""
             try:
                 import openai
 
@@ -560,6 +561,7 @@ class AnthropicLLMGateway(BaseLLMGateway):
         tools = self._build_tools(context)
 
         async def _call() -> Any:
+            """Calls the backend and returns raw model output."""
             try:
                 import anthropic
 

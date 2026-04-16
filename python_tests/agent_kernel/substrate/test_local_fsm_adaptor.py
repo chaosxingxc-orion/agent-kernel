@@ -1,4 +1,4 @@
-"""Tests for LocalFSMAdaptor and LocalWorkflowGateway."""
+"""Verifies for localfsmadaptor and localworkflowgateway."""
 
 from __future__ import annotations
 
@@ -37,6 +37,7 @@ from agent_kernel.substrate.temporal.run_actor_workflow import (
 
 
 def _make_deps() -> RunActorDependencyBundle:
+    """Make deps."""
     event_log = InMemoryKernelRuntimeEventLog()
     return RunActorDependencyBundle(
         event_log=event_log,
@@ -57,12 +58,14 @@ def _make_deps() -> RunActorDependencyBundle:
 
 
 def test_local_substrate_config_defaults() -> None:
+    """Verifies local substrate config defaults."""
     config = LocalSubstrateConfig()
     assert config.workflow_id_prefix == "run"
     assert config.strict_mode_enabled is True
 
 
 def test_local_substrate_config_custom() -> None:
+    """Verifies local substrate config custom."""
     config = LocalSubstrateConfig(workflow_id_prefix="agent", strict_mode_enabled=False)
     assert config.workflow_id_prefix == "agent"
     assert config.strict_mode_enabled is False

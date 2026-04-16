@@ -1,4 +1,4 @@
-"""Tests for v6.4 DedupeStore monotonic idempotency semantics."""
+"""Verifies for v6.4 dedupestore monotonic idempotency semantics."""
 
 from __future__ import annotations
 

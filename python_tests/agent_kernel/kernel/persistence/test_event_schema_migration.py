@@ -1,4 +1,4 @@
-"""Tests for EventSchemaMigrator."""
+"""Test suite for EventSchemaMigrator."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from agent_kernel.kernel.persistence.event_schema_migration import (
 
 
 def _event(schema_version: str = "1") -> RuntimeEvent:
+    """Builds a test event fixture."""
     return RuntimeEvent(
         run_id="run-1",
         event_id="evt-1",
@@ -30,6 +31,7 @@ def _event(schema_version: str = "1") -> RuntimeEvent:
 
 
 def test_migrate_single_step_adds_original_schema_version_marker() -> None:
+    """Verifies migrate single step adds original schema version marker."""
     migrator = EventSchemaMigrator()
     migrator.register(
         "1",
@@ -47,12 +49,14 @@ def test_migrate_single_step_adds_original_schema_version_marker() -> None:
 
 
 def test_migrate_raises_when_no_path_exists() -> None:
+    """Verifies migrate raises when no path exists."""
     migrator = EventSchemaMigrator()
     with pytest.raises(SchemaMigrationError):
         migrator.migrate(_event("1"), "3")
 
 
 def test_migrate_batch_supports_multi_hop_path() -> None:
+    """Verifies migrate batch supports multi hop path."""
     migrator = EventSchemaMigrator()
     migrator.register("1", "2", lambda event: replace(event))
     migrator.register("2", "3", lambda event: replace(event))
@@ -61,6 +65,7 @@ def test_migrate_batch_supports_multi_hop_path() -> None:
 
 
 def test_migrate_chooses_shortest_available_path() -> None:
+    """Verifies migrate chooses shortest available path."""
     migrator = EventSchemaMigrator()
     hop_calls: list[str] = []
     migrator.register(
@@ -84,6 +89,7 @@ def test_migrate_chooses_shortest_available_path() -> None:
 
 
 def test_migrate_preserves_existing_original_schema_marker() -> None:
+    """Verifies migrate preserves existing original schema marker."""
     migrator = EventSchemaMigrator()
     migrator.register(
         "1",

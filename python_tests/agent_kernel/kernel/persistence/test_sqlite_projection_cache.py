@@ -1,4 +1,4 @@
-"""Tests for ProjectionSnapshotCache and CachedDecisionProjectionService."""
+"""Verifies for projectionsnapshotcache and cacheddecisionprojectionservice."""
 
 from __future__ import annotations
 
@@ -41,7 +41,10 @@ def _make_projection(
 
 
 class TestProjectionSnapshotCache:
+    """Test suite for ProjectionSnapshotCache."""
+
     def test_save_and_load_roundtrip(self) -> None:
+        """Verifies save and load roundtrip."""
         cache = ProjectionSnapshotCache()
         proj = _make_projection()
         cache.save(proj)
@@ -61,10 +64,12 @@ class TestProjectionSnapshotCache:
         assert loaded.policy_versions.pinned_at == "2026-01-01T00:00:00Z"
 
     def test_load_missing_returns_none(self) -> None:
+        """Verifies load missing returns none."""
         cache = ProjectionSnapshotCache()
         assert cache.load("nonexistent-run") is None
 
     def test_delete_removes_snapshot(self) -> None:
+        """Verifies delete removes snapshot."""
         cache = ProjectionSnapshotCache()
         proj = _make_projection()
         cache.save(proj)
@@ -73,6 +78,7 @@ class TestProjectionSnapshotCache:
         assert cache.load("run-1") is None
 
     def test_save_upserts_on_conflict(self) -> None:
+        """Verifies save upserts on conflict."""
         cache = ProjectionSnapshotCache()
         proj_v1 = _make_projection(offset=5)
         cache.save(proj_v1)
@@ -84,6 +90,8 @@ class TestProjectionSnapshotCache:
 
 
 class TestCachedDecisionProjectionService:
+    """Test suite for CachedDecisionProjectionService."""
+
     @pytest.mark.asyncio
     async def test_cached_service_seeds_from_sqlite(self) -> None:
         """After saving a projection to SQLite, a fresh service can load it."""

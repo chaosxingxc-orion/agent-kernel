@@ -24,18 +24,23 @@ from agent_kernel.kernel.contracts import Action, ActionCommit, EffectClass, Run
 
 @dataclass
 class RecordedEvent:
+    """Test suite for RecordedEvent."""
+
     name: str
     attributes: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class RecordedSpan:
+    """Test suite for RecordedSpan."""
+
     name: str
     attributes: dict[str, Any] = field(default_factory=dict)
     events: list[RecordedEvent] = field(default_factory=list)
     start_time: int | None = None
 
     def add_event(self, name: str, attributes: dict[str, Any] | None = None) -> None:
+        """Add event."""
         self.events.append(RecordedEvent(name=name, attributes=attributes or {}))
 
 
@@ -43,6 +48,7 @@ class MockTracer:
     """Minimal OTel Tracer mock that records spans without any SDK dependency."""
 
     def __init__(self) -> None:
+        """Initializes MockTracer."""
         self.spans: list[RecordedSpan] = []
 
     @contextmanager
@@ -53,6 +59,7 @@ class MockTracer:
         attributes: dict[str, Any] | None = None,
         start_time: int | None = None,
     ):
+        """Start as current span."""
         span = RecordedSpan(
             name=name,
             attributes=attributes or {},
@@ -63,10 +70,14 @@ class MockTracer:
 
 
 class MockTracerProvider:
+    """Test suite for MockTracerProvider."""
+
     def __init__(self) -> None:
+        """Initializes MockTracerProvider."""
         self.tracer = MockTracer()
 
     def get_tracer(self, name: str, **kwargs: Any) -> MockTracer:
+        """Get tracer."""
         return self.tracer
 
 
@@ -76,6 +87,7 @@ class MockTracerProvider:
 
 
 def _now() -> str:
+    """Returns a deterministic test timestamp."""
     return datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
 
 
@@ -86,6 +98,7 @@ def _make_event(
     event_authority: str = "authoritative_fact",
     payload_json: dict[str, Any] | None = None,
 ) -> RuntimeEvent:
+    """Make event."""
     return RuntimeEvent(
         run_id=run_id,
         event_id=f"evt-{offset}",
@@ -106,6 +119,7 @@ def _make_action(
     action_type: str = "tool_call",
     interaction_target: str | None = None,
 ) -> Action:
+    """Make action."""
     return Action(
         action_id=f"act-{uuid.uuid4().hex[:8]}",
         run_id=run_id,
@@ -123,6 +137,7 @@ def _make_commit(
     event_types: list[str] | None = None,
     event_authority: str = "authoritative_fact",
 ) -> ActionCommit:
+    """Make commit."""
     if event_types is None:
         event_types = ["run.started"]
     events = [
@@ -158,7 +173,10 @@ def _make_exporter(
 
 
 class TestOTLPRunTraceExporter:
+    """Test suite for OTLPRunTraceExporter."""
+
     def test_action_commit_produces_one_span(self) -> None:
+        """Verifies action commit produces one span."""
         exporter, tracer = _make_exporter()
         action = _make_action("run-1")
         commit = _make_commit("run-1", action=action, event_types=["turn.dispatched"])
@@ -166,6 +184,7 @@ class TestOTLPRunTraceExporter:
         assert len(tracer.spans) == 1
 
     def test_span_name_is_kernel_turn_for_action_commit(self) -> None:
+        """Verifies span name is kernel turn for action commit."""
         exporter, tracer = _make_exporter()
         action = _make_action("run-1")
         commit = _make_commit("run-1", action=action)
@@ -173,12 +192,14 @@ class TestOTLPRunTraceExporter:
         assert tracer.spans[0].name == "kernel.turn"
 
     def test_span_name_is_kernel_lifecycle_for_no_action_commit(self) -> None:
+        """Verifies span name is kernel lifecycle for no action commit."""
         exporter, tracer = _make_exporter()
         commit = _make_commit("run-2", event_types=["run.started"])
         asyncio.run(exporter.export_commit(commit))
         assert tracer.spans[0].name == "kernel.lifecycle"
 
     def test_span_attributes_include_run_id_and_commit_id(self) -> None:
+        """Verifies span attributes include run id and commit id."""
         exporter, tracer = _make_exporter()
         commit = _make_commit("run-3")
         asyncio.run(exporter.export_commit(commit))
@@ -187,6 +208,7 @@ class TestOTLPRunTraceExporter:
         assert attrs["kernel.commit_id"] == commit.commit_id
 
     def test_span_attributes_include_action_fields(self) -> None:
+        """Verifies span attributes include action fields."""
         exporter, tracer = _make_exporter()
         action = _make_action(
             "run-4", effect_class=EffectClass.COMPENSATABLE_WRITE, action_type="file_write"
@@ -199,6 +221,7 @@ class TestOTLPRunTraceExporter:
         assert attrs["kernel.effect_class"] == "compensatable_write"
 
     def test_interaction_target_included_in_span_attributes(self) -> None:
+        """Verifies interaction target included in span attributes."""
         exporter, tracer = _make_exporter()
         action = _make_action("run-5", interaction_target="it_service")
         commit = _make_commit("run-5", action=action)
@@ -206,6 +229,7 @@ class TestOTLPRunTraceExporter:
         assert tracer.spans[0].attributes["kernel.interaction_target"] == "it_service"
 
     def test_interaction_target_absent_when_none(self) -> None:
+        """Verifies interaction target absent when none."""
         exporter, tracer = _make_exporter()
         action = _make_action("run-6", interaction_target=None)
         commit = _make_commit("run-6", action=action)
@@ -213,6 +237,7 @@ class TestOTLPRunTraceExporter:
         assert "kernel.interaction_target" not in tracer.spans[0].attributes
 
     def test_span_events_one_per_runtime_event(self) -> None:
+        """Verifies span events one per runtime event."""
         exporter, tracer = _make_exporter()
         action = _make_action("run-7")
         commit = _make_commit(
@@ -227,6 +252,7 @@ class TestOTLPRunTraceExporter:
         assert span.events[1].name == "turn.dispatch_acknowledged"
 
     def test_span_event_attributes_include_event_authority(self) -> None:
+        """Verifies span event attributes include event authority."""
         exporter, tracer = _make_exporter()
         commit = _make_commit(
             "run-8",
@@ -238,12 +264,14 @@ class TestOTLPRunTraceExporter:
         assert event_attrs["event_authority"] == "derived_diagnostic"
 
     def test_span_event_attributes_include_commit_offset(self) -> None:
+        """Verifies span event attributes include commit offset."""
         exporter, tracer = _make_exporter()
         commit = _make_commit("run-9", offset=7, event_types=["run.ready"])
         asyncio.run(exporter.export_commit(commit))
         assert tracer.spans[0].events[0].attributes["commit_offset"] == 7
 
     def test_span_event_count_matches_runtime_event_count(self) -> None:
+        """Verifies span event count matches runtime event count."""
         exporter, tracer = _make_exporter()
         commit = _make_commit(
             "run-10",
@@ -254,6 +282,7 @@ class TestOTLPRunTraceExporter:
         assert tracer.spans[0].attributes["kernel.event_count"] == 3
 
     def test_payload_not_included_by_default(self) -> None:
+        """Verifies payload not included by default."""
         exporter, tracer = _make_exporter(include_payload=False)
         event = _make_event("run-11", 1, "turn.dispatched", payload_json={"host": "local"})
         commit = ActionCommit(
@@ -267,6 +296,7 @@ class TestOTLPRunTraceExporter:
         assert "payload.host" not in event_attrs
 
     def test_payload_included_when_flag_set(self) -> None:
+        """Verifies payload included when flag set."""
         exporter, tracer = _make_exporter(include_payload=True)
         event = _make_event("run-12", 1, "turn.dispatched", payload_json={"host": "local"})
         commit = ActionCommit(
@@ -280,6 +310,7 @@ class TestOTLPRunTraceExporter:
         assert event_attrs["payload.host"] == "local"
 
     def test_multiple_commits_produce_independent_spans(self) -> None:
+        """Verifies multiple commits produce independent spans."""
         exporter, tracer = _make_exporter()
         for i in range(3):
             asyncio.run(exporter.export_commit(_make_commit(f"run-{i}")))
@@ -288,6 +319,7 @@ class TestOTLPRunTraceExporter:
         assert run_ids == {"run-0", "run-1", "run-2"}
 
     def test_span_start_time_set_from_commit_timestamp(self) -> None:
+        """Verifies span start time set from commit timestamp."""
         exporter, tracer = _make_exporter()
         commit = _make_commit("run-ts")
         asyncio.run(exporter.export_commit(commit))
@@ -296,6 +328,7 @@ class TestOTLPRunTraceExporter:
         assert tracer.spans[0].start_time > 0
 
     def test_caused_by_included_in_attributes(self) -> None:
+        """Verifies caused by included in attributes."""
         exporter, tracer = _make_exporter()
         commit = ActionCommit(
             run_id="run-cb",
@@ -323,6 +356,7 @@ class TestOTLPRunTraceExporter:
             original_import = builtins.__import__
 
             def _blocking_import(name: str, *args: Any, **kwargs: Any) -> Any:
+                """Blocking import."""
                 if name.startswith("opentelemetry"):
                     raise ImportError(f"mocked missing: {name}")
                 return original_import(name, *args, **kwargs)

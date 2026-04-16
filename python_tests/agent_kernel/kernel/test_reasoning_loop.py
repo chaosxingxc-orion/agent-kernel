@@ -1,4 +1,4 @@
-"""Tests for ReasoningLoop orchestration."""
+"""Verifies for reasoningloop orchestration."""
 
 from __future__ import annotations
 
@@ -42,6 +42,7 @@ def _make_snapshot(tool_bindings: list[str] | None = None) -> CapabilitySnapshot
 
 
 def _make_inference_config() -> InferenceConfig:
+    """Make inference config."""
     return InferenceConfig(model_ref="echo")
 
 
@@ -51,7 +52,7 @@ def _make_inference_config() -> InferenceConfig:
 
 
 class TestReasoningLoopRunOnce:
-    """Tests for the core run_once method."""
+    """Verifies for the core run once method."""
 
     def test_run_once_returns_reasoning_result_type(self) -> None:
         """run_once should return a ReasoningResult instance."""
@@ -192,19 +193,22 @@ class TestReasoningLoopRunOnce:
 
 
 class TestIdempotencyKeyPassthrough:
-    """Tests that idempotency_key is forwarded to the LLM gateway."""
+    """Verifies that idempotency key is forwarded to the llm gateway."""
 
     def test_idempotency_key_passed_to_gateway(self) -> None:
         """run_once should forward the idempotency_key to LLMGateway.infer."""
         captured: list[str] = []
 
         class CapturingGateway:
+            """Test suite for CapturingGateway."""
+
             async def infer(
                 self,
                 context: ContextWindow,
                 config: InferenceConfig,
                 idempotency_key: str,
             ) -> ModelOutput:
+                """Infers a test response payload."""
                 captured.append(idempotency_key)
                 return ModelOutput(
                     raw_text="",
@@ -237,12 +241,15 @@ class TestIdempotencyKeyPassthrough:
         captured: list[str] = []
 
         class CapturingGateway:
+            """Test suite for CapturingGateway."""
+
             async def infer(
                 self,
                 context: ContextWindow,
                 config: InferenceConfig,
                 idempotency_key: str,
             ) -> ModelOutput:
+                """Infers a test response payload."""
                 captured.append(idempotency_key)
                 return ModelOutput(
                     raw_text="",
@@ -278,13 +285,15 @@ class TestIdempotencyKeyPassthrough:
 
 
 class TestRecoveryContextPassthrough:
-    """Tests that recovery_context is forwarded to the context port."""
+    """Verifies that recovery context is forwarded to the context port."""
 
     def test_recovery_context_passed_to_context_port(self) -> None:
         """run_once should forward recovery_context to ContextPort.assemble."""
         captured_context: list[dict | None] = []
 
         class CapturingContextPort:
+            """Test suite for CapturingContextPort."""
+
             async def assemble(
                 self,
                 run_id: str,
@@ -293,6 +302,7 @@ class TestRecoveryContextPassthrough:
                 inference_config: InferenceConfig | None = None,
                 recovery_context: dict | None = None,
             ) -> ContextWindow:
+                """Assembles a test context payload."""
                 captured_context.append(recovery_context)
                 return ContextWindow(system_instructions="")
 
@@ -319,6 +329,8 @@ class TestRecoveryContextPassthrough:
         captured_context: list[dict | None] = []
 
         class CapturingContextPort:
+            """Test suite for CapturingContextPort."""
+
             async def assemble(
                 self,
                 run_id: str,
@@ -327,6 +339,7 @@ class TestRecoveryContextPassthrough:
                 inference_config: InferenceConfig | None = None,
                 recovery_context: dict | None = None,
             ) -> ContextWindow:
+                """Assembles a test context payload."""
                 captured_context.append(recovery_context)
                 return ContextWindow(system_instructions="")
 
@@ -353,13 +366,15 @@ class TestRecoveryContextPassthrough:
 
 
 class TestPrebuiltContext:
-    """Tests that prebuilt_context parameter bypasses context_port.assemble()."""
+    """Verifies that prebuilt context parameter bypasses context port.assemble()."""
 
     def test_prebuilt_context_skips_context_port(self) -> None:
         """When prebuilt_context is provided, context_port.assemble is not called."""
         assemble_called: list[bool] = []
 
         class TrackingContextPort:
+            """Test suite for TrackingContextPort."""
+
             async def assemble(
                 self,
                 run_id: str,
@@ -368,6 +383,7 @@ class TestPrebuiltContext:
                 inference_config: InferenceConfig | None = None,
                 recovery_context: dict | None = None,
             ) -> ContextWindow:
+                """Assembles a test context payload."""
                 assemble_called.append(True)
                 return ContextWindow(system_instructions="from_port")
 
@@ -417,6 +433,8 @@ class TestPrebuiltContext:
         assemble_called: list[bool] = []
 
         class TrackingContextPort:
+            """Test suite for TrackingContextPort."""
+
             async def assemble(
                 self,
                 run_id: str,
@@ -425,6 +443,7 @@ class TestPrebuiltContext:
                 inference_config: InferenceConfig | None = None,
                 recovery_context: dict | None = None,
             ) -> ContextWindow:
+                """Assembles a test context payload."""
                 assemble_called.append(True)
                 return ContextWindow(system_instructions="from_port")
 

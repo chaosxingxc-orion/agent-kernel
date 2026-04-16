@@ -1,4 +1,4 @@
-"""Tests for RetryingExecutorService (P3b)."""
+"""Verifies for retryingexecutorservice (p3b)."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ class _CountingExecutor:
     calls: int = 0
 
     async def execute(self, action: Any, **kwargs: Any) -> Any:
+        """Executes the test operation."""
         result = self.results[self.calls]
         self.calls += 1
         if isinstance(result, BaseException):
@@ -28,12 +29,16 @@ class _CountingExecutor:
 
 
 class TestRetryingExecutorServiceInit:
+    """Test suite for RetryingExecutorServiceInit."""
+
     def test_max_attempts_zero_raises(self) -> None:
+        """Verifies max attempts zero raises."""
         inner = _CountingExecutor(results=[])
         with pytest.raises(ValueError):
             RetryingExecutorService(inner, max_attempts=0)
 
     def test_max_attempts_one_is_valid(self) -> None:
+        """Verifies max attempts one is valid."""
         inner = _CountingExecutor(results=[{"ok": True}])
         svc = RetryingExecutorService(inner, max_attempts=1)
         result = asyncio.run(svc.execute(object()))
@@ -41,7 +46,10 @@ class TestRetryingExecutorServiceInit:
 
 
 class TestRetryingExecutorServiceSuccessPaths:
+    """Test suite for RetryingExecutorServiceSuccessPaths."""
+
     def test_succeeds_on_first_attempt(self) -> None:
+        """Verifies succeeds on first attempt."""
         inner = _CountingExecutor(results=[{"ack": True}])
         svc = RetryingExecutorService(inner, max_attempts=2, base_delay_ms=0, jitter_ms=0)
         result = asyncio.run(svc.execute(object()))
@@ -49,6 +57,7 @@ class TestRetryingExecutorServiceSuccessPaths:
         assert inner.calls == 1
 
     def test_succeeds_after_one_transient_failure(self) -> None:
+        """Verifies succeeds after one transient failure."""
         inner = _CountingExecutor(results=[TransientExecutionError("flaky"), {"ack": True}])
         svc = RetryingExecutorService(inner, max_attempts=2, base_delay_ms=0, jitter_ms=0)
         result = asyncio.run(svc.execute(object()))
@@ -56,6 +65,7 @@ class TestRetryingExecutorServiceSuccessPaths:
         assert inner.calls == 2
 
     def test_succeeds_after_two_transient_failures(self) -> None:
+        """Verifies succeeds after two transient failures."""
         inner = _CountingExecutor(
             results=[
                 TransientExecutionError("flaky"),
@@ -70,7 +80,10 @@ class TestRetryingExecutorServiceSuccessPaths:
 
 
 class TestRetryingExecutorServiceFailurePaths:
+    """Test suite for RetryingExecutorServiceFailurePaths."""
+
     def test_raises_transient_error_after_all_attempts_exhausted(self) -> None:
+        """Verifies raises transient error after all attempts exhausted."""
         inner = _CountingExecutor(
             results=[
                 TransientExecutionError("always fails"),
@@ -83,6 +96,7 @@ class TestRetryingExecutorServiceFailurePaths:
         assert inner.calls == 2
 
     def test_non_transient_error_propagates_immediately(self) -> None:
+        """Verifies non transient error propagates immediately."""
         inner = _CountingExecutor(results=[RuntimeError("permanent"), {"ack": True}])
         svc = RetryingExecutorService(inner, max_attempts=3, base_delay_ms=0, jitter_ms=0)
         with pytest.raises(RuntimeError):
@@ -91,10 +105,14 @@ class TestRetryingExecutorServiceFailurePaths:
         assert inner.calls == 1
 
     def test_kwargs_forwarded_to_inner_executor(self) -> None:
+        """Verifies kwargs forwarded to inner executor."""
         received_kwargs: list[dict[str, Any]] = []
 
         class _KwargsCapturingExecutor:
+            """Test suite for  KwargsCapturingExecutor."""
+
             async def execute(self, action: Any, **kwargs: Any) -> Any:
+                """Executes the test operation."""
                 received_kwargs.append(kwargs)
                 return {"ok": True}
 

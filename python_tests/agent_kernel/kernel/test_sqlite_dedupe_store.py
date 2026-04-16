@@ -1,4 +1,4 @@
-"""Tests for SQLite-backed dedupe store persistence and monotonic behavior."""
+"""Verifies for sqlite-backed dedupe store persistence and monotonic behavior."""
 
 from __future__ import annotations
 

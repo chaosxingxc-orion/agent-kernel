@@ -60,10 +60,12 @@ class _DelayedFirstGetProjectionService(InMemoryDecisionProjectionService):
     """Delays the first projection read so a callback signal can be processed."""
 
     def __init__(self, event_log: InMemoryKernelRuntimeEventLog) -> None:
+        """Initializes _DelayedFirstGetProjectionService."""
         super().__init__(event_log)
         self._delay_consumed = False
 
     async def get(self, run_id: str):  # type: ignore[override]
+        """Gets test data."""
         if not self._delay_consumed and _in_temporal_workflow_context():
             self._delay_consumed = True
             await temporal_workflow.sleep(timedelta(seconds=1))
@@ -83,11 +85,13 @@ class _PerRunDelayedFirstGetProjectionService(InMemoryDecisionProjectionService)
         delayed_run_ids: set[str],
         delay_seconds: int,
     ) -> None:
+        """Initializes _PerRunDelayedFirstGetProjectionService."""
         super().__init__(event_log)
         self._remaining_delayed_run_ids = set(delayed_run_ids)
         self._delay_seconds = delay_seconds
 
     async def get(self, run_id: str):  # type: ignore[override]
+        """Gets test data."""
         if run_id in self._remaining_delayed_run_ids and _in_temporal_workflow_context():
             self._remaining_delayed_run_ids.remove(run_id)
             await temporal_workflow.sleep(timedelta(seconds=self._delay_seconds))
@@ -189,7 +193,6 @@ async def test_real_run_actor_workflow_runs_signal_and_query_in_temporal_test_en
 @pytest.mark.asyncio
 async def test_child_completion_signal_updates_parent_active_child_runs_in_temporal_env() -> None:
     """Child completion should remove child id from parent projection list."""
-
     assert WorkflowEnvironment is not None
     assert Worker is not None
     assert UnsandboxedWorkflowRunner is not None

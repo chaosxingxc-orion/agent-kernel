@@ -305,6 +305,7 @@ class KernelRuntime:
         )
 
         def _worker_health_check() -> tuple[HealthStatus, str]:
+            """Worker health check."""
             if adaptor.worker_failed:
                 with contextlib.suppress(Exception):
                     adaptor.check_worker()
@@ -331,6 +332,7 @@ class KernelRuntime:
             background_tasks.append(outbox_scheduler.start())
 
             def _outbox_health_check() -> tuple[HealthStatus, str]:
+                """Outbox health check."""
                 last_result = outbox_scheduler.last_reconciliation_result
                 if last_result is None:
                     return (HealthStatus.OK, "outbox_reconciler_not_run_yet")
@@ -612,6 +614,7 @@ def _collect_closeables(*, event_log: Any, dedupe_store: Any) -> list[Any]:
     seen: set[int] = set()
 
     def _register(candidate: Any) -> None:
+        """Registers a callback for worker task completion."""
         if candidate is None:
             return
         candidate_id = id(candidate)

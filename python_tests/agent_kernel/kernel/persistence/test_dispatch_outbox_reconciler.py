@@ -1,4 +1,4 @@
-"""Tests for DispatchOutboxReconciler (Saga-pattern drift repair)."""
+"""Verifies for dispatchoutboxreconciler (saga-pattern drift repair)."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ RUN_ID = "run-recon-test"
 
 
 def _make_envelope(run_id: str, key_suffix: str = "op1") -> IdempotencyEnvelope:
+    """Make envelope."""
     key = f"{run_id}:{key_suffix}"
     return IdempotencyEnvelope(
         dispatch_idempotency_key=key,
@@ -43,12 +44,15 @@ class _SyncEventLogStub:
     """Minimal sync event log that exposes list_events() and _events."""
 
     def __init__(self) -> None:
+        """Initializes _SyncEventLogStub."""
         self._events: list[Any] = []
 
     def list_events(self) -> list[Any]:
+        """List events."""
         return list(self._events)
 
     def add_event(self, run_id: str, idempotency_key: str, event_type: str) -> None:
+        """Add event."""
         ev = MagicMock()
         ev.run_id = run_id
         ev.idempotency_key = idempotency_key
@@ -60,12 +64,15 @@ class _AsyncEventLogStub:
     """Minimal async event log compatible with averify_event_dedupe_consistency."""
 
     def __init__(self) -> None:
+        """Initializes _AsyncEventLogStub."""
         self._store: list[Any] = []
 
     async def load(self, run_id: str, after_offset: int = 0) -> list[Any]:
+        """Load."""
         return [e for e in self._store if getattr(e, "run_id", None) == run_id]
 
     def add_event(self, run_id: str, idempotency_key: str, event_type: str) -> None:
+        """Add event."""
         ev = MagicMock()
         ev.run_id = run_id
         ev.idempotency_key = idempotency_key
@@ -79,7 +86,10 @@ class _AsyncEventLogStub:
 
 
 class TestReconciliationAction:
+    """Test suite for ReconciliationAction."""
+
     def test_is_frozen_dataclass(self) -> None:
+        """Verifies is frozen dataclass."""
         action = ReconciliationAction(
             idempotency_key="k",
             violation_kind="orphaned_dedupe_key",
@@ -90,6 +100,7 @@ class TestReconciliationAction:
             action.action_taken = "skipped"  # type: ignore[misc]
 
     def test_fields_stored_correctly(self) -> None:
+        """Verifies fields stored correctly."""
         action = ReconciliationAction(
             idempotency_key="run1:op1",
             violation_kind="unknown_effect_no_log_evidence",
@@ -108,25 +119,32 @@ class TestReconciliationAction:
 
 
 class TestReconciliationResult:
+    """Test suite for ReconciliationResult."""
+
     def test_is_clean_when_no_violations(self) -> None:
+        """Verifies is clean when no violations."""
         result = ReconciliationResult(run_id=RUN_ID)
         assert result.is_clean is True
 
     def test_is_clean_false_when_violations_found(self) -> None:
+        """Verifies is clean false when violations found."""
         result = ReconciliationResult(run_id=RUN_ID, violations_found=1)
         assert result.is_clean is False
 
     def test_defaults(self) -> None:
+        """Verifies defaults."""
         result = ReconciliationResult(run_id="r")
         assert result.actions == []
         assert result.violations_found == 0
         assert result.violations_repaired == 0
 
     def test_run_id_stored(self) -> None:
+        """Verifies run id stored."""
         result = ReconciliationResult(run_id="my-run")
         assert result.run_id == "my-run"
 
     def test_actions_list_is_mutable(self) -> None:
+        """Verifies actions list is mutable."""
         result = ReconciliationResult(run_id="r")
         action = ReconciliationAction(
             idempotency_key="k",
@@ -144,16 +162,21 @@ class TestReconciliationResult:
 
 
 class TestDispatchOutboxReconcilerSync:
+    """Test suite for DispatchOutboxReconcilerSync."""
+
     def _reconciler(self, logger: logging.Logger | None = None) -> DispatchOutboxReconciler:
+        """Builds a reconciler test fixture."""
         return DispatchOutboxReconciler(logger=logger)
 
     def _store_with_reserved(self, key_suffix: str = "op1") -> InMemoryDedupeStore:
+        """Store with reserved."""
         store = InMemoryDedupeStore()
         env = _make_envelope(RUN_ID, key_suffix)
         store.reserve(env)
         return store
 
     def test_clean_run_is_clean(self) -> None:
+        """Verifies clean run is clean."""
         log = _SyncEventLogStub()
         store = InMemoryDedupeStore()
         result = self._reconciler().reconcile_sync(log, store, RUN_ID)
@@ -163,6 +186,7 @@ class TestDispatchOutboxReconcilerSync:
         assert result.actions == []
 
     def test_orphaned_reserved_key_marked_unknown_effect(self) -> None:
+        """Verifies orphaned reserved key marked unknown effect."""
         log = _SyncEventLogStub()  # no events
         store = self._store_with_reserved()
         key = f"{RUN_ID}:op1"
@@ -182,6 +206,7 @@ class TestDispatchOutboxReconcilerSync:
         assert record.state == "unknown_effect"
 
     def test_orphaned_dispatched_key_marked_unknown_effect(self) -> None:
+        """Verifies orphaned dispatched key marked unknown effect."""
         log = _SyncEventLogStub()
         store = InMemoryDedupeStore()
         env = _make_envelope(RUN_ID, "op2")
@@ -199,6 +224,7 @@ class TestDispatchOutboxReconcilerSync:
         assert record.state == "unknown_effect"
 
     def test_orphaned_unknown_effect_key_skipped(self) -> None:
+        """Verifies orphaned unknown effect key skipped."""
         log = _SyncEventLogStub()
         store = InMemoryDedupeStore()
         env = _make_envelope(RUN_ID, "op3")
@@ -217,6 +243,7 @@ class TestDispatchOutboxReconcilerSync:
         assert store.get(env.dispatch_idempotency_key).state == "unknown_effect"  # type: ignore[union-attr]
 
     def test_orphaned_acknowledged_key_skipped(self) -> None:
+        """Verifies orphaned acknowledged key skipped."""
         log = _SyncEventLogStub()
         store = InMemoryDedupeStore()
         env = _make_envelope(RUN_ID, "op4")
@@ -255,6 +282,7 @@ class TestDispatchOutboxReconcilerSync:
         assert action.violation_kind == "unknown_effect_no_log_evidence"
 
     def test_multiple_violations_all_repaired(self) -> None:
+        """Verifies multiple violations all repaired."""
         log = _SyncEventLogStub()
         store = InMemoryDedupeStore()
 
@@ -287,6 +315,7 @@ class TestDispatchOutboxReconcilerSync:
         original_mark_dispatched = store.mark_dispatched
 
         def _failing_mark_dispatched(key: str, *args: Any, **kwargs: Any) -> None:
+            """Failing mark dispatched."""
             raise DedupeStoreStateError("simulated race condition")
 
         store.mark_dispatched = _failing_mark_dispatched  # type: ignore[method-assign]
@@ -303,6 +332,7 @@ class TestDispatchOutboxReconcilerSync:
         store.mark_dispatched = original_mark_dispatched  # type: ignore[method-assign]
 
     def test_violations_repaired_counts_non_skipped(self) -> None:
+        """Verifies violations repaired counts non skipped."""
         log = _SyncEventLogStub()
         store = InMemoryDedupeStore()
 
@@ -325,6 +355,7 @@ class TestDispatchOutboxReconcilerSync:
         self,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
+        """Verifies custom logger receives warning for unknown effect no evidence."""
         log = _SyncEventLogStub()
         store = InMemoryDedupeStore()
         env = _make_envelope(RUN_ID, "op-warn")
@@ -343,6 +374,7 @@ class TestDispatchOutboxReconcilerSync:
         assert any("unknown_effect" in record.message for record in caplog.records)
 
     def test_reconcile_sync_returns_correct_run_id(self) -> None:
+        """Verifies reconcile sync returns correct run id."""
         log = _SyncEventLogStub()
         store = InMemoryDedupeStore()
         result = self._reconciler().reconcile_sync(log, store, "my-special-run")
@@ -355,11 +387,15 @@ class TestDispatchOutboxReconcilerSync:
 
 
 class TestDispatchOutboxReconcilerAsync:
+    """Test suite for DispatchOutboxReconcilerAsync."""
+
     def _reconciler(self) -> DispatchOutboxReconciler:
+        """Builds a reconciler test fixture."""
         return DispatchOutboxReconciler()
 
     @pytest.mark.asyncio
     async def test_clean_run_is_clean_async(self) -> None:
+        """Verifies clean run is clean async."""
         log = _AsyncEventLogStub()
         store = InMemoryDedupeStore()
         result = await self._reconciler().reconcile(log, store, RUN_ID)
@@ -368,6 +404,7 @@ class TestDispatchOutboxReconcilerAsync:
 
     @pytest.mark.asyncio
     async def test_orphaned_reserved_key_async(self) -> None:
+        """Verifies orphaned reserved key async."""
         log = _AsyncEventLogStub()
         store = InMemoryDedupeStore()
         env = _make_envelope(RUN_ID, "async-op1")
@@ -384,6 +421,7 @@ class TestDispatchOutboxReconcilerAsync:
 
     @pytest.mark.asyncio
     async def test_orphaned_dispatched_key_async(self) -> None:
+        """Verifies orphaned dispatched key async."""
         log = _AsyncEventLogStub()
         store = InMemoryDedupeStore()
         env = _make_envelope(RUN_ID, "async-op2")
@@ -399,6 +437,7 @@ class TestDispatchOutboxReconcilerAsync:
 
     @pytest.mark.asyncio
     async def test_unknown_effect_no_log_evidence_async(self) -> None:
+        """Verifies unknown effect no log evidence async."""
         log = _AsyncEventLogStub()
         store = InMemoryDedupeStore()
         env = _make_envelope(RUN_ID, "async-op3")
@@ -417,6 +456,7 @@ class TestDispatchOutboxReconcilerAsync:
 
     @pytest.mark.asyncio
     async def test_already_unknown_effect_orphaned_key_skipped_async(self) -> None:
+        """Verifies already unknown effect orphaned key skipped async."""
         log = _AsyncEventLogStub()
         store = InMemoryDedupeStore()
         env = _make_envelope(RUN_ID, "async-op4")
@@ -435,12 +475,14 @@ class TestDispatchOutboxReconcilerAsync:
 
     @pytest.mark.asyncio
     async def test_dedupe_state_error_skipped_async(self) -> None:
+        """Verifies dedupe state error skipped async."""
         log = _AsyncEventLogStub()
         store = InMemoryDedupeStore()
         env = _make_envelope(RUN_ID, "async-err")
         store.reserve(env)
 
         def _fail(*args: Any, **kwargs: Any) -> None:
+            """Fails intentionally for test coverage."""
             raise DedupeStoreStateError("simulated")
 
         store.mark_dispatched = _fail  # type: ignore[method-assign]
@@ -452,6 +494,7 @@ class TestDispatchOutboxReconcilerAsync:
 
     @pytest.mark.asyncio
     async def test_reconcile_returns_correct_run_id_async(self) -> None:
+        """Verifies reconcile returns correct run id async."""
         log = _AsyncEventLogStub()
         store = InMemoryDedupeStore()
         result = await self._reconciler().reconcile(log, store, "async-run-42")
@@ -459,6 +502,7 @@ class TestDispatchOutboxReconcilerAsync:
 
     @pytest.mark.asyncio
     async def test_multiple_violations_mixed_async(self) -> None:
+        """Verifies multiple violations mixed async."""
         log = _AsyncEventLogStub()
         store = InMemoryDedupeStore()
 

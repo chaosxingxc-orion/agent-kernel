@@ -10,7 +10,6 @@ from agent_kernel.adapters.facade.kernel_facade import KernelFacade
 
 def test_kernel_facade_exposes_only_documented_entrypoints() -> None:
     """KernelFacade must provide all agent_kernel facade entrypoints."""
-
     expected = {
         "start_run",
         "signal_run",
@@ -25,7 +24,6 @@ def test_kernel_facade_exposes_only_documented_entrypoints() -> None:
 
 def test_cancel_run_request_matches_agent_kernel_contract_shape() -> None:
     """CancelRunRequest must exist and follow the interface contract fields."""
-
     cancel_run_request = kernel_contracts.CancelRunRequest
     assert is_dataclass(cancel_run_request)
     assert [field.name for field in fields(cancel_run_request)] == [
@@ -37,7 +35,6 @@ def test_cancel_run_request_matches_agent_kernel_contract_shape() -> None:
 
 def test_resume_run_request_matches_agent_kernel_contract_shape() -> None:
     """ResumeRunRequest must expose run identity and optional snapshot reference."""
-
     resume_run_request = kernel_contracts.ResumeRunRequest
     assert is_dataclass(resume_run_request)
     assert [field.name for field in fields(resume_run_request)] == [
@@ -67,7 +64,6 @@ def test_query_run_response_includes_recovery_mode_for_observability() -> None:
 
 def test_temporal_activity_input_contracts_expose_minimal_semantic_fields() -> None:
     """Activity input DTOs must expose stable contract-first field ordering."""
-
     assert [field.name for field in fields(kernel_contracts.AdmissionActivityInput)] == [
         "run_id",
         "action",
@@ -102,7 +98,6 @@ def test_temporal_activity_input_contracts_expose_minimal_semantic_fields() -> N
 
 def test_temporal_activity_gateway_contract_defines_all_execution_entrypoints() -> None:
     """TemporalActivityGateway must define all activity execution methods."""
-
     temporal_activity_gateway = kernel_contracts.TemporalActivityGateway
     for method_name in (
         "execute_admission",

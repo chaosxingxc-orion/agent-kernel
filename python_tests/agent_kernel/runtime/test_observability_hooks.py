@@ -1,4 +1,4 @@
-"""Tests for LoggingObservabilityHook JSON mode (R3a) and schema_version (R3b)."""
+"""Verifies for loggingobservabilityhook json mode (r3a) and schema version (r3b)."""
 
 from __future__ import annotations
 
@@ -19,16 +19,19 @@ class _CapturingHandler(logging.Handler):
     """Logging handler that stores formatted messages for test inspection."""
 
     def __init__(self) -> None:
+        """Initializes _CapturingHandler."""
         super().__init__()
         self.records: list[logging.LogRecord] = []
         self.messages: list[str] = []
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Emits a test event payload."""
         self.records.append(record)
         self.messages.append(self.format(record))
 
 
 def _attach_handler(logger_name: str) -> _CapturingHandler:
+    """Attach handler."""
     handler = _CapturingHandler()
     handler.setFormatter(logging.Formatter("%(message)s"))
     logger = logging.getLogger(logger_name)
@@ -46,6 +49,7 @@ class TestLoggingObservabilityHookKeyValue:
     """Verifies the default key=value text format is preserved."""
 
     def test_turn_transition_text_contains_run_id(self) -> None:
+        """Verifies turn transition text contains run id."""
         logger_name = "test_kv_turn"
         handler = _attach_handler(logger_name)
         hook = LoggingObservabilityHook(logger_name=logger_name, use_json=False)
@@ -63,6 +67,7 @@ class TestLoggingObservabilityHookKeyValue:
         assert "turn_transition" in msg
 
     def test_recovery_text_contains_mode(self) -> None:
+        """Verifies recovery text contains mode."""
         logger_name = "test_kv_recovery"
         handler = _attach_handler(logger_name)
         hook = LoggingObservabilityHook(logger_name=logger_name, use_json=False)
@@ -76,6 +81,7 @@ class TestLoggingObservabilityHookJSON:
     """Verifies JSON mode emits valid JSON with expected fields."""
 
     def _hook_and_handler(self) -> tuple[LoggingObservabilityHook, _CapturingHandler]:
+        """Hook and handler."""
         import uuid
 
         name = f"test_json_{uuid.uuid4().hex[:8]}"
@@ -84,10 +90,12 @@ class TestLoggingObservabilityHookJSON:
         return hook, handler
 
     def _parse(self, handler: _CapturingHandler) -> dict[str, Any]:
+        """Parses a test payload."""
         assert handler.messages, "No log message emitted"
         return json.loads(handler.messages[0])
 
     def test_turn_transition_json_fields(self) -> None:
+        """Verifies turn transition json fields."""
         hook, handler = self._hook_and_handler()
         hook.on_turn_state_transition(
             run_id="run-1",
@@ -107,6 +115,7 @@ class TestLoggingObservabilityHookJSON:
         assert isinstance(obj["ts_ms"], int)
 
     def test_run_lifecycle_transition_json_fields(self) -> None:
+        """Verifies run lifecycle transition json fields."""
         hook, handler = self._hook_and_handler()
         hook.on_run_lifecycle_transition(
             run_id="run-2",
@@ -120,6 +129,7 @@ class TestLoggingObservabilityHookJSON:
         assert obj["from_state"] == "ready"
 
     def test_llm_call_json_fields(self) -> None:
+        """Verifies llm call json fields."""
         hook, handler = self._hook_and_handler()
         hook.on_llm_call(run_id="run-3", model_ref="gpt-4o", latency_ms=120, token_usage=None)
         obj = self._parse(handler)
@@ -129,6 +139,7 @@ class TestLoggingObservabilityHookJSON:
         assert obj["tok_out"] == 0
 
     def test_recovery_triggered_json_fields(self) -> None:
+        """Verifies recovery triggered json fields."""
         hook, handler = self._hook_and_handler()
         hook.on_recovery_triggered(run_id="run-4", reason_code="timeout", mode="abort")
         obj = self._parse(handler)
@@ -136,6 +147,7 @@ class TestLoggingObservabilityHookJSON:
         assert obj["mode"] == "abort"
 
     def test_admission_evaluated_json_fields(self) -> None:
+        """Verifies admission evaluated json fields."""
         hook, handler = self._hook_and_handler()
         hook.on_admission_evaluated(run_id="run-5", action_id="act-5", admitted=True, latency_ms=5)
         obj = self._parse(handler)
@@ -143,6 +155,7 @@ class TestLoggingObservabilityHookJSON:
         assert obj["admitted"] is True
 
     def test_parallel_branch_result_json_fields(self) -> None:
+        """Verifies parallel branch result json fields."""
         hook, handler = self._hook_and_handler()
         hook.on_parallel_branch_result(
             run_id="run-6",
@@ -177,7 +190,10 @@ class TestLoggingObservabilityHookJSON:
 
 
 class TestRuntimeEventSchemaVersion:
+    """Test suite for RuntimeEventSchemaVersion."""
+
     def test_runtime_event_has_schema_version_field(self) -> None:
+        """Verifies runtime event has schema version field."""
         from agent_kernel.kernel.contracts import RuntimeEvent
 
         event = RuntimeEvent(
@@ -194,6 +210,7 @@ class TestRuntimeEventSchemaVersion:
         assert event.schema_version == "1"
 
     def test_runtime_event_schema_version_default_is_current(self) -> None:
+        """Verifies runtime event schema version default is current."""
         from agent_kernel.kernel.contracts import RuntimeEvent
         from agent_kernel.kernel.event_registry import _CURRENT_EVENT_SCHEMA_VERSION
 
@@ -211,22 +228,26 @@ class TestRuntimeEventSchemaVersion:
         assert event.schema_version == _CURRENT_EVENT_SCHEMA_VERSION
 
     def test_validate_event_schema_version_current_returns_true(self) -> None:
+        """Verifies validate event schema version current returns true."""
         from agent_kernel.kernel.event_registry import validate_event_schema_version
 
         assert validate_event_schema_version("1") is True
 
     def test_validate_event_schema_version_unknown_returns_false(self) -> None:
+        """Verifies validate event schema version unknown returns false."""
         from agent_kernel.kernel.event_registry import validate_event_schema_version
 
         assert validate_event_schema_version("99") is False
 
     def test_validate_event_schema_version_strict_raises_on_mismatch(self) -> None:
+        """Verifies validate event schema version strict raises on mismatch."""
         from agent_kernel.kernel.event_registry import validate_event_schema_version
 
         with pytest.raises(ValueError, match="schema_version"):
             validate_event_schema_version("0", strict=True)
 
     def test_event_type_descriptor_carries_schema_version(self) -> None:
+        """Verifies event type descriptor carries schema version."""
         from agent_kernel.kernel.event_registry import (
             _CURRENT_EVENT_SCHEMA_VERSION,
             KERNEL_EVENT_REGISTRY,

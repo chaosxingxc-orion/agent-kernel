@@ -1,4 +1,4 @@
-"""Tests for agent_kernel.runtime.metrics."""
+"""Verifies for agent kernel.runtime.metrics."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ class TestCounterIncrementAndGet:
     """Counter basics: increment and read back."""
 
     def test_counter_increment_and_get(self) -> None:
+        """Verifies counter increment and get."""
         c = KernelMetricsCollector()
         assert c.get_counter("x") == 0
         c.inc("x")
@@ -24,6 +25,7 @@ class TestGaugeSetAndGet:
     """Gauge basics: set to arbitrary value and read back."""
 
     def test_gauge_set_and_get(self) -> None:
+        """Verifies gauge set and get."""
         c = KernelMetricsCollector()
         assert c.get_gauge("g") == 0.0
         c.set_gauge("g", 42.5)
@@ -36,6 +38,7 @@ class TestCounterWithLabels:
     """Counters with different label sets are independent."""
 
     def test_counter_with_labels(self) -> None:
+        """Verifies counter with labels."""
         c = KernelMetricsCollector()
         c.inc("req", {"method": "GET"})
         c.inc("req", {"method": "GET"})
@@ -51,6 +54,7 @@ class TestSnapshotReturnsAllMetrics:
     """snapshot() returns MetricPoint for every counter and gauge."""
 
     def test_snapshot_returns_all_metrics(self) -> None:
+        """Verifies snapshot returns all metrics."""
         c = KernelMetricsCollector()
         c.inc("a")
         c.inc("a", {"x": "1"})
@@ -73,6 +77,7 @@ class TestOnRunLifecycleIncrementsCounters:
     """ObservabilityHook lifecycle events drive counters and gauge."""
 
     def test_on_run_lifecycle_increments_counters(self) -> None:
+        """Verifies on run lifecycle increments counters."""
         c = KernelMetricsCollector()
         ts = 1_000_000
 
@@ -113,6 +118,7 @@ class TestOnRunLifecycleIncrementsCounters:
         assert c.get_gauge("active_runs") == 0.0
 
     def test_turn_state_transition_increments_turns(self) -> None:
+        """Verifies turn state transition increments turns."""
         c = KernelMetricsCollector()
         c.on_turn_state_transition(
             run_id="r1",
@@ -134,6 +140,7 @@ class TestOnRunLifecycleIncrementsCounters:
         assert c.get_counter("turns_executed_total", {"outcome": "noop"}) == 1
 
     def test_recovery_triggered_increments(self) -> None:
+        """Verifies recovery triggered increments."""
         c = KernelMetricsCollector()
         c.on_recovery_triggered(run_id="r1", reason_code="timeout", mode="abort")
         c.on_recovery_triggered(
@@ -155,11 +162,13 @@ class TestThreadSafety:
     """Concurrent increments from multiple threads produce correct totals."""
 
     def test_thread_safety(self) -> None:
+        """Verifies thread safety."""
         c = KernelMetricsCollector()
         n_threads = 8
         n_increments = 1_000
 
         def _worker() -> None:
+            """Runs worker behavior for the test."""
             for _ in range(n_increments):
                 c.inc("concurrent_counter")
 

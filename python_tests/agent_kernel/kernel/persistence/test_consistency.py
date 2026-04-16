@@ -38,6 +38,7 @@ from agent_kernel.kernel.persistence.sqlite_colocated_bundle import ColocatedSQL
 
 
 def _utc_now() -> str:
+    """Utc now."""
     return datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
 
 
@@ -47,6 +48,7 @@ def _make_event(
     idempotency_key: str | None = None,
     commit_offset: int = 1,
 ) -> RuntimeEvent:
+    """Make event."""
     return RuntimeEvent(
         run_id=run_id,
         event_id=f"evt-{commit_offset}",
@@ -66,6 +68,7 @@ def _make_commit(
     events: list[RuntimeEvent],
     commit_id: str = "commit-1",
 ) -> ActionCommit:
+    """Make commit."""
     return ActionCommit(
         run_id=run_id,
         commit_id=commit_id,
@@ -75,6 +78,7 @@ def _make_commit(
 
 
 def _make_envelope(run_id: str, key_suffix: str = "action-1") -> IdempotencyEnvelope:
+    """Make envelope."""
     return IdempotencyEnvelope(
         dispatch_idempotency_key=f"{run_id}:{key_suffix}",
         operation_fingerprint="fp-abc123",
@@ -89,12 +93,15 @@ class _ListEventsEventLog:
     """Minimal synchronous event log stub exposing ``list_events()``."""
 
     def __init__(self) -> None:
+        """Initializes _ListEventsEventLog."""
         self._store: list[RuntimeEvent] = []
 
     def add(self, event: RuntimeEvent) -> None:
+        """Adds a test entry."""
         self._store.append(event)
 
     def list_events(self) -> list[RuntimeEvent]:
+        """List events."""
         return list(self._store)
 
 
@@ -104,13 +111,15 @@ class _ListEventsEventLog:
 
 
 class TestConsistencyReport:
-    """Tests for ConsistencyReport dataclass behaviour."""
+    """Verifies for consistencyreport dataclass behaviour."""
 
     def test_is_consistent_when_no_violations(self) -> None:
+        """Verifies is consistent when no violations."""
         report = ConsistencyReport(run_id="run-1")
         assert report.is_consistent is True
 
     def test_is_not_consistent_when_violations_present(self) -> None:
+        """Verifies is not consistent when violations present."""
         violation = ConsistencyViolation(
             kind="orphaned_dedupe_key",
             idempotency_key="run-1:k1",
@@ -122,11 +131,13 @@ class TestConsistencyReport:
         assert report.is_consistent is False
 
     def test_default_counts_are_zero(self) -> None:
+        """Verifies default counts are zero."""
         report = ConsistencyReport(run_id="run-1")
         assert report.events_checked == 0
         assert report.dedupe_keys_checked == 0
 
     def test_run_id_preserved(self) -> None:
+        """Verifies run id preserved."""
         report = ConsistencyReport(run_id="my-run")
         assert report.run_id == "my-run"
 
@@ -153,6 +164,7 @@ class TestConsistencyViolationFrozen:
     """Verifies ConsistencyViolation is a frozen dataclass."""
 
     def test_fields_accessible(self) -> None:
+        """Verifies fields accessible."""
         v = ConsistencyViolation(
             kind="orphaned_dedupe_key",
             idempotency_key="run-1:k",
@@ -166,6 +178,7 @@ class TestConsistencyViolationFrozen:
         assert v.event_count == 0
 
     def test_mutation_raises(self) -> None:
+        """Verifies mutation raises."""
         from dataclasses import FrozenInstanceError
 
         v = ConsistencyViolation(
@@ -185,7 +198,7 @@ class TestConsistencyViolationFrozen:
 
 
 class TestVerifyEventDedupeConsistencySync:
-    """Tests for the synchronous ``verify_event_dedupe_consistency`` function."""
+    """Verifies for the synchronous ``verify event dedupe consistency`` function."""
 
     def test_clean_report_no_violations_list_events(self) -> None:
         """No violations when dedupe key has matching event via list_events() path."""
@@ -320,6 +333,7 @@ class TestVerifyEventDedupeConsistencyColocated:
     """Consistency checks using the SQLite ColocatedSQLiteBundle."""
 
     def _make_bundle(self) -> ColocatedSQLiteBundle:
+        """Make bundle."""
         return ColocatedSQLiteBundle(":memory:")
 
     @pytest.mark.asyncio
@@ -404,7 +418,7 @@ class TestVerifyEventDedupeConsistencyColocated:
 
 
 class TestAverifyEventDedupeConsistency:
-    """Tests for the async variant of verify_event_dedupe_consistency."""
+    """Verifies for the async variant of verify event dedupe consistency."""
 
     @pytest.mark.asyncio
     async def test_async_clean_report(self) -> None:
@@ -425,7 +439,7 @@ class TestAverifyEventDedupeConsistency:
 
     @pytest.mark.asyncio
     async def test_async_orphaned_key_detected(self) -> None:
-        """averify detects orphaned dedupe key."""
+        """Averify detects orphaned dedupe key."""
         log = InMemoryKernelRuntimeEventLog()
         dedupe = InMemoryDedupeStore()
         run_id = "run-async-orphan"
@@ -438,7 +452,7 @@ class TestAverifyEventDedupeConsistency:
 
     @pytest.mark.asyncio
     async def test_async_events_checked_count(self) -> None:
-        """averify counts events correctly via async load()."""
+        """Averify counts events correctly via async load()."""
         log = InMemoryKernelRuntimeEventLog()
         dedupe = InMemoryDedupeStore()
         run_id = "run-async-cnt"
@@ -450,7 +464,7 @@ class TestAverifyEventDedupeConsistency:
 
     @pytest.mark.asyncio
     async def test_async_unknown_effect_no_evidence_detected(self) -> None:
-        """averify detects unknown_effect without dispatch evidence."""
+        """Averify detects unknown_effect without dispatch evidence."""
         log = InMemoryKernelRuntimeEventLog()
         dedupe = InMemoryDedupeStore()
         run_id = "run-async-unk"
@@ -505,7 +519,7 @@ class TestAverifyEventDedupeConsistency:
 
     @pytest.mark.asyncio
     async def test_async_returns_consistency_report_type(self) -> None:
-        """averify always returns a ConsistencyReport instance."""
+        """Averify always returns a ConsistencyReport instance."""
         log = InMemoryKernelRuntimeEventLog()
         dedupe = InMemoryDedupeStore()
         report = await averify_event_dedupe_consistency(log, dedupe, "any-run")
@@ -513,7 +527,7 @@ class TestAverifyEventDedupeConsistency:
 
     @pytest.mark.asyncio
     async def test_async_run_id_preserved(self) -> None:
-        """averify sets report.run_id to the passed run_id."""
+        """Averify sets report.run_id to the passed run_id."""
         log = InMemoryKernelRuntimeEventLog()
         dedupe = InMemoryDedupeStore()
         run_id = "run-id-check"

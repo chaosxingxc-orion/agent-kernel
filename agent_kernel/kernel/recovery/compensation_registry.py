@@ -165,6 +165,7 @@ class CompensationRegistry:
         """
 
         def _decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+            """Wraps a compensation handler while preserving metadata."""
             self.register(
                 effect_class,
                 fn,

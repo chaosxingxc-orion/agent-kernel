@@ -31,6 +31,7 @@ from agent_kernel.kernel.persistence.event_schema_migration import EventSchemaMi
 
 
 def _now() -> str:
+    """Returns a deterministic test timestamp."""
     return datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
 
 
@@ -41,6 +42,7 @@ def _make_event(
     event_authority: str = "authoritative_fact",
     payload_json: dict[str, Any] | None = None,
 ) -> RuntimeEvent:
+    """Make event."""
     return RuntimeEvent(
         run_id=run_id,
         event_id=f"evt-{offset}",
@@ -56,6 +58,7 @@ def _make_event(
 
 
 def _make_action(run_id: str, action_type: str = "tool_call") -> Action:
+    """Make action."""
     return Action(
         action_id=f"act-{uuid.uuid4().hex[:8]}",
         run_id=run_id,
@@ -71,6 +74,7 @@ def _make_commit(
     action: Action | None = None,
     event_types: list[str] | None = None,
 ) -> ActionCommit:
+    """Make commit."""
     if event_types is None:
         event_types = ["run.started"]
     events = [_make_event(run_id, offset + i, et) for i, et in enumerate(event_types)]
@@ -112,6 +116,7 @@ class TestEventExportingEventLog:
         commit = _make_commit("run-2")
 
         async def _run() -> None:
+            """Runs the test helper implementation."""
             await wrapper.append_action_commit(commit)
             # Yield control so the background task runs
             await asyncio.sleep(0)
@@ -125,6 +130,7 @@ class TestEventExportingEventLog:
         inner = InMemoryKernelRuntimeEventLog()
 
         async def _failing_export(commit: ActionCommit) -> None:
+            """Failing export."""
             raise RuntimeError("downstream outage")
 
         export_port = AsyncMock()
@@ -132,6 +138,7 @@ class TestEventExportingEventLog:
         wrapper = EventExportingEventLog(inner, export_port)
 
         async def _run() -> None:
+            """Runs the test helper implementation."""
             await wrapper.append_action_commit(_make_commit("run-3"))
             await asyncio.sleep(0)  # let background task run
 
@@ -142,6 +149,7 @@ class TestEventExportingEventLog:
         inner = InMemoryKernelRuntimeEventLog()
 
         async def _slow_export(commit: ActionCommit) -> None:
+            """Slow export."""
             await asyncio.sleep(10)  # far exceeds timeout
 
         export_port = AsyncMock()
@@ -149,6 +157,7 @@ class TestEventExportingEventLog:
         wrapper = EventExportingEventLog(inner, export_port, export_timeout_ms=1)  # 1 ms timeout
 
         async def _run() -> None:
+            """Runs the test helper implementation."""
             await wrapper.append_action_commit(_make_commit("run-4"))
             await asyncio.sleep(0.05)  # let timeout fire
 
@@ -189,6 +198,7 @@ class TestEventExportingEventLog:
         migrator = EventSchemaMigrator()
 
         def _migrate(event: RuntimeEvent) -> RuntimeEvent:
+            """Migrate."""
             return replace(
                 event,
                 payload_json={**(event.payload_json or {}), "migrated": True},
@@ -208,6 +218,7 @@ class TestEventExportingEventLog:
         commit = _make_commit("run-migrate", event_types=["run.started"])
 
         async def _run() -> None:
+            """Runs the test helper implementation."""
             await wrapper.append_action_commit(commit)
             await asyncio.sleep(0)
 
@@ -221,20 +232,27 @@ class TestEventExportingEventLog:
         """close() should cancel background tasks and await inner async close."""
 
         class _Inner:
+            """Test suite for  Inner."""
+
             def __init__(self) -> None:
+                """Initializes _Inner."""
                 self.closed = False
 
             async def append_action_commit(self, _commit: ActionCommit) -> str:
+                """Append action commit."""
                 return "commit-ref-1"
 
             async def load(self, _run_id: str, after_offset: int = 0) -> list[RuntimeEvent]:
+                """Load."""
                 del after_offset
                 return []
 
             async def close(self) -> None:
+                """Closes the test resource."""
                 self.closed = True
 
         async def _slow_export(_commit: ActionCommit) -> None:
+            """Slow export."""
             await asyncio.sleep(10)
 
         inner = _Inner()
@@ -244,6 +262,7 @@ class TestEventExportingEventLog:
         commit = _make_commit("run-close")
 
         async def _run() -> None:
+            """Runs the test helper implementation."""
             await wrapper.append_action_commit(commit)
             await asyncio.sleep(0)
             await wrapper.close()
@@ -262,10 +281,12 @@ class TestInMemoryRunTraceStore:
     """InMemoryRunTraceStore accumulates commits into RunTrace per run."""
 
     def test_get_returns_none_for_unknown_run(self) -> None:
+        """Verifies get returns none for unknown run."""
         store = InMemoryRunTraceStore()
         assert store.get("unknown") is None
 
     def test_first_commit_creates_trace(self) -> None:
+        """Verifies first commit creates trace."""
         store = InMemoryRunTraceStore()
         commit = _make_commit("run-a", event_types=["run.created", "run.started"])
         asyncio.run(store.export_commit(commit))
@@ -313,6 +334,7 @@ class TestInMemoryRunTraceStore:
         assert turn.outcome_kind == "dispatched"
 
     def test_noop_turn_outcome(self) -> None:
+        """Verifies noop turn outcome."""
         store = InMemoryRunTraceStore()
         action = _make_action("run-d")
         asyncio.run(
@@ -326,6 +348,7 @@ class TestInMemoryRunTraceStore:
         assert trace.failure_count == 0
 
     def test_blocked_turn_outcome(self) -> None:
+        """Verifies blocked turn outcome."""
         store = InMemoryRunTraceStore()
         action = _make_action("run-e")
         asyncio.run(
@@ -336,6 +359,7 @@ class TestInMemoryRunTraceStore:
         assert store.get("run-e").turns[0].outcome_kind == "blocked"
 
     def test_recovery_pending_increments_failure_count(self) -> None:
+        """Verifies recovery pending increments failure count."""
         store = InMemoryRunTraceStore()
         action = _make_action("run-f")
         asyncio.run(
@@ -386,6 +410,7 @@ class TestInMemoryRunTraceStore:
         assert turn.recovery_mode == "human_escalation"
 
     def test_terminal_detection_on_completed(self) -> None:
+        """Verifies terminal detection on completed."""
         store = InMemoryRunTraceStore()
         asyncio.run(store.export_commit(_make_commit("run-h", event_types=["run.completed"])))
         trace = store.get("run-h")
@@ -394,6 +419,7 @@ class TestInMemoryRunTraceStore:
         assert trace.terminal_state == "completed"
 
     def test_terminal_detection_on_aborted(self) -> None:
+        """Verifies terminal detection on aborted."""
         store = InMemoryRunTraceStore()
         asyncio.run(store.export_commit(_make_commit("run-i", event_types=["run.aborted"])))
         trace = store.get("run-i")
@@ -402,11 +428,13 @@ class TestInMemoryRunTraceStore:
         assert trace.terminal_state == "aborted"
 
     def test_non_terminal_run_not_marked_terminal(self) -> None:
+        """Verifies non terminal run not marked terminal."""
         store = InMemoryRunTraceStore()
         asyncio.run(store.export_commit(_make_commit("run-j", event_types=["run.ready"])))
         assert not store.get("run-j").is_terminal
 
     def test_all_returns_sorted_by_run_id(self) -> None:
+        """Verifies all returns sorted by run id."""
         store = InMemoryRunTraceStore()
         for run_id in ("run-z", "run-a", "run-m"):
             asyncio.run(store.export_commit(_make_commit(run_id)))
@@ -414,6 +442,7 @@ class TestInMemoryRunTraceStore:
         assert [t.run_id for t in traces] == ["run-a", "run-m", "run-z"]
 
     def test_terminal_runs_filter(self) -> None:
+        """Verifies terminal runs filter."""
         store = InMemoryRunTraceStore()
         asyncio.run(store.export_commit(_make_commit("run-done", event_types=["run.completed"])))
         asyncio.run(store.export_commit(_make_commit("run-alive", event_types=["run.ready"])))
@@ -422,6 +451,7 @@ class TestInMemoryRunTraceStore:
         assert terminal[0].run_id == "run-done"
 
     def test_failed_runs_filter(self) -> None:
+        """Verifies failed runs filter."""
         store = InMemoryRunTraceStore()
         action_ok = _make_action("run-ok")
         action_fail = _make_action("run-fail")
@@ -453,6 +483,7 @@ class TestInMemoryRunTraceStore:
         assert store.get("run-y").is_terminal
 
     def test_first_and_last_commit_timestamps_recorded(self) -> None:
+        """Verifies first and last commit timestamps recorded."""
         store = InMemoryRunTraceStore()
         asyncio.run(store.export_commit(_make_commit("run-ts", event_types=["run.started"])))
         asyncio.run(
@@ -473,6 +504,7 @@ class TestKernelRuntimeConfigExportWiring:
     """_build_services() should wrap event_log when export_port is provided."""
 
     def test_build_services_without_export_returns_plain_event_log(self) -> None:
+        """Verifies build services without export returns plain event log."""
         from agent_kernel.runtime.kernel_runtime import KernelRuntimeConfig, _build_services
 
         config = KernelRuntimeConfig()
@@ -480,6 +512,7 @@ class TestKernelRuntimeConfigExportWiring:
         assert not isinstance(event_log, EventExportingEventLog)
 
     def test_build_services_with_export_wraps_event_log(self) -> None:
+        """Verifies build services with export wraps event log."""
         from agent_kernel.runtime.kernel_runtime import KernelRuntimeConfig, _build_services
 
         store = InMemoryRunTraceStore()
@@ -511,6 +544,7 @@ class TestKernelRuntimeConfigExportWiring:
         commit = _make_commit("run-wire", event_types=["run.started", "run.completed"])
 
         async def _run() -> None:
+            """Runs the test helper implementation."""
             await event_log.append_action_commit(commit)
             await asyncio.sleep(0)  # let background task execute
 

@@ -1,4 +1,4 @@
-"""Tests for the OpenAPI specification generator."""
+"""Verifies for the openapi specification generator."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ _EXPECTED_PATH_COUNT = 27
 
 
 def _make_facade() -> KernelFacade:
+    """Make facade."""
     gw = MagicMock()
     return KernelFacade(workflow_gateway=gw)
 

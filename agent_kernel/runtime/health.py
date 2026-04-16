@@ -152,18 +152,21 @@ class KernelHealthProbe:
         return self._format_response(aggregate, results)
 
     def _run_all(self) -> dict[str, tuple[HealthStatus, str]]:
+        """Executes all registered health checks."""
         results: dict[str, tuple[HealthStatus, str]] = {}
         for name in self._checks:
             results[name] = self._run_one(name)
         return results
 
     def _run_subset(self, names: list[str]) -> dict[str, tuple[HealthStatus, str]]:
+        """Executes a selected subset of health checks."""
         results: dict[str, tuple[HealthStatus, str]] = {}
         for name in names:
             results[name] = self._run_one(name)
         return results
 
     def _run_one(self, name: str) -> tuple[HealthStatus, str]:
+        """Executes one health check by name."""
         check_fn = self._checks[name][0]
         try:
             return check_fn()
@@ -176,6 +179,7 @@ class KernelHealthProbe:
         aggregate: HealthStatus,
         results: dict[str, tuple[HealthStatus, str]],
     ) -> dict:
+        """Formats health results into an API-friendly response object."""
         return {
             "component": self.component_name,
             "status": aggregate.value,
@@ -207,6 +211,7 @@ def sqlite_dedupe_store_health_check(store: Any) -> HealthCheckFn:
     """
 
     def _check() -> tuple[HealthStatus, str]:
+        """Runs the check and returns a status/message tuple."""
         try:
             store._conn.execute("SELECT 1").fetchone()
             return HealthStatus.OK, "SQLiteDedupeStore reachable"
@@ -232,6 +237,7 @@ def event_log_health_check(event_log: Any) -> HealthCheckFn:
     """
 
     def _check() -> tuple[HealthStatus, str]:
+        """Runs the check and returns a status/message tuple."""
         try:
             if hasattr(event_log, "list_events"):
                 count = len(event_log.list_events())
@@ -265,6 +271,7 @@ def sqlite_lock_contention_health_check(
     """
 
     def _check() -> tuple[HealthStatus, str]:
+        """Runs the check and returns a status/message tuple."""
         start = time.monotonic()
         try:
             conn.execute("BEGIN IMMEDIATE")

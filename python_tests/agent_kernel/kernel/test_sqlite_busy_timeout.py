@@ -1,4 +1,4 @@
-"""Tests for SQLite busy-timeout configuration across persistence layers."""
+"""Verifies for sqlite busy-timeout configuration across persistence layers."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from agent_kernel.kernel.persistence.sqlite_pool import SQLiteConnectionPool
 
 
 def _envelope(key: str) -> IdempotencyEnvelope:
+    """Builds a test envelope fixture."""
     return IdempotencyEnvelope(
         dispatch_idempotency_key=key,
         operation_fingerprint=f"fp:{key}",
@@ -24,6 +25,7 @@ def _envelope(key: str) -> IdempotencyEnvelope:
 
 
 def test_dedupe_store_sets_busy_timeout_pragma(tmp_path: Path) -> None:
+    """Verifies dedupe store sets busy timeout pragma."""
     store = SQLiteDedupeStore(tmp_path / "dedupe.db", busy_timeout_ms=3000)
     row = store._conn.execute("PRAGMA busy_timeout").fetchone()
     assert row is not None
@@ -32,6 +34,7 @@ def test_dedupe_store_sets_busy_timeout_pragma(tmp_path: Path) -> None:
 
 
 def test_event_log_sets_busy_timeout_pragma(tmp_path: Path) -> None:
+    """Verifies event log sets busy timeout pragma."""
     event_log = SQLiteKernelRuntimeEventLog(tmp_path / "events.db", busy_timeout_ms=3500)
     row = event_log._connection.execute("PRAGMA busy_timeout").fetchone()
     assert row is not None
@@ -40,6 +43,7 @@ def test_event_log_sets_busy_timeout_pragma(tmp_path: Path) -> None:
 
 
 def test_pool_sets_busy_timeout_for_read_and_write_connections(tmp_path: Path) -> None:
+    """Verifies pool sets busy timeout for read and write connections."""
     pool = SQLiteConnectionPool(str(tmp_path / "pool.db"), busy_timeout_ms=4000)
     with pool.read_connection() as read_conn:
         read_row = read_conn.execute("PRAGMA busy_timeout").fetchone()
@@ -51,6 +55,7 @@ def test_pool_sets_busy_timeout_for_read_and_write_connections(tmp_path: Path) -
 
 
 def test_busy_timeout_allows_waiting_for_lock_release(tmp_path: Path) -> None:
+    """Verifies busy timeout allows waiting for lock release."""
     db_path = tmp_path / "contention.db"
     store1 = SQLiteDedupeStore(db_path, busy_timeout_ms=2000)
     store2 = SQLiteDedupeStore(db_path, busy_timeout_ms=2000)
@@ -62,6 +67,7 @@ def test_busy_timeout_allows_waiting_for_lock_release(tmp_path: Path) -> None:
     observed: dict[str, float | Exception] = {}
 
     def _writer() -> None:
+        """Writer."""
         start = time.monotonic()
         try:
             store2.reserve(_envelope("key-2"))

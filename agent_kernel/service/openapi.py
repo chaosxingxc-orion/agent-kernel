@@ -20,6 +20,7 @@ def generate_openapi_spec() -> dict:
 
 
 def _ok_response(description: str = "Success") -> dict:
+    """Builds the OpenAPI success response schema."""
     return {
         "description": description,
         "content": {"application/json": {"schema": {"type": "object"}}},
@@ -27,6 +28,7 @@ def _ok_response(description: str = "Success") -> dict:
 
 
 def _error_responses(*codes: int) -> dict:
+    """Builds standard OpenAPI error response schemas."""
     labels = {
         400: "Bad request",
         401: "Unauthorized",
@@ -51,6 +53,7 @@ def _error_responses(*codes: int) -> dict:
 
 
 def _json_request_body(description: str = "JSON payload") -> dict:
+    """Json request body."""
     return {
         "required": True,
         "description": description,
@@ -59,6 +62,7 @@ def _json_request_body(description: str = "JSON payload") -> dict:
 
 
 def _run_id_param() -> dict:
+    """Run id param."""
     return {
         "name": "run_id",
         "in": "path",
